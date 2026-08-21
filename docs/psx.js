@@ -1,0 +1,886 @@
+/*
+ * psx.js - PSX / low-poly compatibility layer for Kalidoface 3D.
+ *
+ * This project ships only the built bundle (docs/assets/index.*.js); there is no
+ * source tree in the repo, so this file is loaded as a plain script BEFORE the
+ * module bundle and the bundle calls back into `window.PSX` at a handful of
+ * patched call sites:
+ *
+ *   PSX.setupRenderer(renderer)  - replaces the hardcoded setPixelRatio(max(2,dpr))
+ *   PSX.aa()                     - value of WebGLRenderer `antialias`
+ *   PSX.smaa()                   - whether the SMAA EffectPass is added
+ *   PSX.fingers()                - finger list used by the hand rig
+ *   PSX.onModel(vrm, gltf)       - called once per loaded VRM
+ *   PSX.tick(vrm)                - called once per frame, after vrm.update()
+ *
+ * The controls are injected into the app's own Settings tab and reuse its
+ * markup and scoped class names, so they look like the rest of the panel.
+ * Settings live in localStorage under "kf3d.psx".
+ */
+(function () {
+  'use strict';
+
+  var STORE_KEY = 'kf3d.psx';
+
+  var DEFAULTS = {
+    // master switch; when false every hook falls back to stock behaviour
+    enabled: false,
+    // render at 1 device pixel per CSS pixel and let CSS upscale with
+    // image-rendering:pixelated -> hard pixel edges instead of a 2x downsample
+    pixelRatio: 1,
+    // WebGL MSAA. Off for PSX.
+    antialias: false,
+    // SMAA post pass. Off for PSX.
+    smaa: false,
+    // nearest-neighbour texture sampling, no mipmaps, no anisotropy
+    nearestTextures: true,
+
+    // drive _MainTex_ST blendshape material values ourselves, so texture-based
+    // expressions work on materials three-vrm cannot bind (non-MToon)
+    uvExpressions: true,
+    // cut straight to the winning atlas cell instead of easing into it
+    snapExpressions: true,
+    // Unity samples V upside down relative to glTF. True is correct for a
+    // normal VRM export; flip it if every expression lands on the wrong cell.
+    uvFlipV: true,
+    // weight an expression has to clear before it takes over its material
+    threshold: 0.35,
+    // how far below `threshold` an expression may sag before it lets go.
+    // Stops the face chattering between two cells at the boundary.
+    hysteresis: 0.1,
+    // minimum ms a cell stays on screen once picked
+    holdMs: 80,
+    // pre-threshold multipliers, so quiet talking / soft blinks still register
+    mouthGain: 1,
+    blinkGain: 1,
+    // '' = live tracking; otherwise force this expression key (calibration)
+    preview: '',
+
+    // 'all' | 'thumb' | 'none' - which fingers the hand solver drives
+    fingers: 'thumb',
+    verbose: false
+  };
+
+  var MOUTH_KEYS = { a: 1, i: 1, u: 1, e: 1, o: 1 };
+  var BLINK_KEYS = { blink: 1, blink_l: 1, blink_r: 1 };
+
+  var cfg = load();
+
+  function load() {
+    var out = {};
+    for (var k in DEFAULTS) out[k] = DEFAULTS[k];
+    try {
+      var raw = localStorage.getItem(STORE_KEY);
+      if (raw) {
+        var saved = JSON.parse(raw);
+        for (var j in saved) if (j in out) out[j] = saved[j];
+      }
+    } catch (e) {}
+    out.preview = '';
+    return out;
+  }
+
+  function save() {
+    try { localStorage.setItem(STORE_KEY, JSON.stringify(cfg)); } catch (e) {}
+  }
+
+  function log() {
+    if (!cfg.verbose) return;
+    console.log.apply(console, ['[psx]'].concat([].slice.call(arguments)));
+  }
+
+  function on() { return !!cfg.enabled; }
+  function now() { return (window.performance && performance.now) ? performance.now() : Date.now(); }
+
+  // ---------------------------------------------------------------- renderer
+
+  var renderer = null;
+
+  function applyPixelRatio() {
+    if (!renderer) return;
+    renderer.setPixelRatio(on() ? cfg.pixelRatio : Math.max(2, window.devicePixelRatio));
+  }
+
+  function applyCanvasFilter() {
+    var el = document.getElementById('psx-canvas-css');
+    if (!el) {
+      if (!document.head) return;
+      el = document.createElement('style');
+      el.id = 'psx-canvas-css';
+      document.head.appendChild(el);
+    }
+    el.textContent = on()
+      ? 'canvas{image-rendering:pixelated;image-rendering:crisp-edges;}'
+      : '';
+  }
+
+  // --------------------------------------------------------------- textures
+
+  var NearestFilter = 1003;
+  var LinearFilter = 1006;
+  var LinearMipmapLinearFilter = 1008;
+
+  var TEXTURE_SLOTS = [
+    'map', 'shadeTexture', 'emissiveMap', 'emissionMap',
+    'sphereAdd', 'rimTexture', 'matcapTexture', 'outlineWidthTexture',
+    'uvAnimMaskTexture', 'receiveShadowTexture', 'shadingGradeTexture'
+  ];
+
+  function eachMaterial(vrm, fn) {
+    if (!vrm || !vrm.scene) return;
+    var seen = [];
+    vrm.scene.traverse(function (o) {
+      if (!o.material) return;
+      var list = Array.isArray(o.material) ? o.material : [o.material];
+      for (var i = 0; i < list.length; i++) {
+        var m = list[i];
+        if (!m || seen.indexOf(m) !== -1) continue;
+        seen.push(m);
+        fn(m);
+      }
+    });
+  }
+
+  function applyTextureFilter(vrm) {
+    var nearest = on() && cfg.nearestTextures;
+    eachMaterial(vrm, function (m) {
+      for (var i = 0; i < TEXTURE_SLOTS.length; i++) {
+        var t = m[TEXTURE_SLOTS[i]];
+        if (!t || !t.isTexture) continue;
+        if (nearest) {
+          t.magFilter = NearestFilter;
+          t.minFilter = NearestFilter;
+          t.generateMipmaps = false;
+          t.anisotropy = 1;
+        } else {
+          t.magFilter = LinearFilter;
+          t.minFilter = LinearMipmapLinearFilter;
+          t.generateMipmaps = true;
+        }
+        t.needsUpdate = true;
+      }
+      m.needsUpdate = true;
+    });
+  }
+
+  // -------------------------------- texture-based (_MainTex_ST) expressions
+  //
+  // VRM avatars that animate the face by sliding the UVs of the face texture
+  // (the usual trick for PSX / low-poly models) store that as
+  // blendShapeGroups[].materialValues[] with propertyName "_MainTex_ST".
+  //
+  // three-vrm 0.6 binds those by writing `material.mainTex_ST`, a property that
+  // only exists on its own MToonMaterial / VRMUnlitMaterial. If the VRM uses
+  // VRM_USE_GLTFSHADER (plain glTF PBR, what most Blender exports produce) the
+  // material is a MeshStandardMaterial, `material.mainTex_ST` is undefined, and
+  // VRMBlendShapeController.addMaterialValue drops the bind without a warning.
+  // Result: the expression is registered, the weight moves, nothing happens on
+  // screen - while UniVRM / VSeeFace animate it fine.
+  //
+  // We re-read the binds straight from the glTF JSON and drive
+  // texture.offset / texture.repeat ourselves.
+  //
+  // These offsets pick a CELL out of a texture atlas - they are not additive.
+  // Blending two of them lands between cells and the face slides across the
+  // sheet, and the tracker feeds every mouth shape a fractional weight on every
+  // frame. So each material picks a single winner and snaps to it, which is
+  // also how these avatars read in-game.
+
+  function collectUvBinds(vrm, gltf) {
+    var ext = gltf && gltf.parser && gltf.parser.json &&
+      gltf.parser.json.extensions && gltf.parser.json.extensions.VRM;
+    var groups = ext && ext.blendShapeMaster && ext.blendShapeMaster.blendShapeGroups;
+    if (!groups || !groups.length) return null;
+
+    var mats = [];
+    eachMaterial(vrm, function (m) { mats.push(m); });
+
+    var byMaterial = [];
+
+    function entryFor(mat) {
+      for (var i = 0; i < byMaterial.length; i++) {
+        if (byMaterial[i].material === mat) return byMaterial[i];
+      }
+      // give this material its own texture instance so sliding its UVs does
+      // not drag every other material sharing the same image along with it
+      if (mat.map && mat.map.isTexture) {
+        mat.map = mat.map.clone();
+        mat.map.needsUpdate = true;
+      }
+      var e = {
+        material: mat,
+        base: {
+          ox: mat.map ? mat.map.offset.x : 0,
+          oy: mat.map ? mat.map.offset.y : 0,
+          rx: mat.map ? mat.map.repeat.x : 1,
+          ry: mat.map ? mat.map.repeat.y : 1
+        },
+        neutral: null,
+        cells: [],
+        current: null,
+        currentCell: null,
+        since: 0
+      };
+      byMaterial.push(e);
+      return e;
+    }
+
+    for (var g = 0; g < groups.length; g++) {
+      var grp = groups[g];
+      var key = (grp.presetName && grp.presetName !== 'unknown') ? grp.presetName : grp.name;
+      var isBinary = !!grp.isBinary;
+      var mvs = grp.materialValues || [];
+      for (var v = 0; v < mvs.length; v++) {
+        var mv = mvs[v];
+        if (!mv.materialName || !mv.propertyName || !mv.targetValue) continue;
+        var prop = mv.propertyName;
+        if (prop !== '_MainTex_ST' && prop !== '_MainTex_ST_S' && prop !== '_MainTex_ST_T') continue;
+
+        var targets = [];
+        for (var i = 0; i < mats.length; i++) {
+          var nm = mats[i].name;
+          if (nm === mv.materialName || nm === mv.materialName + ' (Outline)') targets.push(mats[i]);
+        }
+        if (!targets.length) {
+          log('materialValue references unknown material', mv.materialName);
+          continue;
+        }
+
+        for (var t = 0; t < targets.length; t++) {
+          var mat = targets[t];
+          // MToon / VRMUnlit already carry a working mainTex_ST bind: leave
+          // those to three-vrm so we do not apply the offset twice.
+          if (mat.mainTex_ST !== undefined) continue;
+          if (!mat.map || !mat.map.isTexture) continue;
+
+          var e = entryFor(mat);
+          var tv = mv.targetValue;
+          var sx, sy, ox, oy;
+          if (prop === '_MainTex_ST') {
+            // Unity ST order: scale.xy, offset.xy
+            sx = tv[0]; sy = tv[1]; ox = tv[2]; oy = tv[3];
+          } else if (prop === '_MainTex_ST_S') {
+            sx = tv[0]; ox = tv[1]; sy = 1; oy = 0;
+          } else { // _MainTex_ST_T
+            sy = tv[0]; oy = tv[1]; sx = 1; ox = 0;
+          }
+          e.cells.push({ key: key, isBinary: isBinary, unity: { sx: sx, sy: sy, ox: ox, oy: oy } });
+        }
+      }
+    }
+
+    // A "neutral" group, when the model has one, is the rest cell: use it as
+    // the fallback instead of whatever UV transform the material shipped with.
+    for (var b = 0; b < byMaterial.length; b++) {
+      var ent = byMaterial[b];
+      for (var c = 0; c < ent.cells.length; c++) {
+        if (ent.cells[c].key !== 'neutral') continue;
+        ent.neutral = ent.cells[c].unity;
+        ent.cells.splice(c, 1);
+        break;
+      }
+    }
+
+    var used = byMaterial.filter(function (e) { return e.cells.length; });
+    return used.length ? used : null;
+  }
+
+  // Unity/UniVRM sample with a flipped V axis relative to glTF, so the vertical
+  // offset has to be rebased before it can go into a three.js texture:
+  //   v_univrm = oy + sy * (1 - v)   ->   v_three = (1 - oy - sy) + sy * v
+  function toThreeUv(u) {
+    return cfg.uvFlipV
+      ? { ox: u.ox, oy: 1 - u.oy - u.sy, rx: u.sx, ry: u.sy }
+      : { ox: u.ox, oy: u.oy, rx: u.sx, ry: u.sy };
+  }
+
+  function gainFor(key) {
+    if (MOUTH_KEYS[key]) return cfg.mouthGain;
+    if (BLINK_KEYS[key]) return cfg.blinkGain;
+    return 1;
+  }
+
+  function writeUv(e, uv) {
+    var map = e.material.map;
+    if (!map) return;
+    map.offset.set(uv.ox, uv.oy);
+    map.repeat.set(uv.rx, uv.ry);
+  }
+
+  function applyUvBinds(vrm) {
+    var binds = vrm.__psxUvBinds;
+    if (!binds || !vrm.blendShapeProxy) return;
+    var proxy = vrm.blendShapeProxy;
+    var snap = !!cfg.snapExpressions;
+    var t = now();
+
+    for (var i = 0; i < binds.length; i++) {
+      var e = binds[i];
+      if (!e.material.map) continue;
+
+      var neutralUv = e.neutral ? toThreeUv(e.neutral) : e.base;
+
+      // in blend mode there is no cell latch, so it just rewrites every frame
+      if (!snap) {
+        var top = pickBest(e, proxy);
+        var uv = neutralUv;
+        if (top.cell && top.weight >= cfg.threshold) {
+          var hit = toThreeUv(top.cell.unity);
+          var w = top.weight;
+          uv = {
+            ox: neutralUv.ox + (hit.ox - neutralUv.ox) * w,
+            oy: neutralUv.oy + (hit.oy - neutralUv.oy) * w,
+            rx: neutralUv.rx + (hit.rx - neutralUv.rx) * w,
+            ry: neutralUv.ry + (hit.ry - neutralUv.ry) * w
+          };
+        }
+        e.current = top.cell ? top.cell.key : null;
+        e.currentCell = top.cell;
+        writeUv(e, uv);
+        continue;
+      }
+
+      // snap mode: hold the current cell for at least holdMs
+      if (e.since && (t - e.since) < cfg.holdMs) continue;
+
+      var best = pickBest(e, proxy);
+      // hysteresis: the cell already on screen only has to clear the lower bar
+      var bar = (best.cell && best.cell.key === e.current)
+        ? Math.max(0, cfg.threshold - cfg.hysteresis)
+        : cfg.threshold;
+      var chosen = (best.cell && best.weight >= bar) ? best.cell : null;
+      var tag = chosen ? chosen.key : null;
+
+      if (tag === e.current && e.since) continue;
+      e.current = tag;
+      e.currentCell = chosen;
+      e.since = t;
+      writeUv(e, chosen ? toThreeUv(chosen.unity) : neutralUv);
+    }
+  }
+
+  function pickBest(e, proxy) {
+    var best = null, bestW = 0;
+    for (var c = 0; c < e.cells.length; c++) {
+      var cell = e.cells[c];
+      var w = 0;
+      try { w = proxy.getValue(cell.key) || 0; } catch (err) { w = 0; }
+      w *= gainFor(cell.key);
+      if (w > 1) w = 1;
+      if (cell.isBinary) w = w >= 0.5 ? 1 : 0;
+      if (w > bestW) { bestW = w; best = cell; }
+    }
+    return { cell: best, weight: bestW };
+  }
+
+  // ------------------------------------------------------------------ models
+
+  var models = [];
+
+  function registerModel(vrm, gltf) {
+    if (!vrm) return vrm;
+    vrm.__psxGltf = gltf || null;
+    var at = models.indexOf(vrm);
+    if (at !== -1) models.splice(at, 1);
+    models.push(vrm);
+    // collect first: this may swap in cloned textures, and the filter pass
+    // below has to run on whatever textures end up attached
+    if (on() && cfg.uvExpressions) {
+      vrm.__psxUvBinds = collectUvBinds(vrm, gltf);
+      if (vrm.__psxUvBinds) log('driving', vrm.__psxUvBinds.length, 'material(s) via _MainTex_ST');
+    } else {
+      vrm.__psxUvBinds = null;
+    }
+    applyTextureFilter(vrm);
+    scheduleInject();
+    return vrm;
+  }
+
+  function refreshModels() {
+    for (var i = 0; i < models.length; i++) {
+      applyTextureFilter(models[i]);
+      if (on() && cfg.uvExpressions && !models[i].__psxUvBinds) {
+        models[i].__psxUvBinds = collectUvBinds(models[i], models[i].__psxGltf);
+        applyTextureFilter(models[i]);
+      }
+      // snap mode only writes on a cell change, so drop the latch or a
+      // threshold / flip-V edit would not show until the expression changes
+      var binds = models[i].__psxUvBinds;
+      if (binds) {
+        binds.forEach(function (e) { e.current = null; e.currentCell = null; e.since = 0; });
+      }
+    }
+  }
+
+  function expressionKeys() {
+    var keys = [];
+    for (var i = 0; i < models.length; i++) {
+      var binds = models[i].__psxUvBinds;
+      if (!binds) continue;
+      binds.forEach(function (e) {
+        if (e.neutral && keys.indexOf('neutral') === -1) keys.push('neutral');
+        e.cells.forEach(function (c) { if (keys.indexOf(c.key) === -1) keys.push(c.key); });
+      });
+    }
+    return keys;
+  }
+
+  // Force one expression weight and freeze it, so you can see whether the
+  // texture actually moves. PSX.test() with no args hands control back.
+  var held = {};
+
+  function test(key, weight) {
+    var vrm = models[models.length - 1];
+    if (!vrm || !vrm.blendShapeProxy) { console.warn('[psx] no model'); return; }
+    if (key === undefined) { held = {}; console.log('[psx] hold cleared'); return; }
+    if (weight === undefined) weight = 1;
+    held[key] = weight;
+    if (!weight) delete held[key];
+    console.log('[psx] holding', held);
+  }
+
+  var lastPreview = '';
+
+  function applyHeld(vrm) {
+    if (!vrm.blendShapeProxy) return;
+    if (cfg.preview) {
+      lastPreview = cfg.preview;
+      var keys = expressionKeys();
+      for (var i = 0; i < keys.length; i++) {
+        vrm.blendShapeProxy.setValue(keys[i], keys[i] === cfg.preview ? 1 : 0);
+      }
+      return;
+    }
+    if (lastPreview) {
+      // the tracker only rewrites the presets it drives, so zero the rest once
+      // or the previewed cell stays pinned after leaving preview
+      lastPreview = '';
+      var all = expressionKeys();
+      for (var k = 0; k < all.length; k++) vrm.blendShapeProxy.setValue(all[k], 0);
+    }
+    var hk = Object.keys(held);
+    for (var j = 0; j < hk.length; j++) vrm.blendShapeProxy.setValue(hk[j], held[hk[j]]);
+  }
+
+  // ------------------------------------------------------------- diagnostics
+
+  function dump(vrm) {
+    vrm = vrm || models[models.length - 1];
+    if (!vrm) { console.warn('[psx] no model loaded'); return; }
+    var proxy = vrm.blendShapeProxy;
+    console.group('[psx] ' + (vrm.name || 'model'));
+
+    if (!proxy) {
+      console.warn('no blendShapeProxy - this VRM has no blendShapeMaster at all');
+    } else {
+      var presetMap = proxy.blendShapePresetMap || {};
+      console.log('preset -> group:', presetMap);
+      console.log('unknown (non-preset) groups:', proxy.unknownGroupNames);
+      var wanted = ['blink', 'blink_l', 'blink_r', 'a', 'i', 'u', 'e', 'o', 'joy'];
+      var missing = wanted.filter(function (p) { return !presetMap[p]; });
+      if (missing.length) {
+        console.warn('presets the app drives but the model does NOT map:', missing.join(', '));
+      } else {
+        console.log('all presets the app drives are mapped');
+      }
+    }
+
+    var ext = vrm.__psxGltf && vrm.__psxGltf.parser && vrm.__psxGltf.parser.json &&
+      vrm.__psxGltf.parser.json.extensions && vrm.__psxGltf.parser.json.extensions.VRM;
+
+    console.log('psx config:', JSON.parse(JSON.stringify(cfg)));
+
+    var sceneMats = [];
+    eachMaterial(vrm, function (m) {
+      sceneMats.push({
+        name: m.name, type: m.type,
+        map: m.map ? (m.map.name || '(unnamed)') : '(none)',
+        hasMainTexST: m.mainTex_ST !== undefined
+      });
+    });
+    console.log('materials in scene:');
+    console.table(sceneMats);
+
+    if (ext && ext.blendShapeMaster) {
+      var mvRows = [];
+      (ext.blendShapeMaster.blendShapeGroups || []).forEach(function (g) {
+        (g.materialValues || []).forEach(function (mv) {
+          var key = (g.presetName && g.presetName !== 'unknown') ? g.presetName : g.name;
+          var hit = sceneMats.some(function (m) {
+            return m.name === mv.materialName || m.name === mv.materialName + ' (Outline)';
+          });
+          mvRows.push({
+            key: key, materialName: mv.materialName, matched: hit,
+            propertyName: mv.propertyName, targetValue: JSON.stringify(mv.targetValue)
+          });
+        });
+      });
+      console.log('raw materialValues from the VRM:');
+      console.table(mvRows);
+      var unmatched = mvRows.filter(function (r) { return !r.matched; });
+      if (unmatched.length) {
+        console.warn('materialValues whose materialName matches NO material in the scene:',
+          unmatched.map(function (r) { return r.materialName; }).join(', '));
+      }
+    }
+    if (ext && ext.materialProperties) {
+      var shaders = {};
+      ext.materialProperties.forEach(function (m) { shaders[m.shader] = (shaders[m.shader] || 0) + 1; });
+      console.log('shaders:', shaders);
+    }
+
+    var binds = vrm.__psxUvBinds;
+    if (!binds) {
+      console.error('PSX is driving NOTHING on this model (__psxUvBinds is empty).');
+      if (!on()) console.error('-> PSX mode is off.');
+      else if (!cfg.uvExpressions) console.error('-> "Texture expressions" is off.');
+      else console.error('-> see the tables above: either no materialName matched, or the matched material has no .map');
+    } else {
+      console.log('PSX is driving ' + binds.length + ' material(s):');
+      console.table(binds.map(function (b) {
+        return {
+          material: b.material.name,
+          showing: b.current || '(neutral)',
+          hasNeutralCell: !!b.neutral,
+          cells: b.cells.map(function (d) { return d.key; }).join(' ')
+        };
+      }));
+      console.log('resolved UV per cell (three.js space):');
+      var cellRows = [];
+      binds.forEach(function (b) {
+        var n = b.neutral ? toThreeUv(b.neutral) : b.base;
+        cellRows.push({
+          material: b.material.name, cell: '(neutral)',
+          offset: n.ox.toFixed(3) + ', ' + n.oy.toFixed(3),
+          repeat: n.rx.toFixed(3) + ', ' + n.ry.toFixed(3)
+        });
+        b.cells.forEach(function (c) {
+          var u = toThreeUv(c.unity);
+          cellRows.push({
+            material: b.material.name, cell: c.key,
+            offset: u.ox.toFixed(3) + ', ' + u.oy.toFixed(3),
+            repeat: u.rx.toFixed(3) + ', ' + u.ry.toFixed(3)
+          });
+        });
+      });
+      console.table(cellRows);
+    }
+
+    var h = vrm.humanoid;
+    if (h) {
+      var fingerBones = [];
+      ['left', 'right'].forEach(function (side) {
+        ['Thumb', 'Index', 'Middle', 'Ring', 'Little'].forEach(function (f) {
+          ['Proximal', 'Intermediate', 'Distal'].forEach(function (seg) {
+            if (h.getBoneNode(side + f + seg)) fingerBones.push(side + f + seg);
+          });
+        });
+      });
+      console.log('finger bones present (' + fingerBones.length + '):', fingerBones.join(', ') || '(none)');
+    }
+    console.groupEnd();
+  }
+
+  // ------------------------------------------------------- settings tab UI
+  //
+  // Rebuilds the app's own Settings markup: <container> > .setting cards, with
+  // h4 headings, styled range inputs and the same checkbox-backed toggle.
+  // All class names below are the app's scoped Svelte hashes - keep them.
+
+  var SV = 'svelte-2t25z9';   // Settings panel scope
+  var TG = 'svelte-yzrsaq';   // Toggle component scope
+  var BTN = 'svelte-1krauxh'; // button scope
+
+  var NEEDS_RELOAD = { enabled: 1, pixelRatio: 1, antialias: 1, smaa: 1 };
+  var pendingReload = false;
+
+  function el(tag, cls, text) {
+    var n = document.createElement(tag);
+    if (cls) n.setAttribute('class', cls);
+    if (text != null) n.textContent = text;
+    return n;
+  }
+
+  function heading(text, readout) {
+    var h = el('h4', SV, text);
+    if (readout != null) {
+      var s = el('span', null, readout);
+      s.style.marginLeft = 'auto';
+      s.style.opacity = '.55';
+      s.style.fontWeight = '400';
+      h.appendChild(s);
+      h.__readout = s;
+    }
+    return h;
+  }
+
+  function onChange(key) {
+    save();
+    if (NEEDS_RELOAD[key]) {
+      pendingReload = true;
+      var note = document.getElementById('psx-reload-note');
+      if (note) note.style.display = '';
+    } else {
+      applyCanvasFilter();
+      refreshModels();
+    }
+    syncControls();
+  }
+
+  var controls = [];
+
+  function addRange(parent, key, label, min, max, step, fmt) {
+    var h = heading(label, fmt(cfg[key]));
+    var input = el('input', SV);
+    input.type = 'range';
+    input.min = min; input.max = max; input.step = step;
+    input.value = cfg[key];
+    input.setAttribute('aria-label', label);
+    input.setAttribute('name', 'psx-' + key);
+
+    function paint() {
+      var pct = (cfg[key] - min) / (max - min) * 100;
+      input.style.backgroundSize = pct + '% 100%';
+      if (h.__readout) h.__readout.textContent = fmt(cfg[key]);
+    }
+    input.addEventListener('input', function () {
+      cfg[key] = parseFloat(input.value);
+      paint();
+      onChange(key);
+    });
+    paint();
+    parent.appendChild(h);
+    parent.appendChild(input);
+    controls.push({ key: key, sync: function () { input.value = cfg[key]; paint(); } });
+    return input;
+  }
+
+  function addToggle(parent, key, label) {
+    var row = el('div', 'toggle ' + SV);
+    var h = el('h4', SV, label);
+    h.style.margin = '0';
+
+    var lab = el('label', TG);
+    lab.setAttribute('name', label);
+    var input = el('input', TG);
+    input.type = 'checkbox';
+    input.setAttribute('aria-label', label);
+    input.checked = !!cfg[key];
+    var cont = el('container', TG);
+    var track = el('div', 'track ' + TG);
+    track.innerHTML = '<div class="toggleButton ' + TG + '">' +
+      '<i class="kalicon notranslate fill small ' + TG + '">jellyfill</i></div>';
+    cont.appendChild(track);
+    lab.appendChild(input);
+    lab.appendChild(cont);
+
+    function paint() {
+      input.checked = !!cfg[key];
+      lab.setAttribute('class', (cfg[key] ? 'toggled' : '') + ' ' + TG);
+    }
+    input.addEventListener('change', function () {
+      cfg[key] = input.checked;
+      paint();
+      onChange(key);
+    });
+    paint();
+
+    row.appendChild(h);
+    row.appendChild(lab);
+    parent.appendChild(row);
+    controls.push({ key: key, sync: paint });
+    return row;
+  }
+
+  function addChoice(parent, key, label, values, labels) {
+    var h = heading(label, labels[values.indexOf(cfg[key])] || cfg[key]);
+    var input = el('input', SV);
+    input.type = 'range';
+    input.min = 0; input.max = values.length - 1; input.step = 1;
+    input.value = Math.max(0, values.indexOf(cfg[key]));
+    input.setAttribute('aria-label', label);
+    input.setAttribute('name', 'psx-' + key);
+
+    function paint() {
+      var idx = Math.max(0, values.indexOf(cfg[key]));
+      input.value = idx;
+      input.style.backgroundSize = (idx / (values.length - 1) * 100) + '% 100%';
+      if (h.__readout) h.__readout.textContent = labels[idx];
+    }
+    input.addEventListener('input', function () {
+      cfg[key] = values[parseInt(input.value, 10)];
+      paint();
+      onChange(key);
+    });
+    paint();
+    parent.appendChild(h);
+    parent.appendChild(input);
+    controls.push({ key: key, sync: paint });
+    return input;
+  }
+
+  function addRule(parent) { parent.appendChild(el('hr', SV)); }
+
+  function card(title) {
+    var c = el('div', 'setting ' + SV + ' psx-injected');
+    if (title) {
+      var h = el('h4', SV, title);
+      h.style.opacity = '.5';
+      h.style.letterSpacing = '.08em';
+      h.style.textTransform = 'uppercase';
+      h.style.fontSize = '11px';
+      c.appendChild(h);
+    }
+    return c;
+  }
+
+  function buildSections() {
+    controls = [];
+    var frag = document.createDocumentFragment();
+
+    // --- render -------------------------------------------------------
+    var r = card('PSX Render');
+    addToggle(r, 'enabled', 'PSX mode');
+    addToggle(r, 'nearestTextures', 'Nearest textures');
+    addToggle(r, 'antialias', 'MSAA');
+    addToggle(r, 'smaa', 'SMAA');
+    addRule(r);
+    addRange(r, 'pixelRatio', 'Render scale', 0.25, 2, 0.25, function (v) { return v + 'x'; });
+
+    var note = el('div', SV, 'PSX mode, MSAA, SMAA and render scale apply on reload.');
+    note.id = 'psx-reload-note';
+    note.style.cssText = 'width:100%;opacity:.5;font-size:12px;margin-top:16px;text-align:left';
+    note.style.display = pendingReload ? '' : 'none';
+    var btn = el('button', 'trigger ' + BTN, 'Reload to apply');
+    btn.style.marginTop = '12px';
+    btn.addEventListener('click', function () { location.reload(); });
+    note.appendChild(btn);
+    r.appendChild(note);
+    frag.appendChild(r);
+
+    // --- expressions --------------------------------------------------
+    var x = card('Face Expressions');
+    addToggle(x, 'uvExpressions', 'Texture expressions');
+    addToggle(x, 'snapExpressions', 'Snap to cell');
+    addToggle(x, 'uvFlipV', 'Flip V axis');
+    addRule(x);
+    addRange(x, 'threshold', 'Trigger threshold', 0, 1, 0.01, function (v) { return v.toFixed(2); });
+    addRange(x, 'hysteresis', 'Release margin', 0, 0.5, 0.01, function (v) { return v.toFixed(2); });
+    addRange(x, 'holdMs', 'Minimum hold', 0, 400, 10, function (v) { return v + ' ms'; });
+    addRule(x);
+    addRange(x, 'mouthGain', 'Mouth gain', 0.25, 3, 0.05, function (v) { return v.toFixed(2) + 'x'; });
+    addRange(x, 'blinkGain', 'Blink gain', 0.25, 3, 0.05, function (v) { return v.toFixed(2) + 'x'; });
+    addRule(x);
+    var keys = expressionKeys();
+    if (keys.length) {
+      addChoice(x, 'preview', 'Preview cell', [''].concat(keys), ['live tracking'].concat(keys));
+    } else {
+      var hint = el('div', SV, 'Load a VRM to calibrate individual cells.');
+      hint.style.cssText = 'width:100%;opacity:.5;font-size:12px;text-align:left';
+      x.appendChild(hint);
+    }
+    frag.appendChild(x);
+
+    // --- hands / debug ------------------------------------------------
+    var hnd = card('PSX Hands');
+    addChoice(hnd, 'fingers', 'Driven fingers', ['all', 'thumb', 'none'],
+      ['all fingers', 'thumb only', 'none']);
+    var dbg = el('button', 'trigger ' + BTN, 'Log diagnostics to console');
+    dbg.style.marginTop = '20px';
+    dbg.addEventListener('click', function () { dump(); });
+    hnd.appendChild(dbg);
+    hnd.classList.add('last');
+    frag.appendChild(hnd);
+
+    return frag;
+  }
+
+  function syncControls() {
+    for (var i = 0; i < controls.length; i++) controls[i].sync();
+  }
+
+  function settingsContainer() {
+    var probe = document.getElementById('temp');
+    if (!probe || !probe.closest) return null;
+    return probe.closest('container.' + SV);
+  }
+
+  var injectQueued = false;
+
+  function scheduleInject() {
+    if (injectQueued) return;
+    injectQueued = true;
+    requestAnimationFrame(function () {
+      injectQueued = false;
+      tryInject();
+    });
+  }
+
+  function tryInject() {
+    var c = settingsContainer();
+    if (!c) return;
+    var existing = c.querySelectorAll('.psx-injected');
+    // rebuild if the model changed the available preview cells
+    var wantKeys = expressionKeys().length;
+    if (existing.length) {
+      if (c.__psxKeys === wantKeys) return;
+      Array.prototype.forEach.call(existing, function (n) { n.remove(); });
+    }
+    c.__psxKeys = wantKeys;
+    c.appendChild(buildSections());
+  }
+
+  function startObserver() {
+    var mo = new MutationObserver(scheduleInject);
+    mo.observe(document.documentElement, { childList: true, subtree: true });
+    scheduleInject();
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', startObserver);
+  } else {
+    startObserver();
+  }
+  applyCanvasFilter();
+
+  // ------------------------------------------------------------- public API
+
+  window.PSX = {
+    cfg: cfg,
+    save: save,
+    dump: dump,
+    test: test,
+    models: models,
+    keys: expressionKeys,
+
+    set: function (k, v) {
+      cfg[k] = v;
+      save();
+      applyCanvasFilter();
+      refreshModels();
+      syncControls();
+    },
+
+    // --- hooks called from the patched bundle ---
+    setupRenderer: function (r) {
+      renderer = r;
+      applyPixelRatio();
+      applyCanvasFilter();
+      return r;
+    },
+    aa: function () { return on() ? !!cfg.antialias : true; },
+    smaa: function () { return on() ? !!cfg.smaa : true; },
+    fingers: function () {
+      var all = ['Ring', 'Index', 'Little', 'Thumb', 'Middle'];
+      if (!on() || cfg.fingers === 'all') return all;
+      if (cfg.fingers === 'none') return [];
+      return ['Thumb'];
+    },
+    onModel: registerModel,
+    tick: function (vrm) {
+      if (!vrm) return;
+      applyHeld(vrm);
+      if (vrm.__psxUvBinds) applyUvBinds(vrm);
+    }
+  };
+})();

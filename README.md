@@ -1,4 +1,69 @@
-# Kalidoface 3D - Face and Full-Body tracking for Vtubing on the web!
+# Kalidoface 3D — PSX Edition
+
+> **This is a fork of [yeemachine/kalidoface-3d](https://github.com/yeemachine/kalidoface-3d), retuned for PSX / low-poly VRM models.**
+>
+> Stock Kalidoface 3D targets smooth, modern VRM avatars: 2x pixel ratio, MSAA + SMAA,
+> linear/mipmapped textures and blendshape-driven faces. PSX-era models want the
+> opposite — hard pixels, nearest-neighbour texels, and faces animated by *swapping
+> texture cells* (UV offsets on a face atlas) instead of morph targets.
+> This fork adds a compatibility layer, `docs/psx.js`, that makes those models look
+> and animate the way they're supposed to.
+
+## What the PSX layer does
+
+`docs/psx.js` loads as a plain script **before** the app bundle and exposes `window.PSX`.
+The bundle calls back into it at a handful of patched call sites, so nothing here
+touches the app's own source tree (this repo only ships the built bundle).
+
+| Hook | Effect |
+| --- | --- |
+| `PSX.setupRenderer(renderer)` | Replaces the hardcoded `setPixelRatio(max(2, dpr))` with the configured render scale |
+| `PSX.aa()` / `PSX.smaa()` | Turn off WebGL MSAA and the SMAA post pass |
+| `PSX.fingers()` | Limits which fingers the hand solver drives |
+| `PSX.onModel(vrm, gltf)` | Nearest-neighbour texture filtering, no mipmaps, no anisotropy; collects `_MainTex_ST` UV binds |
+| `PSX.tick(vrm)` | Drives texture-atlas face expressions each frame |
+
+### Texture-atlas face expressions
+
+PSX models usually put every mouth and eye state in one face atlas and switch between
+cells with a UV offset. three-vrm can only bind those `_MainTex_ST` values on MToon
+materials, so this layer drives them directly — which means texture expressions also
+work on plain/unlit materials.
+
+Cell selection is deliberately *not* smooth:
+
+- **Trigger threshold** — weight an expression must clear before it takes over its material
+- **Release margin** (hysteresis) — how far below the threshold it may sag before letting go, so the face doesn't chatter at the boundary
+- **Minimum hold** — ms a cell stays on screen once picked
+- **Snap to cell** — cut straight to the winning cell instead of easing into it
+- **Mouth / blink gain** — pre-threshold multipliers, so quiet talking and soft blinks still register
+- **Flip V axis** — Unity samples V upside down relative to glTF; `on` is correct for a normal VRM export
+
+## Controls
+
+The layer injects its own cards into the app's existing **Settings** tab, reusing the
+app's markup and scoped class names, so they look native:
+
+- **PSX Render** — PSX mode, Nearest textures, MSAA, SMAA, Render scale (0.25x–2x)
+- **Face Expressions** — Texture expressions, Snap to cell, Flip V axis, Trigger threshold, Release margin, Minimum hold, Mouth gain, Blink gain, Preview cell (force one expression for calibration)
+- **PSX Hands** — Driven fingers (`all fingers` / `thumb only` / `none`) + a diagnostics dump button
+
+PSX mode is **off by default** — with it off, every hook falls back to stock behaviour.
+PSX mode, MSAA, SMAA and render scale apply on reload; everything else is live.
+
+Settings persist in `localStorage` under the key `kf3d.psx`.
+
+## Calibrating a model
+
+1. Load your `.vrm`, open **Settings**, turn on **PSX mode**, reload.
+2. Use **Preview cell** to force each expression key in turn and confirm the atlas cell is right. If every expression lands on the wrong cell, toggle **Flip V axis**.
+3. If the face chatters between two cells, raise **Release margin** or **Minimum hold**.
+4. If quiet talking doesn't register, raise **Mouth gain**; same for **Blink gain**.
+5. Hit **Log diagnostics to console** for the resolved materials, UV binds and current cell.
+
+---
+
+## Upstream: Kalidoface 3D — Face and Full-Body tracking for Vtubing on the web!
 
 A sequal to **[Kalidoface](https://kalidoface.com)** which supports Live2D avatars, **[Kalidoface 3D](https://3d.kalidoface.com)** is a web app that brings support for 3D Vtuber avatars. It now features more dynamic camera angles, and even full-body tracking options using the latest Mediapipe human pose detection models. Add the web app to your homescreen to use it in standalone full screen or even use it in OBS as a browser object directly.
 
