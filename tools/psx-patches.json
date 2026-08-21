@@ -62,8 +62,8 @@
    "replace": "*2,-.3,.3)},i?1:window.PSX.smooth(.04+Ke*2))},Ps=(l,e,t=!1)"
   },
   {
-   "find": "pplyer.lookAt(u)},un=(l,e,t=\"Rig",
-   "replace": "pplyer.lookAt(u),window.PSX.face(l,e)},un=(l,e,t=\"Rig"
+   "find": "upil.x,0,\"XYZ\"),l.lookAt.applyer.lookAt(u)},un=(l,e,t=\"Ri",
+   "replace": "upil.x,0,\"XYZ\"),window.PSX.gaze(l,u),window.PSX.face(l,e)},un=(l,e,t=\"Ri"
   },
   {
    "find": "t\":n,r=i?-1:1,u=[\"Ring\",\"Index\",\"Little\",\"Thumb\",\"Middle\"],c=[\"Proximal\",\"",

@@ -18,7 +18,8 @@
  *   PSX.frame()                  - whether this animation frame gets rendered
  *   PSX.nextTrack(fn)            - schedules the next Mediapipe inference
  *   PSX.mpOptions(opts)          - Mediapipe model options, before setOptions
- *   PSX.shadows() / shadowSize() - shadow map enable and resolution
+ *   PSX.shadows() / shadowSize() - shadow maps; both hardcoded off
+ *   PSX.gaze(vrm, euler)         - eye aim; a no-op by design
  *   PSX.overlay(inst, opts)      - queued subnav background animation
  *   PSX.overlayOpen(inst)        - the state that animation is heading to
  *
@@ -143,12 +144,6 @@
     trackFps: 0,
     // rendered frames per second. 0 = display rate (stock).
     renderFps: 0,
-    // realtime shadow maps. Two lights cast at 2048x2048 by default, which is
-    // two full depth passes per frame.
-    shadows: true,
-    shadowSize: 2048,
-    // Mediapipe iris / lip refinement (refineFaceLandmarks). An extra model.
-    faceIris: true,
     // Holistic modelComplexity 0 (lite) instead of 1
     poseLite: false,
 
@@ -157,7 +152,6 @@
 
   var STOCK_HEAD_GAIN = 1;
   var STOCK_BODY_GAIN = 0.05;
-  var STOCK_SHADOW_SIZE = 2048;
 
   var MOUTH_KEYS = { a: 1, i: 1, u: 1, e: 1, o: 1 };
   var BLINK_KEYS = { blink: 1, blink_l: 1, blink_r: 1 };
@@ -165,12 +159,11 @@
   // Ranges and enums for the stored settings. Values come back out of
   // localStorage, which survives schema changes, hand editing and a half-written
   // save - and several of these reach WebGL directly. A pixelRatio of 0 or a
-  // shadowSize of "large" is a black screen with no way back but devtools, so
+  // snapGrid of "large" is a black screen with no way back but devtools, so
   // anything that does not fit its spec falls back to the default.
   var SPEC = {
     pixelRatio: { min: 0.25, max: 2 },
     snapGrid: { min: 32, max: 480 },
-    colorLevels: { one: [8, 16, 32, 64] },
     threshold: { min: 0, max: 1 },
     hysteresis: { min: 0, max: 0.5 },
     holdMs: { min: 0, max: 400 },
@@ -186,11 +179,11 @@
     damping: { min: 0, max: 0.95 },
     trackFps: { min: 0, max: 60 },
     renderFps: { min: 0, max: 60 },
+    colorLevels: { one: [8, 16, 32, 64] },
     fingers: { one: ['all', 'thumb', 'none'] },
     smileKey: { one: ['fun', 'joy', 'both'] },
     signal: { one: ['calibrated', 'auto', 'raw'] },
-    lang: { one: ['en', 'pt'] },
-    shadowSize: { one: [256, 512, 1024, 2048] }
+    lang: { one: ['en', 'pt'] }
   };
 
   var CAL_FIELDS = ['browRest', 'browDown', 'browUp', 'smileRest', 'smileMax'];
@@ -1198,10 +1191,10 @@
       if (strip) pin(t.input, STRIP[i].pin);
       show(t.card, !strip);
     }
-    // The shadow sliders are not replaced by anything - they simply do nothing
-    // while realtime shadows are off, so they follow that switch instead.
+    // Realtime shadows are off for good in this fork, so these two do nothing
+    // at all any more.
     var sh = document.querySelector('input[name="shadowStrength"]');
-    if (sh) show(sh.closest('.setting'), !(strip && !shadows()));
+    if (sh) show(sh.closest('.setting'), !strip);
   }
 
 
@@ -1310,8 +1303,6 @@
     'Performance caps': 'Limites de desempenho',
     'Tracking rate': 'Taxa de rastreio',
     'Render rate': 'Taxa de render',
-    'Realtime shadows': 'Sombras em tempo real',
-    'Shadow resolution': 'Resolucao da sombra',
     'Iris / lip refinement': 'Refino de iris / labios',
     'Lite pose model': 'Modelo de pose leve',
     'uncapped': 'sem limite',
@@ -1331,10 +1322,10 @@
 
     // --- notes ---
     'note.reloadRender': 'Modo PSX, MSAA, SMAA e escala de render sao aplicados ao recarregar.',
-    'note.reloadPerf': 'Sombras e as opcoes do modelo Mediapipe sao aplicadas ao recarregar. Os limites de taxa valem na hora.',
+    'note.reloadPerf': 'As opcoes do modelo Mediapipe sao aplicadas ao recarregar. Os limites de taxa valem na hora.',
     'note.emotions': 'O app so rastreia piscadas, as cinco vogais e um sorriso. Bravo, triste e fun nunca sao escritos - isto os deriva da sobrancelha e da boca para que essas celulas possam disparar. Faca cada careta e observe a leitura para ajustar os limiares.',
     'note.motion': 'Os ganhos de pescoco e torso sao fixos no app, entao um movimento real pequeno vira um movimento grande no avatar. Baixe o ganho para mexer menos, aumente o amortecimento para mexer mais devagar.',
-    'note.perf': 'O app roda uma inferencia do Mediapipe a cada frame, renderiza a cada frame, e tem duas luzes projetando sombras 2048x2048. A taxa de rastreio e onde vai quase toda a CPU.',
+    'note.perf': 'O app roda uma inferencia do Mediapipe a cada frame e renderiza a cada frame. A taxa de rastreio e onde vai quase toda a CPU.',
 
     // --- the app's own hardcoded labels ---
     'Light Color': 'Cor da luz',
@@ -1364,7 +1355,7 @@
 
   var EN = {
     'note.reloadRender': 'PSX mode, MSAA, SMAA and render scale apply on reload.',
-    'note.reloadPerf': 'Shadows and the Mediapipe model options apply on reload. ' +
+    'note.reloadPerf': 'The Mediapipe model options apply on reload. ' +
       'The rate caps take effect immediately.',
     'note.emotions': 'The app only tracks blinks, the five vowels and a smile. Angry, ' +
       'sorrow and fun are never written at all - this derives them from the brow and ' +
@@ -1374,7 +1365,7 @@
       'movement lands as a large avatar movement. Lower the gain to move less, raise ' +
       'the damping to move slower.',
     'note.perf': 'Upstream runs a Mediapipe inference on every animation frame, renders ' +
-      'on every animation frame, and has two lights casting 2048x2048 shadow maps. The ' +
+      'on every animation frame. The ' +
       'tracking rate is where nearly all the CPU goes.'
   };
 
@@ -1399,7 +1390,7 @@
   var EXPECTED_HOOKS = {
     setupRenderer: 1, aa: 1, smaa: 1, fingers: 1, onModel: 1, tick: 1,
     face: 1, headGain: 1, bodyGain: 1, smooth: 4, frame: 1, nextTrack: 1,
-    mpOptions: 2, shadows: 1, shadowSize: 4, overlay: 3, overlayOpen: 1
+    mpOptions: 2, shadows: 1, shadowSize: 4, overlay: 3, overlayOpen: 1, gaze: 1
   };
 
   function verify() {
@@ -1496,17 +1487,33 @@
   // PSX avatar all three are overkill: the models are flat and untextured by
   // modern standards, and the era's own cadence was 20-30fps.
 
-  function shadows() { return cfg.perf ? !!cfg.shadows : true; }
-  function shadowSize() { return cfg.perf ? cfg.shadowSize : STOCK_SHADOW_SIZE; }
+  // Not options. This fork targets PSX-era models and the performance that goes
+  // with them, and the console had no realtime shadows at all - it stamped a
+  // blob on the floor. Leaving them on costs two extra full-scene depth passes
+  // per frame, from two lights at 2048x2048, for something the look does not
+  // want. The size still answers because the bundle asks, but nothing is
+  // allocated while shadowMap.enabled is false.
+  function shadows() { return false; }
+  function shadowSize() { return 256; }
+
+  // Eye aim, called instead of lookAt.applyer.lookAt(). PSX faces put the eyes
+  // on the texture atlas - they blink by swapping a cell, they do not swivel -
+  // so pointing the eye bones at a solved pupil is wasted work and reads wrong.
+  // The eyes stay at their bind pose, facing forward.
+  function gaze() {}
 
   // Called with whatever options object is about to reach setOptions - Holistic
   // spells the refinement flag one way, FaceMesh another, so touch whichever
   // keys are actually present.
   function mpOptions(opts) {
-    if (!cfg.perf || !opts) return opts;
-    if ('refineFaceLandmarks' in opts) opts.refineFaceLandmarks = !!cfg.faceIris;
-    if ('refineLandmarks' in opts) opts.refineLandmarks = !!cfg.faceIris;
-    if ('modelComplexity' in opts) opts.modelComplexity = cfg.poseLite ? 0 : 1;
+    if (!opts) return opts;
+    // Always off: the refinement model exists to place iris landmarks and
+    // denser lip contours, and its main consumer here was the eye aim we no
+    // longer do. It is a whole extra network per frame for detail a texture
+    // atlas cannot show. Holistic and FaceMesh spell the flag differently.
+    if ('refineFaceLandmarks' in opts) opts.refineFaceLandmarks = false;
+    if ('refineLandmarks' in opts) opts.refineLandmarks = false;
+    if (cfg.perf && 'modelComplexity' in opts) opts.modelComplexity = cfg.poseLite ? 0 : 1;
     log('mediapipe options', opts);
     return opts;
   }
@@ -1793,7 +1800,7 @@
 
   var NEEDS_RELOAD = {
     enabled: 1, pixelRatio: 1, antialias: 1, smaa: 1,
-    perf: 1, shadows: 1, shadowSize: 1, faceIris: 1, poseLite: 1
+    perf: 1, poseLite: 1
   };
   var pendingReload = false;
 
@@ -2138,11 +2145,6 @@
     addRange(pf, 'trackFps', T('Tracking rate'), 0, 60, 1, fpsLabel, STG);
     addRange(pf, 'renderFps', T('Render rate'), 0, 60, 1, fpsLabel, STG);
     addRule(pf);
-    addToggle(pf, 'shadows', T('Realtime shadows'), STG);
-    addChoice(pf, 'shadowSize', T('Shadow resolution'), [256, 512, 1024, 2048],
-      ['256', '512', '1024', '2048'], STG);
-    addRule(pf);
-    addToggle(pf, 'faceIris', T('Iris / lip refinement'), STG);
     addToggle(pf, 'poseLite', T('Lite pose model'), STG);
     reloadNote(pf, T('note.reloadPerf'), STG);
     frag.appendChild(pf);
@@ -2415,6 +2417,7 @@
     mpOptions: mpOptions,
     shadows: shadows,
     shadowSize: shadowSize,
+    gaze: gaze,
 
     overlay: overlay,
     overlayOpen: overlayOpen

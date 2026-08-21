@@ -192,17 +192,23 @@ capping the rate is authentic rather than a compromise.
 | --- | --- |
 | **Tracking rate** | One Holistic/FaceMesh inference per animation frame. This is where nearly all the CPU goes; 24–30fps is plenty for face tracking |
 | **Render rate** | One full render per animation frame, up to the display's refresh. Capping to 20–30 roughly halves GPU time on a 60Hz screen |
-| **Realtime shadows** | Two shadow-casting lights, so two full depth passes of the scene per frame plus their shadow maps in VRAM. PS1 had no realtime shadows |
-| **Shadow resolution** | 2048×2048 per light. 512 is four times less depth buffer and usually indistinguishable at PSX render scales |
-| **Iris / lip refinement** | `refineFaceLandmarks` runs an extra refinement model over every frame |
 | **Lite pose model** | Holistic `modelComplexity` 1. Dropping to 0 trades pose accuracy for a much cheaper network |
+
+Three of upstream's costs are not options here, because this fork targets PSX-era
+models and nothing else:
+
+| Removed | Why it is gone rather than switchable |
+| --- | --- |
+| **Realtime shadows** | Two shadow-casting lights at 2048×2048, so two extra full-scene depth passes every frame and ~33 MB of VRAM. The PS1 had no realtime shadows at all — it stamped a blob on the floor. `PSX.shadows()` returns `false`, and upstream's Shadow Strength / Shadow Blur sliders are hidden with it |
+| **Eye aim** | `PSX.gaze()` replaces `lookAt.applyer.lookAt()` and does nothing. A PSX face keeps its eyes on the texture atlas: it blinks by swapping a cell, it does not swivel. Aiming eye bones at a solved pupil is wasted work that reads wrong |
+| **Iris / lip refinement** | `refineFaceLandmarks` is forced off. It is a whole extra network per frame, placing iris landmarks and denser lip contours — detail a texture atlas cannot show, and its main consumer was the eye aim above |
 
 Stack these with **Render scale** in the Effects tab: at `0.5x` the renderer
 draws a quarter of the pixels, which is the single biggest GPU win and the
 reason PSX mode looks right in the first place.
 
-Shadows and the Mediapipe options are read once at startup, so those apply on
-reload; the rate caps take effect immediately.
+The Mediapipe options are read once at startup, so those apply on reload; the
+rate caps take effect immediately.
 
 ## Keeping the hooks alive
 

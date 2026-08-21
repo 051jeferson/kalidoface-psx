@@ -232,6 +232,7 @@
         mpOptions: function (o) { return o; },
         shadows: function () { return true; },
         shadowSize: function () { return 2048; },
+        gaze: function (vrm, euler) { if (vrm && vrm.lookAt) vrm.lookAt.applyer.lookAt(euler); },
         // stock behaviour, dropped requests and all - the queueing fix lives in psx.js
         overlay: function (inst, opts) { if (inst) inst.animate(opts); },
         overlayOpen: function (inst) { return !!(inst && inst.isOpen); },
