@@ -48,6 +48,11 @@
     smaa: false,
     // nearest-neighbour texture sampling, no mipmaps, no anisotropy
     nearestTextures: true,
+    // hide the app's own options that PSX mode replaces or contradicts, and
+    // pin them to the value that keeps them out of the way
+    stripOptions: true,
+    // 'en' | 'pt' - the panel language, and the app's own labels with it
+    lang: 'en',
 
     // --- the actual PS1 signatures (all gated behind `enabled`) -------
     // The console had no floating point in its GPU: vertices were snapped to
@@ -184,6 +189,7 @@
     fingers: { one: ['all', 'thumb', 'none'] },
     smileKey: { one: ['fun', 'joy', 'both'] },
     signal: { one: ['calibrated', 'auto', 'raw'] },
+    lang: { one: ['en', 'pt'] },
     shadowSize: { one: [256, 512, 1024, 2048] }
   };
 
@@ -794,31 +800,51 @@
   // to hold a stick at its extremes - records a separate span per direction and
   // gives a much better mapping.
 
+  var MOTION_STEPS = [
+    { key: 'rest',  title: 'Face the camera',      hint: 'Head straight, shoulders square' },
+    { key: 'left',  title: 'Turn your head left',  hint: 'As far as is comfortable, and hold' },
+    { key: 'right', title: 'Turn your head right', hint: 'As far as is comfortable, and hold' },
+    { key: 'up',    title: 'Look up',              hint: 'Tilt your head back and hold' },
+    { key: 'down',  title: 'Look down',            hint: 'Tilt your chin down and hold' }
+  ];
+
   var CAL_STEPS = [
     { key: 'rest',  title: 'Relax your face',   hint: 'Neutral, looking at the camera' },
     { key: 'down',  title: 'Furrow your brows', hint: 'Angry - pull them down and together' },
     { key: 'up',    title: 'Raise your brows',  hint: 'Surprised - lift them as high as you can' },
     { key: 'smile', title: 'Smile wide',        hint: 'Big smile, and hold it' }
   ];
-  var CAL_LEAD = 1200;  // ms to get into the pose
-  var CAL_HOLD = 1800;  // ms of sampling
+  // Long enough to read the prompt, get the face there, and hold it still.
+  var CAL_LEAD = 2600;  // ms to get into the pose
+  var CAL_HOLD = 2600;  // ms of sampling
   var calRun = null;
   var calEl = null;
   var calBtn = null;
+  var calMotionEl = null;
+  var calMotionBtn = null;
 
   function stepAccum() {
-    return { n: 0, browSum: 0, browMin: Infinity, browMax: -Infinity, smileSum: 0, smileMax: -Infinity };
+    return {
+      n: 0, browSum: 0, browMin: Infinity, browMax: -Infinity, smileSum: 0, smileMax: -Infinity,
+      ySum: 0, xSum: 0, yDev: 0, xDev: 0
+    };
   }
 
-  function startCalibration() {
-    calRun = { i: 0, phase: 'lead', until: now() + CAL_LEAD, acc: stepAccum(), out: {}, note: '' };
+  function steps() { return calRun.kind === 'motion' ? MOTION_STEPS : CAL_STEPS; }
+
+  function begin(kind) {
+    calRun = { kind: kind, i: 0, phase: 'lead', until: now() + CAL_LEAD, acc: stepAccum(), out: {} };
     calTick();
     syncCalUi();
   }
 
+  function startCalibration() { begin('face'); }
+  function startMotionCalibration() { begin('motion'); }
+
   function stopCalibration(note) {
+    var el0 = calTarget();
     calRun = null;
-    if (calEl) setText(calEl, note || '');
+    if (el0) setText(el0, note || '');
     syncCalUi();
   }
 
@@ -833,7 +859,7 @@
   }
 
   function advanceCalibration() {
-    var st = CAL_STEPS[calRun.i];
+    var st = steps()[calRun.i];
     if (calRun.phase === 'lead') {
       calRun.phase = 'hold';
       calRun.until = now() + CAL_HOLD;
@@ -842,7 +868,23 @@
     }
     var a = calRun.acc;
     if (!a.n) {
-      stopCalibration('No face was tracked during "' + st.title + '". Start face tracking and try again.');
+      stopCalibration(T('No face was tracked during') + ' "' + T(st.title) + '". ' +
+        T('Start face tracking and try again.'));
+      return;
+    }
+    if (calRun.kind === 'motion') {
+      if (st.key === 'rest') {
+        calRun.out.restY = a.ySum / a.n;
+        calRun.out.restX = a.xSum / a.n;
+      } else {
+        // whichever axis this pose is meant to move; the deviation is measured
+        // against the resting head recorded in step one
+        calRun.out[st.key] = (st.key === 'left' || st.key === 'right') ? a.yDev : a.xDev;
+      }
+      calRun.i++;
+      if (calRun.i >= MOTION_STEPS.length) { finishMotion(); return; }
+      calRun.phase = 'lead';
+      calRun.until = now() + CAL_LEAD;
       return;
     }
     if (st.key === 'rest') {
@@ -859,6 +901,34 @@
     if (calRun.i >= CAL_STEPS.length) { finishCalibration(); return; }
     calRun.phase = 'lead';
     calRun.until = now() + CAL_LEAD;
+  }
+
+  // The neck rig clamps its rotation to +/-0.8, so mapping the widest turn the
+  // user actually makes onto that number uses the whole available range without
+  // clipping - which is the same fix as the expression calibration, applied to
+  // movement. The torso is driven by the same head signal, so it keeps its
+  // stock ratio to the head.
+  function finishMotion() {
+    var c = calRun.out;
+    var devY = Math.max(c.left || 0, c.right || 0);
+    var devX = Math.max(c.up || 0, c.down || 0);
+    var dev = Math.max(devY, devX);
+
+    if (dev < 0.05) {
+      stopCalibration(T('Barely any head movement was tracked. Is face tracking running?'));
+      return;
+    }
+
+    cfg.headGain = clamp(0.8 / dev, 0, 1.5);
+    cfg.bodyGain = clamp(STOCK_BODY_GAIN * (cfg.headGain / STOCK_HEAD_GAIN), 0, 0.2);
+    cfg.motion = true;
+    save();
+    syncControls();
+
+    stopCalibration(T('Calibrated') + ' - ' + T('turn') + ' ' + devY.toFixed(2) +
+      ', ' + T('tilt') + ' ' + devX.toFixed(2) + '  ->  ' +
+      T('Head / neck gain') + ' ' + cfg.headGain.toFixed(2) +
+      ', ' + T('Torso gain') + ' ' + cfg.bodyGain.toFixed(3) + '.');
   }
 
   function finishCalibration() {
@@ -886,22 +956,40 @@
     stopCalibration(msg);
   }
 
+  // Each wizard writes into the card it was started from.
+  function calTarget() {
+    return calRun && calRun.kind === 'motion' ? calMotionEl : calEl;
+  }
+
   function paintCalibration(left) {
+    var calEl = calTarget();
     if (!calEl) return;
-    var st = CAL_STEPS[calRun.i];
+    var st = steps()[calRun.i];
     var lead = calRun.phase === 'lead';
     setText(calEl,
-      (calRun.i + 1) + '/' + CAL_STEPS.length + '  ' + st.title +
-      '  ·  ' + (lead ? 'get ready' : 'hold') + ' ' + Math.ceil(left / 100) / 10 + 's' +
-      NL + st.hint);
+      (calRun.i + 1) + '/' + steps().length + '  ' + T(st.title) +
+      NL + T(st.hint) +
+      NL + (lead ? T('getReady') : T('holdIt')) + '  ' + Math.ceil(left / 1000) + 's');
   }
 
   // Fed from the face hook, so it records whatever the tracker is actually
   // producing rather than the mapped value.
-  function sampleCalibration(rawBrow, rawSmile) {
+  function sampleCalibration(rawBrow, rawSmile, rig) {
     if (!calRun || calRun.phase !== 'hold') return;
     var a = calRun.acc;
     a.n++;
+    if (calRun.kind === 'motion') {
+      var h = rig && rig.head;
+      if (!h) { a.n--; return; }
+      var y = num(h.y), x = num(h.x);
+      a.ySum += y;
+      a.xSum += x;
+      if (calRun.out.restY !== undefined) {
+        a.yDev = Math.max(a.yDev, Math.abs(y - calRun.out.restY));
+        a.xDev = Math.max(a.xDev, Math.abs(x - calRun.out.restX));
+      }
+      return;
+    }
     a.browSum += rawBrow;
     if (rawBrow < a.browMin) a.browMin = rawBrow;
     if (rawBrow > a.browMax) a.browMax = rawBrow;
@@ -1020,6 +1108,281 @@
     if (!cfg.motion || !cfg.damping) return t;
     // never return 0, or the bone would freeze instead of easing
     return Math.max(t * (1 - cfg.damping), 0.002);
+  }
+
+  // -------------------------------------------------- stripping app options
+  //
+  // A few of the app's own controls either do the same job as a PSX control,
+  // only worse, or actively fight one. They are anchored here by the input's
+  // name / aria-label rather than by its visible label, since those are stable
+  // and the labels are not.
+  //
+  // Hiding alone is not enough - a hidden slider still holds its value - so
+  // each is also driven to a harmless setting through its own input event,
+  // which lets the app's own handler update its store. That is why none of
+  // this needs a new call site in the bundle.
+
+  var STRIP = [
+    // Render scale does this before rasterising. The app's version renders at
+    // full resolution and pixelates afterwards, so it costs more for a worse
+    // result - and any non-zero value moves the whole scene onto the composer,
+    // which drags a 60-sample god-rays pass along with it.
+    { find: 'input[name="pixelSize"]', card: '.setting', pin: 0 },
+    // Same composer cost, and outlines were never a PS1 thing.
+    { find: 'input[name="outlineSize"]', card: '.setting', pin: 0 },
+    // Composer again, plus a per-frame animation step.
+    { aria: ['Animation Off', 'Animation On'], card: '.setting', pin: false },
+    { aria: ['Disable Experiment', 'Enable Experiment'], card: '.setting', pin: false },
+    // This one is not merely redundant. The app subtracts its smile value from
+    // every vowel and from the blink, so it drags the mouth cells below the
+    // expression threshold and the lip sync degrades. PSX.face also overwrites
+    // the Joy it writes, so it has nothing left to contribute.
+    { heading: 'Smile Detection [Beta]', card: '.list', pin: false }
+  ];
+
+  function stripTarget(spec) {
+    if (spec.heading) {
+      var hs = document.querySelectorAll('h4');
+      for (var j = 0; j < hs.length; j++) {
+        if ((hs[j].textContent || '').trim() !== spec.heading) continue;
+        var c = hs[j].closest(spec.card);
+        return { card: c, input: c && c.querySelector('input') };
+      }
+      return null;
+    }
+    var el = null;
+    if (spec.find) el = document.querySelector(spec.find);
+    else if (spec.aria) {
+      for (var i = 0; i < spec.aria.length && !el; i++) {
+        el = document.querySelector('input[aria-label="' + spec.aria[i] + '"]');
+      }
+    }
+    return el ? { card: el.closest(spec.card), input: el } : null;
+  }
+
+  // Drive the app's own input so its handler runs; setting the property alone
+  // would leave the store untouched.
+  function pin(input, want) {
+    if (!input || want === undefined) return;
+    if (typeof want === 'boolean') {
+      if (input.checked === want) return;
+      input.checked = want;
+      input.dispatchEvent(new Event('change', { bubbles: true }));
+    } else {
+      if (parseFloat(input.value) === want) return;
+      input.value = want;
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+      input.dispatchEvent(new Event('change', { bubbles: true }));
+    }
+  }
+
+  function show(node, visible) {
+    if (!node) return;
+    if (visible) {
+      if (node.__psxHidden) {
+        node.style.display = node.__psxDisplay || '';
+        node.__psxHidden = false;
+      }
+    } else if (!node.__psxHidden) {
+      node.__psxDisplay = node.style.display;
+      node.style.display = 'none';
+      node.__psxHidden = true;
+    }
+  }
+
+  function applyStrip() {
+    var strip = on() && cfg.stripOptions;
+    for (var i = 0; i < STRIP.length; i++) {
+      var t = stripTarget(STRIP[i]);
+      if (!t) continue;
+      if (strip) pin(t.input, STRIP[i].pin);
+      show(t.card, !strip);
+    }
+    // The shadow sliders are not replaced by anything - they simply do nothing
+    // while realtime shadows are off, so they follow that switch instead.
+    var sh = document.querySelector('input[name="shadowStrength"]');
+    if (sh) show(sh.closest('.setting'), !(strip && !shadows()));
+  }
+
+
+  // ------------------------------------------------------------ translation
+  //
+  // English strings are the keys, so an untranslated one falls through to
+  // itself rather than to a blank label. The same table also drives the app's
+  // own hardcoded labels, which are not in its i18n tables at all: it ships an
+  // en/ru map for the menu buttons only, and even that never switches, because
+  // the language store is built as J("en") and the navigator.languages lookup
+  // beside it is evaluated and thrown away.
+
+  var PT = {
+    // --- Effects / render ---
+    'PSX Render': 'Render PSX',
+    'PSX mode': 'Modo PSX',
+    'Hide replaced options': 'Ocultar opcoes substituidas',
+    'Nearest textures': 'Texturas nearest',
+    'Render scale': 'Escala de render',
+    'Vertex snapping': 'Snap de vertices',
+    'Snap grid': 'Grade do snap',
+    'Affine textures': 'Texturas afins',
+    'Dither': 'Dithering',
+    'Colour depth': 'Profundidade de cor',
+    '3 bit': '3 bits',
+    '4 bit': '4 bits',
+    '5 bit (PS1)': '5 bits (PS1)',
+    '6 bit': '6 bits',
+    'Reload to apply': 'Recarregar para aplicar',
+
+    // --- expressions ---
+    'Face Expressions': 'Expressoes faciais',
+    'Texture expressions': 'Expressoes por textura',
+    'Snap to cell': 'Encaixar na celula',
+    'Flip V axis': 'Inverter eixo V',
+    'Trigger threshold': 'Limiar de disparo',
+    'Release margin': 'Margem de liberacao',
+    'Minimum hold': 'Tempo minimo',
+    'Mouth gain': 'Ganho da boca',
+    'Blink gain': 'Ganho da piscada',
+    'Preview cell': 'Previsualizar celula',
+    'live tracking': 'rastreio ao vivo',
+    'Load a VRM to calibrate individual cells.': 'Carregue um VRM para calibrar celulas individuais.',
+
+    // --- emotions ---
+    'Emotion Detection': 'Deteccao de emocoes',
+    'Detect emotions': 'Detectar emocoes',
+    'Signal range': 'Faixa do sinal',
+    'calibrated': 'calibrado',
+    'auto': 'auto',
+    'raw': 'bruto',
+    'Strongest only': 'Somente a mais forte',
+    'Speech first': 'Prioridade a fala',
+    'Talking at': 'Falando a partir de',
+    'Signal gain': 'Ganho do sinal',
+    'Angry at': 'Bravo a partir de',
+    'Sorrow at': 'Triste a partir de',
+    'Smile at': 'Sorriso a partir de',
+    'Smile drives': 'Sorriso aciona',
+    'fun + joy': 'fun + joy',
+    'waiting for a tracked face...': 'aguardando um rosto rastreado...',
+    'Calibrate expressions': 'Calibrar expressoes',
+    'Cancel calibration': 'Cancelar calibracao',
+    'Reset auto range': 'Zerar faixa automatica',
+    'Calibrate motion': 'Calibrar movimento',
+    'Face the camera': 'Encare a camera',
+    'Head straight, shoulders square': 'Cabeca reta, ombros alinhados',
+    'Turn your head left': 'Vire a cabeca para a esquerda',
+    'Turn your head right': 'Vire a cabeca para a direita',
+    'As far as is comfortable, and hold': 'Ate onde for confortavel, e segure',
+    'Look up': 'Olhe para cima',
+    'Tilt your head back and hold': 'Incline a cabeca para tras e segure',
+    'Look down': 'Olhe para baixo',
+    'Tilt your chin down and hold': 'Incline o queixo para baixo e segure',
+    'Barely any head movement was tracked. Is face tracking running?':
+      'Quase nenhum movimento de cabeca foi detectado. O rastreio facial esta ligado?',
+    'No face was tracked during': 'Nenhum rosto foi detectado durante',
+    'Start face tracking and try again.': 'Ligue o rastreio facial e tente de novo.',
+    'Calibrated': 'Calibrado',
+    'turn': 'giro',
+    'tilt': 'inclinacao',
+    'neutral': 'neutro',
+
+    // --- calibration prompts ---
+    'Relax your face': 'Relaxe o rosto',
+    'Neutral, looking at the camera': 'Neutro, olhando para a camera',
+    'Furrow your brows': 'Franza as sobrancelhas',
+    'Angry - pull them down and together': 'Bravo - puxe para baixo e para o centro',
+    'Raise your brows': 'Levante as sobrancelhas',
+    'Surprised - lift them as high as you can': 'Surpreso - levante o maximo que conseguir',
+    'Smile wide': 'Sorria bastante',
+    'Big smile, and hold it': 'Sorriso grande, e segure',
+    'get ready': 'prepare-se',
+    'hold': 'segure',
+    'Calibration cancelled.': 'Calibracao cancelada.',
+
+    // --- motion ---
+    'Motion Calibration': 'Calibragem de movimento',
+    'Motion calibration': 'Calibragem de movimento',
+    'Head / neck gain': 'Ganho de cabeca / pescoco',
+    'Torso gain': 'Ganho do torso',
+    'Damping': 'Amortecimento',
+
+    // --- performance ---
+    'Performance': 'Desempenho',
+    'Performance caps': 'Limites de desempenho',
+    'Tracking rate': 'Taxa de rastreio',
+    'Render rate': 'Taxa de render',
+    'Realtime shadows': 'Sombras em tempo real',
+    'Shadow resolution': 'Resolucao da sombra',
+    'Iris / lip refinement': 'Refino de iris / labios',
+    'Lite pose model': 'Modelo de pose leve',
+    'uncapped': 'sem limite',
+
+    // --- hands / diagnostics ---
+    'PSX Hands': 'Maos PSX',
+    'Driven fingers': 'Dedos animados',
+    'all fingers': 'todos os dedos',
+    'thumb only': 'so o polegar',
+    'none': 'nenhum',
+    'Log diagnostics to console': 'Registrar diagnostico no console',
+    'Check bundle hooks': 'Conferir hooks do bundle',
+    'Reset PSX settings': 'Restaurar ajustes PSX',
+    'Language': 'Idioma',
+    'English': 'English',
+    'Portuguese (BR)': 'Portugues (BR)',
+
+    // --- notes ---
+    'note.reloadRender': 'Modo PSX, MSAA, SMAA e escala de render sao aplicados ao recarregar.',
+    'note.reloadPerf': 'Sombras e as opcoes do modelo Mediapipe sao aplicadas ao recarregar. Os limites de taxa valem na hora.',
+    'note.emotions': 'O app so rastreia piscadas, as cinco vogais e um sorriso. Bravo, triste e fun nunca sao escritos - isto os deriva da sobrancelha e da boca para que essas celulas possam disparar. Faca cada careta e observe a leitura para ajustar os limiares.',
+    'note.motion': 'Os ganhos de pescoco e torso sao fixos no app, entao um movimento real pequeno vira um movimento grande no avatar. Baixe o ganho para mexer menos, aumente o amortecimento para mexer mais devagar.',
+    'note.perf': 'O app roda uma inferencia do Mediapipe a cada frame, renderiza a cada frame, e tem duas luzes projetando sombras 2048x2048. A taxa de rastreio e onde vai quase toda a CPU.',
+
+    // --- the app's own hardcoded labels ---
+    'Light Color': 'Cor da luz',
+    'Light Position X': 'Posicao da luz X',
+    'Light Position Y': 'Posicao da luz Y',
+    'Shadow Strength': 'Forca da sombra',
+    'Shadow Blur': 'Desfoque da sombra',
+    'Outline Size': 'Espessura do contorno',
+    'Outline Color': 'Cor do contorno',
+    'Pixelate': 'Pixelizar',
+    'Water Animation': 'Animacao de agua',
+    'Light Cube Experiment': 'Experimento do cubo de luz',
+    'Body Tracking Options': 'Opcoes de rastreio corporal',
+    'Enable Wink': 'Ativar piscadela',
+    'Smile Detection [Beta]': 'Deteccao de sorriso [Beta]',
+    'Room Tracking': 'Rastreio de ambiente',
+    'Leg Tracking [WIP]': 'Rastreio de pernas [WIP]',
+    'Hide Camera Panel': 'Ocultar painel da camera',
+    'Hide Webcam Video': 'Ocultar video da webcam',
+    'Change Camera': 'Trocar camera',
+    'Reset Character Tracking': 'Reiniciar rastreio do personagem',
+    'For eyetracking, use both face and full body tracking.':
+      'Para rastreio ocular, use rastreio facial e de corpo inteiro juntos.',
+    'Allow webcam access to see camera list.':
+      'Permita o acesso a webcam para ver a lista de cameras.'
+  };
+
+  var EN = {
+    'note.reloadRender': 'PSX mode, MSAA, SMAA and render scale apply on reload.',
+    'note.reloadPerf': 'Shadows and the Mediapipe model options apply on reload. ' +
+      'The rate caps take effect immediately.',
+    'note.emotions': 'The app only tracks blinks, the five vowels and a smile. Angry, ' +
+      'sorrow and fun are never written at all - this derives them from the brow and ' +
+      'mouth so those cells can fire. Pull each face and watch the readout to set the ' +
+      'thresholds.',
+    'note.motion': 'The neck and torso gains are hardcoded upstream, so a small real ' +
+      'movement lands as a large avatar movement. Lower the gain to move less, raise ' +
+      'the damping to move slower.',
+    'note.perf': 'Upstream runs a Mediapipe inference on every animation frame, renders ' +
+      'on every animation frame, and has two lights casting 2048x2048 shadow maps. The ' +
+      'tracking rate is where nearly all the CPU goes.'
+  };
+
+  function T(en) {
+    if (cfg.lang !== 'pt') return EN[en] === undefined ? en : EN[en];
+    var v = PT[en];
+    if (v !== undefined) return v;
+    return EN[en] === undefined ? en : EN[en];
   }
 
   // ------------------------------------------------------------- integrity
@@ -1424,6 +1787,10 @@
   // rebuilt; the rest are uniforms and take effect on the next frame.
   var RECOMPILES = { affine: 1 };
 
+  // The labels are baked into the DOM when a card is built, so switching
+  // language means throwing the cards away and building them again.
+  var REBUILDS = { lang: 1 };
+
   var NEEDS_RELOAD = {
     enabled: 1, pixelRatio: 1, antialias: 1, smaa: 1,
     perf: 1, shadows: 1, shadowSize: 1, faceIris: 1, poseLite: 1
@@ -1459,6 +1826,8 @@
     } else {
       applyCanvasFilter();
       if (RECOMPILES[key]) refreshShaders(); else syncShaderUniforms();
+      if (REBUILDS[key]) rebuildPanels();
+      applyStrip();
       refreshModels();
     }
     syncControls();
@@ -1496,6 +1865,12 @@
 
   function addToggle(parent, key, label, sc) {
     var row = el('div', 'toggle ' + FX);
+    // The switch is a 24px knob inside an 11px track with overflow:visible, so
+    // it hangs ~5px past the row. The app never notices because its toggles are
+    // always last in a card; ours are followed by sliders, and the knob landed
+    // on top of the next heading.
+    row.style.minHeight = '24px';
+    row.style.marginBottom = '6px';
     var h = el('h4', sc || FX, label);
     h.style.margin = '0';
 
@@ -1594,23 +1969,24 @@
   function buildEffects() {
     var frag = document.createDocumentFragment();
 
-    var r = card('PSX Render');
-    addToggle(r, 'enabled', 'PSX mode');
-    addToggle(r, 'nearestTextures', 'Nearest textures');
-    addToggle(r, 'antialias', 'MSAA');
-    addToggle(r, 'smaa', 'SMAA');
+    var r = card(T('PSX Render'));
+    addToggle(r, 'enabled', T('PSX mode'));
+    addToggle(r, 'stripOptions', T('Hide replaced options'));
+    addToggle(r, 'nearestTextures', T('Nearest textures'));
+    addToggle(r, 'antialias', T('MSAA'));
+    addToggle(r, 'smaa', T('SMAA'));
     addRule(r);
-    addRange(r, 'pixelRatio', 'Render scale', 0.25, 2, 0.25, function (v) { return v + 'x'; });
+    addRange(r, 'pixelRatio', T('Render scale'), 0.25, 2, 0.25, function (v) { return v + 'x'; });
     addRule(r);
-    addToggle(r, 'vertexSnap', 'Vertex snapping');
-    addRange(r, 'snapGrid', 'Snap grid', 32, 480, 8, function (v) { return v + ''; });
-    addToggle(r, 'affine', 'Affine textures');
+    addToggle(r, 'vertexSnap', T('Vertex snapping'));
+    addRange(r, 'snapGrid', T('Snap grid'), 32, 480, 8, function (v) { return v + ''; });
+    addToggle(r, 'affine', T('Affine textures'));
     addRule(r);
-    addToggle(r, 'dither', 'Dither');
-    addChoice(r, 'colorLevels', 'Colour depth', [8, 16, 32, 64],
-      ['3 bit', '4 bit', '5 bit (PS1)', '6 bit']);
+    addToggle(r, 'dither', T('Dither'));
+    addChoice(r, 'colorLevels', T('Colour depth'), [8, 16, 32, 64],
+      [T('3 bit'), T('4 bit'), T('5 bit (PS1)'), T('6 bit')]);
 
-    reloadNote(r, 'PSX mode, MSAA, SMAA and render scale apply on reload.', FX);
+    reloadNote(r, T('note.reloadRender'), FX);
 
     r.classList.add('last');
     frag.appendChild(r);
@@ -1622,55 +1998,51 @@
   function buildSettings() {
     var frag = document.createDocumentFragment();
 
-    var x = card('Face Expressions', STG);
-    addToggle(x, 'uvExpressions', 'Texture expressions', STG);
-    addToggle(x, 'snapExpressions', 'Snap to cell', STG);
-    addToggle(x, 'uvFlipV', 'Flip V axis', STG);
+    var x = card(T('Face Expressions'), STG);
+    addToggle(x, 'uvExpressions', T('Texture expressions'), STG);
+    addToggle(x, 'snapExpressions', T('Snap to cell'), STG);
+    addToggle(x, 'uvFlipV', T('Flip V axis'), STG);
     addRule(x);
-    addRange(x, 'threshold', 'Trigger threshold', 0, 1, 0.01, function (v) { return v.toFixed(2); }, STG);
-    addRange(x, 'hysteresis', 'Release margin', 0, 0.5, 0.01, function (v) { return v.toFixed(2); }, STG);
-    addRange(x, 'holdMs', 'Minimum hold', 0, 400, 10, function (v) { return v + ' ms'; }, STG);
+    addRange(x, 'threshold', T('Trigger threshold'), 0, 1, 0.01, function (v) { return v.toFixed(2); }, STG);
+    addRange(x, 'hysteresis', T('Release margin'), 0, 0.5, 0.01, function (v) { return v.toFixed(2); }, STG);
+    addRange(x, 'holdMs', T('Minimum hold'), 0, 400, 10, function (v) { return v + ' ms'; }, STG);
     addRule(x);
-    addRange(x, 'mouthGain', 'Mouth gain', 0.25, 3, 0.05, function (v) { return v.toFixed(2) + 'x'; }, STG);
-    addRange(x, 'blinkGain', 'Blink gain', 0.25, 3, 0.05, function (v) { return v.toFixed(2) + 'x'; }, STG);
+    addRange(x, 'mouthGain', T('Mouth gain'), 0.25, 3, 0.05, function (v) { return v.toFixed(2) + 'x'; }, STG);
+    addRange(x, 'blinkGain', T('Blink gain'), 0.25, 3, 0.05, function (v) { return v.toFixed(2) + 'x'; }, STG);
     addRule(x);
     var keys = expressionKeys();
     if (keys.length) {
-      addChoice(x, 'preview', 'Preview cell', [''].concat(keys), ['live tracking'].concat(keys), STG);
+      addChoice(x, 'preview', T('Preview cell'), [''].concat(keys), [T('live tracking')].concat(keys), STG);
     } else {
-      var hint = el('div', STG, 'Load a VRM to calibrate individual cells.');
+      var hint = el('div', STG, T('Load a VRM to calibrate individual cells.'));
       hint.style.cssText = 'width:100%;opacity:.5;font-size:12px;text-align:left';
       x.appendChild(hint);
     }
     frag.appendChild(x);
 
     // --- emotions ------------------------------------------------------
-    var em = card('Emotion Detection', STG);
-    var emNote = el('div', STG,
-      'The app only tracks blinks, the five vowels and a smile. Angry, sorrow ' +
-      'and fun are never written at all - this derives them from the brow and ' +
-      'mouth so those cells can fire. Pull each face and watch the readout to ' +
-      'set the thresholds.');
+    var em = card(T('Emotion Detection'), STG);
+    var emNote = el('div', STG, T('note.emotions'));
     emNote.style.cssText = 'width:100%;opacity:.5;font-size:12px;margin:0 0 4px;text-align:left';
     em.appendChild(emNote);
-    addToggle(em, 'emotions', 'Detect emotions', STG);
-    addChoice(em, 'signal', 'Signal range', ['calibrated', 'auto', 'raw'],
-      ['calibrated', 'auto', 'raw'], STG);
-    addToggle(em, 'exclusive', 'Strongest only', STG);
+    addToggle(em, 'emotions', T('Detect emotions'), STG);
+    addChoice(em, 'signal', T('Signal range'), ['calibrated', 'auto', 'raw'],
+      [T('calibrated'), T('auto'), T('raw')], STG);
+    addToggle(em, 'exclusive', T('Strongest only'), STG);
     addRule(em);
-    addToggle(em, 'speechFirst', 'Speech first', STG);
-    addRange(em, 'speechAt', 'Talking at', 0, 1, 0.01, function (v) { return v.toFixed(2); }, STG);
+    addToggle(em, 'speechFirst', T('Speech first'), STG);
+    addRange(em, 'speechAt', T('Talking at'), 0, 1, 0.01, function (v) { return v.toFixed(2); }, STG);
     addRule(em);
-    addRange(em, 'browGain', 'Signal gain', 0.25, 4, 0.05, function (v) { return v.toFixed(2) + 'x'; }, STG);
-    addRange(em, 'angryAt', 'Angry at', 0, 0.95, 0.01, function (v) { return v.toFixed(2); }, STG);
-    addRange(em, 'sorrowAt', 'Sorrow at', 0, 0.95, 0.01, function (v) { return v.toFixed(2); }, STG);
-    addRange(em, 'smileAt', 'Smile at', 0, 0.95, 0.01, function (v) { return v.toFixed(2); }, STG);
+    addRange(em, 'browGain', T('Signal gain'), 0.25, 4, 0.05, function (v) { return v.toFixed(2) + 'x'; }, STG);
+    addRange(em, 'angryAt', T('Angry at'), 0, 0.95, 0.01, function (v) { return v.toFixed(2); }, STG);
+    addRange(em, 'sorrowAt', T('Sorrow at'), 0, 0.95, 0.01, function (v) { return v.toFixed(2); }, STG);
+    addRange(em, 'smileAt', T('Smile at'), 0, 0.95, 0.01, function (v) { return v.toFixed(2); }, STG);
     addRule(em);
-    addChoice(em, 'smileKey', 'Smile drives', ['fun', 'joy', 'both'],
-      ['fun', 'joy', 'fun + joy'], STG);
+    addChoice(em, 'smileKey', T('Smile drives'), ['fun', 'joy', 'both'],
+      ['fun', 'joy', T('fun + joy')], STG);
     addRule(em);
 
-    readoutEl = el('div', STG, 'waiting for a tracked face...');
+    readoutEl = el('div', STG, T('waiting for a tracked face...'));
     readoutEl.style.cssText = 'width:100%;font-size:12px;opacity:.75;text-align:left;' +
       'font-variant-numeric:tabular-nums;font-feature-settings:"tnum"';
     em.appendChild(readoutEl);
@@ -1683,12 +2055,12 @@
     calBtn = el('button', 'trigger ' + STG, '');
     calBtn.style.marginTop = '12px';
     calBtn.addEventListener('click', function () {
-      if (calRun) stopCalibration('Calibration cancelled.');
+      if (calRun) stopCalibration(T('Calibration cancelled.'));
       else startCalibration();
     });
     em.appendChild(calBtn);
 
-    var recal = el('button', 'trigger ' + STG, 'Reset auto range');
+    var recal = el('button', 'trigger ' + STG, T('Reset auto range'));
     recal.style.marginTop = '8px';
     recal.addEventListener('click', function () { resetCalibration(); });
     em.appendChild(recal);
@@ -1696,57 +2068,66 @@
     frag.appendChild(em);
 
     // --- motion --------------------------------------------------------
-    var mo = card('Motion Calibration', STG);
-    var moNote = el('div', STG,
-      'The neck and torso gains are hardcoded upstream, so a small real ' +
-      'movement lands as a large avatar movement. Lower the gain to move less, ' +
-      'raise the damping to move slower.');
+    var mo = card(T('Motion Calibration'), STG);
+    var moNote = el('div', STG, T('note.motion'));
     moNote.style.cssText = 'width:100%;opacity:.5;font-size:12px;margin:0 0 4px;text-align:left';
     mo.appendChild(moNote);
-    addToggle(mo, 'motion', 'Motion calibration', STG);
+    addToggle(mo, 'motion', T('Motion calibration'), STG);
     addRule(mo);
-    addRange(mo, 'headGain', 'Head / neck gain', 0, 1.5, 0.05, function (v) { return v.toFixed(2) + 'x'; }, STG);
-    addRange(mo, 'bodyGain', 'Torso gain', 0, 0.2, 0.005, function (v) { return v.toFixed(3) + 'x'; }, STG);
-    addRange(mo, 'damping', 'Damping', 0, 0.95, 0.01, function (v) { return v.toFixed(2); }, STG);
+    addRange(mo, 'headGain', T('Head / neck gain'), 0, 1.5, 0.05, function (v) { return v.toFixed(2) + 'x'; }, STG);
+    addRange(mo, 'bodyGain', T('Torso gain'), 0, 0.2, 0.005, function (v) { return v.toFixed(3) + 'x'; }, STG);
+    addRange(mo, 'damping', T('Damping'), 0, 0.95, 0.01, function (v) { return v.toFixed(2); }, STG);
+
+    calMotionEl = el('div', STG, '');
+    calMotionEl.style.cssText = 'width:100%;font-size:12px;opacity:.85;text-align:left;' +
+      'white-space:pre-line;margin-top:10px;line-height:1.5';
+    mo.appendChild(calMotionEl);
+
+    calMotionBtn = el('button', 'trigger ' + STG, '');
+    calMotionBtn.style.marginTop = '12px';
+    calMotionBtn.addEventListener('click', function () {
+      if (calRun) stopCalibration(T('Calibration cancelled.'));
+      else startMotionCalibration();
+    });
+    mo.appendChild(calMotionBtn);
     frag.appendChild(mo);
 
     // --- performance ---------------------------------------------------
-    var pf = card('Performance', STG);
-    var pfNote = el('div', STG,
-      'Upstream runs a Mediapipe inference on every animation frame, renders on ' +
-      'every animation frame, and has two lights casting 2048x2048 shadow maps. ' +
-      'The tracking rate is where nearly all the CPU goes.');
+    var pf = card(T('Performance'), STG);
+    var pfNote = el('div', STG, T('note.perf'));
     pfNote.style.cssText = 'width:100%;opacity:.5;font-size:12px;margin:0 0 4px;text-align:left';
     pf.appendChild(pfNote);
-    addToggle(pf, 'perf', 'Performance caps', STG);
+    addToggle(pf, 'perf', T('Performance caps'), STG);
     addRule(pf);
-    addRange(pf, 'trackFps', 'Tracking rate', 0, 60, 1, fpsLabel, STG);
-    addRange(pf, 'renderFps', 'Render rate', 0, 60, 1, fpsLabel, STG);
+    addRange(pf, 'trackFps', T('Tracking rate'), 0, 60, 1, fpsLabel, STG);
+    addRange(pf, 'renderFps', T('Render rate'), 0, 60, 1, fpsLabel, STG);
     addRule(pf);
-    addToggle(pf, 'shadows', 'Realtime shadows', STG);
-    addChoice(pf, 'shadowSize', 'Shadow resolution', [256, 512, 1024, 2048],
+    addToggle(pf, 'shadows', T('Realtime shadows'), STG);
+    addChoice(pf, 'shadowSize', T('Shadow resolution'), [256, 512, 1024, 2048],
       ['256', '512', '1024', '2048'], STG);
     addRule(pf);
-    addToggle(pf, 'faceIris', 'Iris / lip refinement', STG);
-    addToggle(pf, 'poseLite', 'Lite pose model', STG);
-    reloadNote(pf, 'Shadows and the Mediapipe model options apply on reload. ' +
-      'The rate caps take effect immediately.', STG);
+    addToggle(pf, 'faceIris', T('Iris / lip refinement'), STG);
+    addToggle(pf, 'poseLite', T('Lite pose model'), STG);
+    reloadNote(pf, T('note.reloadPerf'), STG);
     frag.appendChild(pf);
 
-    var hnd = card('PSX Hands', STG);
-    addChoice(hnd, 'fingers', 'Driven fingers', ['all', 'thumb', 'none'],
-      ['all fingers', 'thumb only', 'none'], STG);
-    var dbg = el('button', 'trigger ' + STG, 'Log diagnostics to console');
+    var hnd = card(T('PSX Hands'), STG);
+    addChoice(hnd, 'lang', T('Language'), ['en', 'pt'],
+      [T('English'), T('Portuguese (BR)')], STG);
+    addRule(hnd);
+    addChoice(hnd, 'fingers', T('Driven fingers'), ['all', 'thumb', 'none'],
+      [T('all fingers'), T('thumb only'), T('none')], STG);
+    var dbg = el('button', 'trigger ' + STG, T('Log diagnostics to console'));
     dbg.style.marginTop = '20px';
     dbg.addEventListener('click', function () { dump(); });
     hnd.appendChild(dbg);
 
-    var chk = el('button', 'trigger ' + STG, 'Check bundle hooks');
+    var chk = el('button', 'trigger ' + STG, T('Check bundle hooks'));
     chk.style.marginTop = '8px';
     chk.addEventListener('click', function () { verify(); });
     hnd.appendChild(chk);
 
-    var rst = el('button', 'trigger reset ' + STG, 'Reset PSX settings');
+    var rst = el('button', 'trigger reset ' + STG, T('Reset PSX settings'));
     rst.style.marginTop = '8px';
     rst.addEventListener('click', function () { resetSettings(); });
     hnd.appendChild(rst);
@@ -1758,7 +2139,13 @@
   }
 
   function syncCalUi() {
-    if (calBtn) setText(calBtn, calRun ? 'Cancel calibration' : 'Calibrate expressions');
+    var busy = !!calRun;
+    if (calBtn) {
+      setText(calBtn, busy && calRun.kind === 'face' ? T('Cancel calibration') : T('Calibrate expressions'));
+    }
+    if (calMotionBtn) {
+      setText(calMotionBtn, busy && calRun.kind === 'motion' ? T('Cancel calibration') : T('Calibrate motion'));
+    }
   }
 
   function syncControls() {
@@ -1778,14 +2165,23 @@
   }
 
   var injectQueued = false;
+  var lastInject = 0;
+  var INJECT_EVERY = 250;
 
+  // The app writes a store on every tracked frame, so its panels mutate
+  // continuously and the observer fires with them. Running the full pass each
+  // time meant querySelectorAll over the document once a frame for no reason.
   function scheduleInject() {
     if (injectQueued) return;
     injectQueued = true;
-    requestAnimationFrame(function () {
-      injectQueued = false;
-      tryInject();
-    });
+    var wait = Math.max(0, lastInject + INJECT_EVERY - now());
+    setTimeout(function () {
+      requestAnimationFrame(function () {
+        injectQueued = false;
+        lastInject = now();
+        tryInject();
+      });
+    }, wait);
   }
 
   // A panel is torn down when its tab closes, taking our cards with it. Drop the
@@ -1813,7 +2209,21 @@
     c.appendChild(build());
   }
 
+  function rebuildPanels() {
+    var cards = document.querySelectorAll('.psx-injected');
+    Array.prototype.forEach.call(cards, function (n) {
+      if (n.parentNode) n.parentNode.__psxKeys = undefined;
+      n.remove();
+    });
+    controls = [];
+    calEl = calMotionEl = calBtn = calMotionBtn = readoutEl = null;
+    lastInject = 0;
+    translateTree(document.body || document.documentElement);
+    tryInject();
+  }
+
   function tryInject() {
+    applyStrip();
     pruneControls();
     injectInto(effectsContainer(), buildEffects, false);
     injectInto(settingsContainer(), buildSettings, true);
@@ -1846,8 +2256,43 @@
     return allOurs(added) && allOurs(removed);
   }
 
+  // The app's panel labels are hardcoded textContent, not entries in its i18n
+  // tables, so they are swapped in the DOM. Only leaf elements are touched, and
+  // the English original is kept on the node so switching back is exact.
+  function translateNode(n) {
+    if (!n || n.nodeType !== 1 || n.children.length) return;
+    var tag = n.tagName;
+    if (tag !== 'H4' && tag !== 'LABEL' && tag !== 'P' && tag !== 'BUTTON') return;
+    if (isOurs(n)) return;
+    var en = n.__psxEn || (n.textContent || '').trim();
+    if (!(en in PT)) return;
+    n.__psxEn = en;
+    var want = cfg.lang === 'pt' ? PT[en] : en;
+    if ((n.textContent || '').trim() !== want) n.textContent = want;
+  }
+
+  function translateTree(root) {
+    if (!root || root.nodeType !== 1) return;
+    translateNode(root);
+    if (!root.querySelectorAll) return;
+    var kids = root.querySelectorAll('h4, label, p, button');
+    for (var i = 0; i < kids.length; i++) translateNode(kids[i]);
+  }
+
+  // Runs on the raw mutation records rather than the throttled pass: a re-render
+  // that reset a label back to English would otherwise show for a quarter of a
+  // second, which reads as a flicker.
+  function translateMutations(list) {
+    for (var i = 0; i < list.length; i++) {
+      translateTree(list[i].target);
+      var added = list[i].addedNodes || [];
+      for (var j = 0; j < added.length; j++) translateTree(added[j]);
+    }
+  }
+
   function startObserver() {
     var mo = new MutationObserver(function (list) {
+      translateMutations(list);
       // our own cards mutate constantly (the live readout, the calibration
       // prompts). Reacting to those would schedule a pass every frame.
       for (var i = 0; i < list.length; i++) {
@@ -1855,6 +2300,7 @@
       }
     });
     mo.observe(document.documentElement, { childList: true, subtree: true });
+    translateTree(document.body || document.documentElement);
     scheduleInject();
   }
 
@@ -1913,12 +2359,13 @@
         var rawSmile = num(rig && rig.mouth && rig.mouth.x);
         // calibration has to record even with emotions switched off, since
         // that is the order people will do it in
-        sampleCalibration(rawBrow, rawSmile);
+        sampleCalibration(rawBrow, rawSmile, rig);
         driveEmotions(vrm, rig, rawBrow, rawSmile);
       } catch (e) { log('face hook failed', e); }
     },
 
     calibrate: startCalibration,
+    calibrateMotion: startMotionCalibration,
     resetCalibration: resetCalibration,
     resetSettings: resetSettings,
     verify: verify,

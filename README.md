@@ -128,6 +128,20 @@ four every frame, including the zeroes, so a stale upstream `joy` cannot outvote
 an exclusive pick. Point **Smile drives** at `joy` for the stock behaviour with
 a threshold you can actually tune.
 
+### Language
+
+The panel speaks English or Portuguese (BR), switched in the PSX Hands card.
+
+Upstream cannot do this: it ships an `en`/`ru` map for the menu buttons only,
+its language store is built as `J("en")`, and the `navigator.languages[0]`
+lookup beside it is evaluated and thrown away. Everything else — every panel
+label — is hardcoded `textContent`.
+
+So the app's own labels are swapped in the DOM, keeping the English original on
+the node so switching back is exact. That runs on the raw mutation records
+rather than on the throttled pass, because a re-render that reset a label to
+English would otherwise show for a quarter of a second and read as a flicker.
+
 ### Motion calibration
 
 The neck rig multiplies the solved head rotation by `1` and the chest/spine rig
@@ -136,6 +150,14 @@ by `0.05`, both hardcoded, then lerps toward the result at `0.04 + dt*4` and
 with nothing upstream to tune. **Head / neck gain** and **Torso gain** scale the
 rotation; **Damping** scales the lerp, so the avatar eases into a pose instead of
 snapping to it.
+
+**Calibrate motion** sets them for you, the same way the expression wizard does:
+it prompts you to face the camera, then turn left, turn right, look up and look
+down, and records how far your head actually travels. The neck rig clamps its
+rotation to ±0.8, so mapping your widest turn onto that number uses the whole
+available range without clipping — someone who barely moves gets a gain above 1,
+someone who moves a lot gets one below. The torso is driven by the same head
+signal, so it keeps its stock ratio to the head.
 
 Emotion detection and motion calibration are independent of PSX mode — they are
 tracking fixes, not a render look — so each has its own switch and both default
