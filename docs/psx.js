@@ -138,6 +138,57 @@
   var MOUTH_KEYS = { a: 1, i: 1, u: 1, e: 1, o: 1 };
   var BLINK_KEYS = { blink: 1, blink_l: 1, blink_r: 1 };
 
+  // Ranges and enums for the stored settings. Values come back out of
+  // localStorage, which survives schema changes, hand editing and a half-written
+  // save - and several of these reach WebGL directly. A pixelRatio of 0 or a
+  // shadowSize of "large" is a black screen with no way back but devtools, so
+  // anything that does not fit its spec falls back to the default.
+  var SPEC = {
+    pixelRatio: { min: 0.25, max: 2 },
+    threshold: { min: 0, max: 1 },
+    hysteresis: { min: 0, max: 0.5 },
+    holdMs: { min: 0, max: 400 },
+    mouthGain: { min: 0.25, max: 3 },
+    blinkGain: { min: 0.25, max: 3 },
+    browGain: { min: 0.25, max: 4 },
+    angryAt: { min: 0, max: 0.95 },
+    sorrowAt: { min: 0, max: 0.95 },
+    smileAt: { min: 0, max: 0.95 },
+    speechAt: { min: 0, max: 1 },
+    headGain: { min: 0, max: 1.5 },
+    bodyGain: { min: 0, max: 0.2 },
+    damping: { min: 0, max: 0.95 },
+    trackFps: { min: 0, max: 60 },
+    renderFps: { min: 0, max: 60 },
+    fingers: { one: ['all', 'thumb', 'none'] },
+    smileKey: { one: ['fun', 'joy', 'both'] },
+    signal: { one: ['calibrated', 'auto', 'raw'] },
+    shadowSize: { one: [256, 512, 1024, 2048] }
+  };
+
+  var CAL_FIELDS = ['browRest', 'browDown', 'browUp', 'smileRest', 'smileMax'];
+
+  function isNum(v) { return typeof v === 'number' && isFinite(v); }
+
+  function sanitize(key, v) {
+    var def = DEFAULTS[key];
+    if (key === 'cal') {
+      if (!v || typeof v !== 'object') return null;
+      for (var i = 0; i < CAL_FIELDS.length; i++) {
+        if (!isNum(v[CAL_FIELDS[i]])) return null;
+      }
+      return v;
+    }
+    var spec = SPEC[key];
+    if (spec && spec.one) return spec.one.indexOf(v) === -1 ? def : v;
+    if (typeof def === 'boolean') return typeof v === 'boolean' ? v : def;
+    if (typeof def === 'number') {
+      if (!isNum(v)) return def;
+      return spec ? clamp(v, spec.min, spec.max) : v;
+    }
+    return typeof v === typeof def ? v : def;
+  }
+
   var cfg = load();
 
   function load() {
@@ -147,11 +198,25 @@
       var raw = localStorage.getItem(STORE_KEY);
       if (raw) {
         var saved = JSON.parse(raw);
-        for (var j in saved) if (j in out) out[j] = saved[j];
+        for (var j in saved) if (j in out) out[j] = sanitize(j, saved[j]);
       }
     } catch (e) {}
     out.preview = '';
     return out;
+  }
+
+  function resetSettings() {
+    try { localStorage.removeItem(STORE_KEY); } catch (e) {}
+    var fresh = load();
+    for (var k in fresh) cfg[k] = fresh[k];
+    resetCalibration();
+    applyCanvasFilter();
+    refreshModels();
+    syncControls();
+    pendingReload = true;
+    var notes = document.querySelectorAll('.psx-reload-note');
+    Array.prototype.forEach.call(notes, function (n) { n.style.display = ''; });
+    console.log('[psx] settings reset to defaults');
   }
 
   function save() {
@@ -807,6 +872,56 @@
     return Math.max(t * (1 - cfg.damping), 0.002);
   }
 
+  // ------------------------------------------------------------- integrity
+  //
+  // Every hook above only fires because a call to it was written into the
+  // minified bundle. Those edits are invisible once committed and do not
+  // survive the bundle being regenerated - and this project syncs with Glitch,
+  // so that happens. When it does, psx.js still loads, still builds its panels,
+  // and silently does nothing at all, because nothing ever calls it.
+  //
+  // So: count the call sites in the bundle that is actually running and say
+  // which ones are missing. tools/patch.mjs puts them back.
+
+  var EXPECTED_HOOKS = {
+    setupRenderer: 1, aa: 1, smaa: 1, fingers: 1, onModel: 1, tick: 1,
+    face: 1, headGain: 1, bodyGain: 1, smooth: 4, frame: 1, nextTrack: 1,
+    mpOptions: 2, shadows: 1, shadowSize: 4, overlay: 3, overlayOpen: 1
+  };
+
+  function verify() {
+    var el = document.querySelector('script[type="module"][src]');
+    if (!el || typeof fetch !== 'function') {
+      console.warn('[psx] cannot reach the bundle to check it');
+      return;
+    }
+    return fetch(el.src).then(function (r) { return r.text(); }).then(function (src) {
+      var bad = [];
+      var total = 0;
+      for (var k in EXPECTED_HOOKS) {
+        total++;
+        // the trailing word boundary stops PSX.overlay from also counting
+        // every PSX.overlayOpen
+        var re = new RegExp('window\\.PSX\\.' + k + '\\b', 'g');
+        var n = (src.match(re) || []).length;
+        if (n !== EXPECTED_HOOKS[k]) {
+          bad.push('  PSX.' + k + ': ' + n + ' call site(s), expected ' + EXPECTED_HOOKS[k]);
+        }
+      }
+      var name = el.getAttribute('src');
+      if (!bad.length) {
+        console.log('[psx] ' + name + ': all ' + total + ' hooks present');
+      } else {
+        console.warn('[psx] ' + name + ' is missing PSX hooks - the layer is ' +
+          'loaded but partly inert. Run:  node tools/patch.mjs');
+        console.warn(bad.join(String.fromCharCode(10)));
+      }
+      return bad;
+    }).catch(function (e) {
+      console.warn('[psx] could not read the bundle:', e);
+    });
+  }
+
   // ------------------------------------------------------- subnav overlay
   //
   // The panel's dark background is not a CSS background - it is an animated SVG
@@ -1460,6 +1575,16 @@
     dbg.style.marginTop = '20px';
     dbg.addEventListener('click', function () { dump(); });
     hnd.appendChild(dbg);
+
+    var chk = el('button', 'trigger ' + STG, 'Check bundle hooks');
+    chk.style.marginTop = '8px';
+    chk.addEventListener('click', function () { verify(); });
+    hnd.appendChild(chk);
+
+    var rst = el('button', 'trigger reset ' + STG, 'Reset PSX settings');
+    rst.style.marginTop = '8px';
+    rst.addEventListener('click', function () { resetSettings(); });
+    hnd.appendChild(rst);
     // .last only exists in the Effects scope, so carry FX along for the margin
     hnd.classList.add('last', FX);
     frag.appendChild(hnd);
@@ -1630,6 +1755,8 @@
 
     calibrate: startCalibration,
     resetCalibration: resetCalibration,
+    resetSettings: resetSettings,
+    verify: verify,
 
     headGain: headGain,
     bodyGain: bodyGain,

@@ -1,0 +1,97 @@
+{
+ "bundle": "docs/assets/index.e2bec78d.js",
+ "patches": [
+  {
+   "find": ")),f.setOptions({maxNumFaces:1,r",
+   "replace": ")),f.setOptions(window.PSX.mpOptions({maxNumFaces:1,r"
+  },
+  {
+   "find": "gConfidence:.5}),f.onResults(p=>",
+   "replace": "gConfidence:.5})),f.onResults(p=>"
+  },
+  {
+   "find": ")),c.setOptions(n.holistic.model),c.onResults(lr",
+   "replace": ")),c.setOptions(window.PSX.mpOptions(n.holistic.model)),c.onResults(lr"
+  },
+  {
+   "find": ".detected=!0,a),requestAnimationFrame(C)}}return l.$$",
+   "replace": ".detected=!0,a),window.PSX.nextTrack(C)}}return l.$$"
+  },
+  {
+   "find": "i))),n.update(e)},Al=l=>{!l||(E(",
+   "replace": "i))),n.update(e),window.PSX.tick(n)},Al=l=>{!l||(E("
+  },
+  {
+   "find": "eturn;y.id=z.id,y.isUser=z.id===",
+   "replace": "eturn;y.id=z.id,window.PSX.onModel(y,g),y.isUser=z.id==="
+  },
+  {
+   "find": "w.mapSize.width=2048,M.shadow.mapSize.height=2048,M.shadow.camera",
+   "replace": "w.mapSize.width=window.PSX.shadowSize(),M.shadow.mapSize.height=window.PSX.shadowSize(),M.shadow.camera"
+  },
+  {
+   "find": "p),C.addPass(z),C.addPass(v),C.a",
+   "replace": "p),C.addPass(z),window.PSX.smaa()&&C.addPass(v),C.a"
+  },
+  {
+   "find": "=e;function m(){requestAnimationFrame(m),Ke=zi.getDelta()",
+   "replace": "=e;function m(){if(requestAnimationFrame(m),!window.PSX.frame())return;Ke=zi.getDelta()"
+  },
+  {
+   "find": "PI,Math.PI):0,c=1;o&&zt(o,{y:ae(e",
+   "replace": "PI,Math.PI):0,c=window.PSX.headGain();o&&zt(o,{y:ae(e"
+  },
+  {
+   "find": ",-.3,.3)*a},i?1:.04+Ke*4)},Ms=(l,e,t,n=!",
+   "replace": ",-.3,.3)*a},i?1:window.PSX.smooth(.04+Ke*4))},Ms=(l,e,t,n=!"
+  },
+  {
+   "find": "me.Spine);let c=.05;r&&zt(r,{x:ae(e",
+   "replace": "me.Spine);let c=window.PSX.bodyGain();r&&zt(r,{x:ae(e"
+  },
+  {
+   "find": "*2,-.3,.3)},i?1:.04+Ke*2),u&&zt(u,{x:ae(",
+   "replace": "*2,-.3,.3)},i?1:window.PSX.smooth(.04+Ke*2)),u&&zt(u,{x:ae("
+  },
+  {
+   "find": "*2,-.1,.1)},i?1:.04+Ke*2),o&&zt(o,{x:ae(",
+   "replace": "*2,-.1,.1)},i?1:window.PSX.smooth(.04+Ke*2)),o&&zt(o,{x:ae("
+  },
+  {
+   "find": "*2,-.3,.3)},i?1:.04+Ke*2)},Ps=(l,e,t=!1)",
+   "replace": "*2,-.3,.3)},i?1:window.PSX.smooth(.04+Ke*2))},Ps=(l,e,t=!1)"
+  },
+  {
+   "find": "pplyer.lookAt(u)},un=(l,e,t=\"Rig",
+   "replace": "pplyer.lookAt(u),window.PSX.face(l,e)},un=(l,e,t=\"Rig"
+  },
+  {
+   "find": "t\":n,r=i?-1:1,u=[\"Ring\",\"Index\",\"Little\",\"Thumb\",\"Middle\"],c=[\"Proximal\",\"",
+   "replace": "t\":n,r=i?-1:1,u=window.PSX.fingers(),c=[\"Proximal\",\""
+  },
+  {
+   "find": "ance\",antialias:!0,stencil:!0,alph",
+   "replace": "ance\",antialias:window.PSX.aa(),stencil:!0,alph"
+  },
+  {
+   "find": "ow.innerHeight),p.setPixelRatio(Math.max(2,window.devicePixelRatio)),p.shadowMap.enabled=!0;let z=null;cons",
+   "replace": "ow.innerHeight),window.PSX.setupRenderer(p),p.shadowMap.enabled=window.PSX.shadows();let z=null;cons"
+  },
+  {
+   "find": "w.mapSize.width=2048,g.shadow.mapSize.height=2048;const y=new ba(",
+   "replace": "w.mapSize.width=window.PSX.shadowSize(),g.shadow.mapSize.height=window.PSX.shadowSize();const y=new ba("
+  },
+  {
+   "find": "=0;const _=()=>{fl.isOpen?(!i||i===\"close\")&&b():fl.isOpen||w()},b=()=>{mn(i);let g=n.w<600;fl.animate({action:\"close\",",
+   "replace": "=0;const _=()=>{window.PSX.overlayOpen(fl)?(!i||i===\"close\")&&b():w()},b=()=>{mn(i);let g=n.w<600;window.PSX.overlay(fl,{action:\"close\","
+  },
+  {
+   "find": ">{let g=n.w<600;fl.animate({action:\"open\",a",
+   "replace": ">{let g=n.w<600;window.PSX.overlay(fl,{action:\"open\",a"
+  },
+  {
+   "find": "0);return}mn(p),fl.animate({action:\"close\",",
+   "replace": "0);return}mn(p),window.PSX.overlay(fl,{action:\"close\","
+  }
+ ]
+}

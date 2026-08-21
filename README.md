@@ -160,6 +160,45 @@ reason PSX mode looks right in the first place.
 Shadows and the Mediapipe options are read once at startup, so those apply on
 reload; the rate caps take effect immediately.
 
+## Keeping the hooks alive
+
+The PSX layer only runs because a call to it was written into ~26 places in the
+minified bundle. Those edits are invisible once committed and **do not survive
+the bundle being regenerated** — and this project syncs with Glitch, so that
+happens. When it does, `psx.js` still loads, still builds its panels, and
+silently does nothing at all, because nothing calls it.
+
+So the edits are not kept in anyone's memory:
+
+```bash
+node tools/patch.mjs           # apply; safe to re-run, applied patches are skipped
+node tools/patch.mjs --check   # report status, exit 1 if any are missing
+```
+
+`tools/psx-patches.json` holds every call site as a find/replace pair. The tool
+locates the bundle through `docs/index.html` rather than by name, so a rebuild
+that changes the content hash still resolves, and it refuses to write if a call
+site is missing or ambiguous rather than guessing.
+
+From the running app, **Check bundle hooks** in the PSX Hands card (or
+`PSX.verify()`) counts the call sites in the bundle the browser actually
+loaded and names the missing ones.
+
+### If psx.js does not load
+
+Those ~26 call sites are unguarded and on the hot path — the render loop, the
+bone rig, the tracking loop. A 404 or a parse error in `psx.js` would mean a
+`TypeError` per frame and a dead app. So `docs/index.html` defines
+`window.PSX` inline first, with every hook returning exactly what the stock code
+did inline; `psx.js` replaces it wholesale when it loads. If it never does, the
+app runs as upstream instead of breaking.
+
+Settings are validated on the way back out of `localStorage` for the same
+reason: several of them reach WebGL directly, and a `pixelRatio` of `0` or a
+`shadowSize` of `"large"` is a black screen with no way back but devtools.
+Anything that does not fit its range or enum falls back to the default, and
+**Reset PSX settings** clears the lot.
+
 ## Controls
 
 The layer injects its own cards into the app's existing tabs, reusing their markup
@@ -175,7 +214,7 @@ and scoped class names, so they look native. Controls are split by what they do:
 - **Emotion Detection** — Detect emotions, Signal range (`calibrated` / `auto` / `raw`), Strongest only, Speech first, Talking at, Signal gain, Angry at, Sorrow at, Smile at, Smile drives (`fun` / `joy` / `fun + joy`), live readout, Calibrate expressions and Reset auto range
 - **Motion Calibration** — Motion calibration, Head / neck gain, Torso gain, Damping
 - **Performance** — Performance caps, Tracking rate, Render rate, Realtime shadows, Shadow resolution, Iris / lip refinement, Lite pose model
-- **PSX Hands** — Driven fingers (`all fingers` / `thumb only` / `none`) + a diagnostics dump button
+- **PSX Hands** — Driven fingers (`all fingers` / `thumb only` / `none`), Log diagnostics to console, Check bundle hooks, Reset PSX settings
 
 Every switch is **off by default**, and with it off the matching hooks fall back
 to stock behaviour. Anything the app reads only at startup — PSX mode, MSAA,

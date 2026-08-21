@@ -205,6 +205,39 @@
     'https://www.googletagmanager.com/gtm.js?id='+i+dl;f.parentNode.insertBefore(j,f);
     })(window,document,'script','dataLayer','GTM-5V3VF28');</script>
     <!-- End Google Tag Manager -->
+    <!--
+      The bundle calls window.PSX.* at ~26 patched call sites, unguarded and on
+      the hot path - the render loop, the bone rig, the tracking loop. If psx.js
+      fails to load or throws while parsing, every one of those becomes a
+      TypeError per frame and the app is simply dead.
+
+      So the hooks are defined here first, returning exactly what the stock code
+      used to do inline. psx.js replaces window.PSX wholesale when it loads; if
+      it never does, the app runs as upstream instead of breaking.
+    -->
+    <script>
+      window.PSX = {
+        setupRenderer: function (r) { r.setPixelRatio(Math.max(2, window.devicePixelRatio)); return r; },
+        aa: function () { return true; },
+        smaa: function () { return true; },
+        fingers: function () { return ['Ring', 'Index', 'Little', 'Thumb', 'Middle']; },
+        onModel: function (vrm) { return vrm; },
+        tick: function () {},
+        face: function () {},
+        headGain: function () { return 1; },
+        bodyGain: function () { return 0.05; },
+        smooth: function (t) { return t; },
+        frame: function () { return true; },
+        nextTrack: function (fn) { return requestAnimationFrame(fn); },
+        mpOptions: function (o) { return o; },
+        shadows: function () { return true; },
+        shadowSize: function () { return 2048; },
+        // stock behaviour, dropped requests and all - the queueing fix lives in psx.js
+        overlay: function (inst, opts) { if (inst) inst.animate(opts); },
+        overlayOpen: function (inst) { return !!(inst && inst.isOpen); },
+        stub: true
+      };
+    </script>
     <!-- PSX / low-poly compatibility layer. Must load before the bundle. -->
     <script src="./psx.js"></script>
     <script type="module" crossorigin src="./assets/index.e2bec78d.js"></script>
