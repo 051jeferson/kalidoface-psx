@@ -1529,13 +1529,31 @@
     injectInto(settingsContainer(), buildSettings, true);
   }
 
-  function ownMutation(m) {
-    var n = m.target;
+  function isOurs(n) {
     while (n) {
       if (n.classList && n.classList.contains('psx-injected')) return true;
       n = n.parentNode;
     }
     return false;
+  }
+
+  function allOurs(list) {
+    for (var i = 0; i < list.length; i++) {
+      if (!isOurs(list[i])) return false;
+    }
+    return true;
+  }
+
+  // A mutation is ours if it happened inside one of our cards, or if it *is* one
+  // of our cards arriving or leaving - appending a card targets the container,
+  // which is the app's, so matching on the target alone would let every
+  // injection schedule another pass.
+  function ownMutation(m) {
+    if (isOurs(m.target)) return true;
+    var added = m.addedNodes || [];
+    var removed = m.removedNodes || [];
+    if (!added.length && !removed.length) return false;
+    return allOurs(added) && allOurs(removed);
   }
 
   function startObserver() {
