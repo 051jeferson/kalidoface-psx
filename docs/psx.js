@@ -786,14 +786,18 @@
     { key: 'up',    title: 'Raise your brows',  hint: 'Surprised - lift them as high as you can' },
     { key: 'smile', title: 'Smile wide',        hint: 'Big smile, and hold it' }
   ];
-  // Long enough to read the prompt, get the face there, and hold it still.
-  var CAL_LEAD = 2600;  // ms to get into the pose
-  var CAL_HOLD = 2600;  // ms of sampling
+  // No countdown to race. Each step waits for the person to say they are in
+  // the pose, then samples briefly while they hold it - which is the whole
+  // reason a guided calibration beats a continuous one, and it only works if
+  // they are actually in the pose when it reads.
+  var CAL_HOLD = 900;   // ms of sampling once they confirm
   var calRun = null;
   var calEl = null;
   var calBtn = null;
   var calMotionEl = null;
   var calMotionBtn = null;
+  var calCancelBtn = null;
+  var calMotionCancelBtn = null;
 
   function stepAccum() {
     return {
@@ -805,7 +809,17 @@
   function steps() { return calRun.kind === 'motion' ? MOTION_STEPS : CAL_STEPS; }
 
   function begin(kind) {
-    calRun = { kind: kind, i: 0, phase: 'lead', until: now() + CAL_LEAD, acc: stepAccum(), out: {} };
+    calRun = { kind: kind, i: 0, phase: 'wait', until: 0, acc: stepAccum(), out: {} };
+    paintCalibration(0);
+    syncCalUi();
+  }
+
+  // Called from the button or the keyboard: the person is in the pose, read it.
+  function captureStep() {
+    if (!calRun || calRun.phase !== 'wait') return;
+    calRun.phase = 'hold';
+    calRun.until = now() + CAL_HOLD;
+    calRun.acc = stepAccum();
     calTick();
     syncCalUi();
   }
@@ -820,24 +834,27 @@
     syncCalUi();
   }
 
-  // Time advances here rather than in the face hook, so a step with no face
-  // tracked still times out instead of hanging on the prompt forever.
+  // Only runs while a step is being sampled; waiting for the person costs
+  // nothing. Time advances here rather than in the face hook, so a capture with
+  // no face tracked still ends instead of hanging.
   function calTick() {
-    if (!calRun) return;
-    requestAnimationFrame(calTick);
+    if (!calRun || calRun.phase !== 'hold') return;
     var t = now();
     if (t >= calRun.until) { advanceCalibration(); return; }
+    requestAnimationFrame(calTick);
     paintCalibration(Math.max(0, calRun.until - t));
+  }
+
+  function nextStep(total, finish) {
+    calRun.i++;
+    if (calRun.i >= total) { finish(); return; }
+    calRun.phase = 'wait';
+    paintCalibration(0);
+    syncCalUi();
   }
 
   function advanceCalibration() {
     var st = steps()[calRun.i];
-    if (calRun.phase === 'lead') {
-      calRun.phase = 'hold';
-      calRun.until = now() + CAL_HOLD;
-      calRun.acc = stepAccum();
-      return;
-    }
     var a = calRun.acc;
     if (!a.n) {
       stopCalibration(T('No face was tracked during') + ' "' + T(st.title) + '". ' +
@@ -853,10 +870,7 @@
         // against the resting head recorded in step one
         calRun.out[st.key] = (st.key === 'left' || st.key === 'right') ? a.yDev : a.xDev;
       }
-      calRun.i++;
-      if (calRun.i >= MOTION_STEPS.length) { finishMotion(); return; }
-      calRun.phase = 'lead';
-      calRun.until = now() + CAL_LEAD;
+      nextStep(MOTION_STEPS.length, finishMotion);
       return;
     }
     if (st.key === 'rest') {
@@ -869,10 +883,7 @@
     } else if (st.key === 'smile') {
       calRun.out.smileMax = a.smileMax;
     }
-    calRun.i++;
-    if (calRun.i >= CAL_STEPS.length) { finishCalibration(); return; }
-    calRun.phase = 'lead';
-    calRun.until = now() + CAL_LEAD;
+    nextStep(CAL_STEPS.length, finishCalibration);
   }
 
   // The neck rig clamps its rotation to +/-0.8, so mapping the widest turn the
@@ -935,13 +946,14 @@
 
   function paintCalibration(left) {
     var calEl = calTarget();
-    if (!calEl) return;
+    if (!calEl || !calRun) return;
     var st = steps()[calRun.i];
-    var lead = calRun.phase === 'lead';
     setText(calEl,
       (calRun.i + 1) + '/' + steps().length + '  ' + T(st.title) +
       NL + T(st.hint) +
-      NL + (lead ? T('getReady') : T('holdIt')) + '  ' + Math.ceil(left / 1000) + 's');
+      NL + (calRun.phase === 'wait'
+        ? T('Hold the pose, then press Space. Esc cancels.')
+        : T('Reading, keep holding...')));
   }
 
   // Fed from the face hook, so it records whatever the tracker is actually
@@ -1235,6 +1247,11 @@
     'Cancel calibration': 'Cancelar calibracao',
     'Reset auto range': 'Zerar faixa automatica',
     'Calibrate motion': 'Calibrar movimento',
+    'Capture (Space)': 'Capturar (Espaco)',
+    'Reading...': 'Lendo...',
+    'Hold the pose, then press Space. Esc cancels.':
+      'Faca a pose, segure, e aperte Espaco. Esc cancela.',
+    'Reading, keep holding...': 'Lendo, continue segurando...',
     'Face the camera': 'Encare a camera',
     'Head straight, shoulders square': 'Cabeca reta, ombros alinhados',
     'Turn your head left': 'Vire a cabeca para a esquerda',
@@ -2061,10 +2078,18 @@
     calBtn = el('button', 'trigger ' + STG, '');
     calBtn.style.marginTop = '12px';
     calBtn.addEventListener('click', function () {
-      if (calRun) stopCalibration(T('Calibration cancelled.'));
-      else startCalibration();
+      if (!calRun) startCalibration();
+      else if (calRun.kind === 'face') captureStep();
     });
     em.appendChild(calBtn);
+
+    calCancelBtn = el('button', 'trigger reset ' + STG, T('Cancel calibration'));
+    calCancelBtn.style.marginTop = '8px';
+    calCancelBtn.style.display = 'none';
+    calCancelBtn.addEventListener('click', function () {
+      stopCalibration(T('Calibration cancelled.'));
+    });
+    em.appendChild(calCancelBtn);
 
     var recal = el('button', 'trigger ' + STG, T('Reset auto range'));
     recal.style.marginTop = '8px';
@@ -2092,10 +2117,18 @@
     calMotionBtn = el('button', 'trigger ' + STG, '');
     calMotionBtn.style.marginTop = '12px';
     calMotionBtn.addEventListener('click', function () {
-      if (calRun) stopCalibration(T('Calibration cancelled.'));
-      else startMotionCalibration();
+      if (!calRun) startMotionCalibration();
+      else if (calRun.kind === 'motion') captureStep();
     });
     mo.appendChild(calMotionBtn);
+
+    calMotionCancelBtn = el('button', 'trigger reset ' + STG, T('Cancel calibration'));
+    calMotionCancelBtn.style.marginTop = '8px';
+    calMotionCancelBtn.style.display = 'none';
+    calMotionCancelBtn.addEventListener('click', function () {
+      stopCalibration(T('Calibration cancelled.'));
+    });
+    mo.appendChild(calMotionCancelBtn);
     frag.appendChild(mo);
 
     // --- performance ---------------------------------------------------
@@ -2139,14 +2172,23 @@
     return frag;
   }
 
+  // The primary button doubles as the step advance, so the whole flow works
+  // with the mouse alone; Space and Esc are the shortcut, not the only way in.
+  function calLabel(mine, idle) {
+    if (!mine) return idle;
+    return calRun.phase === 'wait' ? T('Capture (Space)') : T('Reading...');
+  }
+
   function syncCalUi() {
     var busy = !!calRun;
     if (calBtn) {
-      setText(calBtn, busy && calRun.kind === 'face' ? T('Cancel calibration') : T('Calibrate expressions'));
+      setText(calBtn, calLabel(busy && calRun.kind === 'face', T('Calibrate expressions')));
     }
     if (calMotionBtn) {
-      setText(calMotionBtn, busy && calRun.kind === 'motion' ? T('Cancel calibration') : T('Calibrate motion'));
+      setText(calMotionBtn, calLabel(busy && calRun.kind === 'motion', T('Calibrate motion')));
     }
+    if (calCancelBtn) calCancelBtn.style.display = busy ? '' : 'none';
+    if (calMotionCancelBtn) calMotionCancelBtn.style.display = busy ? '' : 'none';
   }
 
   function syncControls() {
@@ -2218,6 +2260,7 @@
     });
     controls = [];
     calEl = calMotionEl = calBtn = calMotionBtn = readoutEl = null;
+    calCancelBtn = calMotionCancelBtn = null;
     lastInject = 0;
     translateTree(document.body || document.documentElement);
     tryInject();
@@ -2291,7 +2334,22 @@
     }
   }
 
+  function onCalKey(e) {
+    if (!calRun) return;
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      stopCalibration(T('Calibration cancelled.'));
+      return;
+    }
+    if (e.key === ' ' || e.key === 'Spacebar' || e.key === 'Enter') {
+      // or the page scrolls, or a focused button fires as well
+      e.preventDefault();
+      captureStep();
+    }
+  }
+
   function startObserver() {
+    document.addEventListener('keydown', onCalKey);
     var mo = new MutationObserver(function (list) {
       translateMutations(list);
       // our own cards mutate constantly (the live readout, the calibration

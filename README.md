@@ -103,8 +103,10 @@ unreachable and the emotion simply never fires. Three modes:
 
 **Calibrate expressions** runs a short guided pass, the way a game asks you to
 hold a stick at its extremes. It prompts for four poses — relax, furrow, raise,
-smile — with a get-ready countdown and about two seconds of sampling each, then
-records what your face actually reached and switches the mode to `calibrated`.
+smile — and waits: get into the pose, hold it, then press **Space** (or click the
+button) and it reads for under a second. `Esc` cancels. Nothing is on a timer, so
+the reading always happens while you are actually in the pose. It then records
+what your face reached and switches the mode to `calibrated`.
 
 This beats `auto` because it records **a separate span per direction**. Most
 people furrow much further than they raise, and continuous auto-calibration has
@@ -159,7 +161,8 @@ snapping to it.
 
 **Calibrate motion** sets them for you, the same way the expression wizard does:
 it prompts you to face the camera, then turn left, turn right, look up and look
-down, and records how far your head actually travels. The neck rig clamps its
+down — same rhythm, press **Space** once you are there — and records how far your
+head actually travels. The neck rig clamps its
 rotation to ±0.8, so mapping your widest turn onto that number uses the whole
 available range without clipping — someone who barely moves gets a gain above 1,
 someone who moves a lot gets one below. The torso is driven by the same head
