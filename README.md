@@ -29,6 +29,8 @@ touches the app's own source tree (this repo only ships the built bundle).
 | `PSX.nextTrack(fn)` | Schedules the next Mediapipe inference |
 | `PSX.mpOptions(opts)` | Mediapipe model options, before `setOptions` |
 | `PSX.shadows()` / `PSX.shadowSize()` | Shadow map enable and resolution |
+| `PSX.overlay(inst, opts)` | Queued subnav background animation |
+| `PSX.overlayOpen(inst)` | The state that animation is heading to |
 
 ### Texture-atlas face expressions
 
@@ -61,6 +63,25 @@ its smile — drives **fun** and/or **joy**. Each has its own threshold, and
 **Strongest only** keeps a furrowed brow over a wide mouth from landing between
 two cells.
 
+**Auto-calibrate** is what makes this usable. Kalidokit's brow scalar only swings
+a few hundredths for most faces, so a raw threshold of `0.35` is unreachable and
+the emotion simply never fires. With it on, the layer learns where your brow
+rests and how far it actually travels, then reports the signal as a fraction of
+*your* range — a full grimace reads as `1.00` whatever its raw size. The resting
+value only drifts while your face is near rest, so holding an expression doesn't
+turn it into the new neutral and fade out. **Reset calibration** starts the
+learning over.
+
+**Speech first** fixes the other half. On a PSX atlas the vowels and the emotions
+are cells of the *same* face texture, so they cannot both show — an emotion that
+outweighs a vowel takes the whole face and the lip sync stops dead. With this on,
+the emotions stand down while a vowel is above **Talking at**, so the mouth keeps
+speaking and the expression returns when you stop.
+
+The card carries a **live readout** of the normalised `brow` and `smile` values
+and the emotion currently winning. Pull each face, watch the numbers, and set
+each threshold just under what you can actually reach.
+
 While this is on, the emotion presets belong to the PSX layer: it writes all
 four every frame, including the zeroes, so a stale upstream `joy` cannot outvote
 an exclusive pick. Point **Smile drives** at `joy` for the stock behaviour with
@@ -78,6 +99,24 @@ snapping to it.
 Emotion detection and motion calibration are independent of PSX mode — they are
 tracking fixes, not a render look — so each has its own switch and both default
 to stock behaviour.
+
+### Panel background
+
+The panel's dark backdrop is not a CSS background — it is an animated SVG shape
+that grows to cover the panel. Upstream drops any `animate()` call that arrives
+while an animation is already running, and only flips `isOpen` when one
+finishes, which is also what the caller consults to decide whether it needs to
+open anything.
+
+Click two tabs quickly and those two facts combine badly: pick a new tab while
+the close animation is still playing, `isOpen` still reads `true`, so the caller
+decides nothing needs opening — and when the close lands, the shape is gone while
+the panel is open. The content then renders straight over the 3D canvas with
+nothing behind it, so the chroma key bleeds through.
+
+This fork routes the calls through `PSX.overlay`, which remembers the state each
+request is heading to and holds a request that arrives mid-animation instead of
+dropping it.
 
 ### Performance
 
@@ -114,7 +153,7 @@ and scoped class names, so they look native. Controls are split by what they do:
 **Settings tab** — per-model calibration, next to the app's own tracking options:
 
 - **Face Expressions** — Texture expressions, Snap to cell, Flip V axis, Trigger threshold, Release margin, Minimum hold, Mouth gain, Blink gain, Preview cell (force one expression for calibration)
-- **Emotion Detection** — Detect emotions, Strongest only, Brow gain, Angry at, Sorrow at, Smile at, Smile drives (`fun` / `joy` / `fun + joy`)
+- **Emotion Detection** — Detect emotions, Auto-calibrate, Strongest only, Speech first, Talking at, Signal gain, Angry at, Sorrow at, Smile at, Smile drives (`fun` / `joy` / `fun + joy`), live readout and Reset calibration
 - **Motion Calibration** — Motion calibration, Head / neck gain, Torso gain, Damping
 - **Performance** — Performance caps, Tracking rate, Render rate, Realtime shadows, Shadow resolution, Iris / lip refinement, Lite pose model
 - **PSX Hands** — Driven fingers (`all fingers` / `thumb only` / `none`) + a diagnostics dump button
@@ -133,7 +172,7 @@ Settings persist in `localStorage` under the key `kf3d.psx`.
 3. If the face chatters between two cells, raise **Release margin** or **Minimum hold**.
 4. If quiet talking doesn't register, raise **Mouth gain**; same for **Blink gain**.
 5. Hit **Log diagnostics to console** for the resolved materials, UV binds, current cell, and the last solved `brow` / `smile` values with the emotion weights they produced.
-6. For emotions, watch those logged values while you pull the face, then set **Angry at** / **Sorrow at** / **Smile at** just under what you can actually reach. Raise **Brow gain** if the brow signal never gets far from 0.
+6. For emotions, leave **Auto-calibrate** on, pull each face, and watch the card's live readout. Set **Angry at** / **Sorrow at** / **Smile at** just under the values you can actually reach. If an expression stops your lip sync, that is what **Speech first** is for.
 
 ---
 

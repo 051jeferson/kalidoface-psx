@@ -19,6 +19,8 @@
  *   PSX.nextTrack(fn)            - schedules the next Mediapipe inference
  *   PSX.mpOptions(opts)          - Mediapipe model options, before setOptions
  *   PSX.shadows() / shadowSize() - shadow map enable and resolution
+ *   PSX.overlay(inst, opts)      - queued subnav background animation
+ *   PSX.overlayOpen(inst)        - the state that animation is heading to
  *
  * The controls are injected into the app's own Effects and Settings tabs and
  * reuse their markup and scoped class names, so they look like the rest of the
@@ -70,13 +72,24 @@
     // Drive angry / sorrow / fun from the solved face. Off = stock, which
     // never writes those presets at all, so their atlas cells can never win.
     emotions: false,
-    // multiplier on Kalidokit's brow scalar, before the thresholds below
+    // Normalise the brow and the smile against the range this face actually
+    // produces, instead of against a fixed span. Kalidokit's brow scalar only
+    // swings a few hundredths for most people, so a raw threshold of 0.35 is
+    // unreachable and the emotion never fires.
+    autoCalibrate: true,
+    // multiplier applied after normalisation
     browGain: 1,
     // how far the brow has to travel before it reads as that emotion
     angryAt: 0.35,
     sorrowAt: 0.35,
     // how wide the mouth corners have to go before it reads as a smile
     smileAt: 0.3,
+    // Let the mouth win while it is talking. On a PSX atlas the vowels and the
+    // emotions are cells of the same face texture, so they cannot both show -
+    // without this an emotion pins the face and the lip sync stops.
+    speechFirst: true,
+    // how loud a vowel has to be to count as talking
+    speechAt: 0.2,
     // which preset a smile drives: 'fun' | 'joy' | 'both'
     smileKey: 'fun',
     // let only the strongest emotion through
@@ -490,14 +503,76 @@
     return clamp((v - at) / (1 - at), 0, 1);
   }
 
+  // Kalidokit's brow scalar only swings a few hundredths for most faces, and
+  // mouth.x sits wherever that mouth happens to rest, so fixed thresholds are
+  // unreachable for some people and permanently tripped for others. Learn the
+  // resting value and the biggest deviation from it, then report the signal as
+  // a fraction of that - a full grimace becomes 1 whatever its raw size.
+  //
+  // The baseline creeps toward wherever the face spends its time; the span
+  // widens instantly on a new extreme and decays slowly, so a single big
+  // expression sets the scale but the range still follows the face over time.
+  function tracker() {
+    return { base: null, span: 0 };
+  }
+
+  var browTrack = tracker();
+  var smileTrack = tracker();
+
+  function normalize(tr, raw, floor) {
+    if (tr.base === null) tr.base = raw;
+    var dev = raw - tr.base;
+    var mag = Math.abs(dev);
+    if (mag > tr.span) tr.span = mag; else tr.span *= 0.99985;
+    var span = Math.max(tr.span, floor);
+    // The resting value only follows the face while the face is near rest.
+    // Letting it drift during an expression would make a held grimace the new
+    // neutral, and the emotion would fade out while you were still pulling it.
+    if (mag < span * 0.35) tr.base += dev * 0.002;
+    return dev / span;
+  }
+
+  // Filled in when the Emotion card is built. Calibrating by watching numbers
+  // move is the whole point, so this updates every tracked frame.
+  var readoutEl = null;
+
+  function paintReadout() {
+    if (!readoutEl || !readoutEl.isConnected || !lastFace) return;
+    var top = null;
+    for (var i = 0; i < EMOTION_KEYS.length; i++) {
+      var k = EMOTION_KEYS[i];
+      if (lastFace.out[k] > 0 && (!top || lastFace.out[k] > lastFace.out[top])) top = k;
+    }
+    readoutEl.textContent =
+      'brow ' + lastFace.brow.toFixed(2) +
+      '  ·  smile ' + lastFace.smile.toFixed(2) +
+      '  ·  ' + (top ? top + ' ' + lastFace.out[top].toFixed(2) : 'neutral');
+  }
+
+  function resetCalibration() {
+    browTrack = tracker();
+    smileTrack = tracker();
+    log('calibration reset');
+  }
+
   function driveEmotions(vrm, rig) {
     if (!cfg.emotions) return;
     var proxy = vrm && vrm.blendShapeProxy;
     if (!proxy || !rig) return;
 
-    var brow = clamp(num(rig.brow) * cfg.browGain, -1, 1);
-    // same normalisation the app uses for its own smile: 0.4 -> 0.9 maps to 0 -> 1
-    var smile = clamp((num(rig.mouth && rig.mouth.x) - 0.4) / 0.5, 0, 1);
+    var rawBrow = num(rig.brow);
+    var rawSmile = num(rig.mouth && rig.mouth.x);
+    var brow, smile;
+    if (cfg.autoCalibrate) {
+      brow = clamp(normalize(browTrack, rawBrow, 0.01) * cfg.browGain, -1, 1);
+      // a smile only ever opens the mouth wider than rest, so the closing half
+      // of the range is not a smile
+      smile = clamp(normalize(smileTrack, rawSmile, 0.02) * cfg.browGain, 0, 1);
+    } else {
+      brow = clamp(rawBrow * cfg.browGain, -1, 1);
+      // the same normalisation the app uses: 0.4 -> 0.9 maps to 0 -> 1
+      smile = clamp((rawSmile - 0.4) / 0.5, 0, 1);
+    }
 
     var out = {
       angry: ramp(-brow, cfg.angryAt),
@@ -523,7 +598,16 @@
       }
     }
 
-    lastFace = { brow: brow, smile: smile, out: out };
+    // On a PSX atlas the vowels and the emotions are cells of the same face
+    // texture, so whichever wins takes the whole face. An emotion that outweighs
+    // a vowel therefore stops the lip sync dead. Let the mouth speak first: while
+    // a vowel is loud enough to count as talking, the emotions stand down.
+    if (cfg.speechFirst && mouthLevel(proxy) >= cfg.speechAt) {
+      for (var q = 0; q < EMOTION_KEYS.length; q++) out[EMOTION_KEYS[q]] = 0;
+    }
+
+    lastFace = { brow: brow, smile: smile, out: out, raw: { brow: rawBrow, smile: rawSmile } };
+    paintReadout();
 
     // Write all four, including the ones we resolved to 0. The app writes Joy
     // itself from "Smile Detection [Beta]", and leaving that in place would let
@@ -533,6 +617,18 @@
     for (var n = 0; n < EMOTION_KEYS.length; n++) {
       try { proxy.setValue(EMOTION_KEYS[n], out[EMOTION_KEYS[n]]); } catch (e) {}
     }
+  }
+
+  // The vowels the app writes are the only speech signal we get; take the
+  // loudest of them as "is this face talking right now".
+  function mouthLevel(proxy) {
+    var top = 0;
+    for (var k in MOUTH_KEYS) {
+      var w = 0;
+      try { w = proxy.getValue(k) || 0; } catch (e) { w = 0; }
+      if (w > top) top = w;
+    }
+    return top;
   }
 
   // ----------------------------------------------------------- motion gains
@@ -550,6 +646,60 @@
     if (!cfg.motion || !cfg.damping) return t;
     // never return 0, or the bone would freeze instead of easing
     return Math.max(t * (1 - cfg.damping), 0.002);
+  }
+
+  // ------------------------------------------------------- subnav overlay
+  //
+  // The panel's dark background is not a CSS background - it is an animated SVG
+  // shape that grows to cover the panel. Its component drops any animate() call
+  // that arrives while an animation is already running, and only flips `isOpen`
+  // when one finishes. The caller then asks `isOpen` whether it needs to open.
+  //
+  // Click two tabs quickly and those two facts combine badly: pick a new tab
+  // while the close animation is still playing, `isOpen` still reads true, so
+  // the caller decides nothing needs opening - and when the close lands, the
+  // shape is gone while the panel is open. The panel's content renders over the
+  // 3D canvas with no background behind it, which is the chroma key bleeding
+  // through.
+  //
+  // So: remember the state each request is heading to, and hold the request that
+  // arrived mid-animation instead of dropping it.
+
+  function overlayOpen(inst) {
+    if (!inst) return false;
+    return inst.__psxWant === undefined ? !!inst.isOpen : inst.__psxWant;
+  }
+
+  function overlay(inst, opts) {
+    if (!inst) return;
+    if (opts && (opts.action === 'open' || opts.action === 'close')) {
+      inst.__psxWant = opts.action === 'open';
+    }
+    if (inst.transition) {
+      // last request wins; anything older is already stale
+      inst.__psxQueued = opts;
+      watchOverlay(inst);
+      return;
+    }
+    inst.animate(opts);
+  }
+
+  // The component exposes `transition` but nothing to subscribe to, so poll it
+  // for the length of one animation rather than reaching into its internals.
+  function watchOverlay(inst) {
+    if (inst.__psxWatching) return;
+    inst.__psxWatching = true;
+    (function step() {
+      if (inst.transition) { requestAnimationFrame(step); return; }
+      inst.__psxWatching = false;
+      var q = inst.__psxQueued;
+      if (!q) return;
+      inst.__psxQueued = null;
+      // it may have landed where we wanted anyway
+      var open = q.action === 'open';
+      if ((q.action === 'open' || q.action === 'close') && !!inst.isOpen === open) return;
+      inst.animate(q);
+    })();
   }
 
   // ------------------------------------------------------------ performance
@@ -1060,19 +1210,34 @@
     var emNote = el('div', STG,
       'The app only tracks blinks, the five vowels and a smile. Angry, sorrow ' +
       'and fun are never written at all - this derives them from the brow and ' +
-      'mouth so those cells can fire.');
+      'mouth so those cells can fire. Pull each face and watch the readout to ' +
+      'set the thresholds.');
     emNote.style.cssText = 'width:100%;opacity:.5;font-size:12px;margin:0 0 4px;text-align:left';
     em.appendChild(emNote);
     addToggle(em, 'emotions', 'Detect emotions', STG);
+    addToggle(em, 'autoCalibrate', 'Auto-calibrate', STG);
     addToggle(em, 'exclusive', 'Strongest only', STG);
     addRule(em);
-    addRange(em, 'browGain', 'Brow gain', 0.25, 4, 0.05, function (v) { return v.toFixed(2) + 'x'; }, STG);
+    addToggle(em, 'speechFirst', 'Speech first', STG);
+    addRange(em, 'speechAt', 'Talking at', 0, 1, 0.01, function (v) { return v.toFixed(2); }, STG);
+    addRule(em);
+    addRange(em, 'browGain', 'Signal gain', 0.25, 4, 0.05, function (v) { return v.toFixed(2) + 'x'; }, STG);
     addRange(em, 'angryAt', 'Angry at', 0, 0.95, 0.01, function (v) { return v.toFixed(2); }, STG);
     addRange(em, 'sorrowAt', 'Sorrow at', 0, 0.95, 0.01, function (v) { return v.toFixed(2); }, STG);
     addRange(em, 'smileAt', 'Smile at', 0, 0.95, 0.01, function (v) { return v.toFixed(2); }, STG);
     addRule(em);
     addChoice(em, 'smileKey', 'Smile drives', ['fun', 'joy', 'both'],
       ['fun', 'joy', 'fun + joy'], STG);
+    addRule(em);
+
+    readoutEl = el('div', STG, 'waiting for a tracked face...');
+    readoutEl.style.cssText = 'width:100%;font-size:12px;opacity:.75;text-align:left;' +
+      'font-variant-numeric:tabular-nums;font-feature-settings:"tnum"';
+    em.appendChild(readoutEl);
+    var recal = el('button', 'trigger ' + STG, 'Reset calibration');
+    recal.style.marginTop = '12px';
+    recal.addEventListener('click', function () { resetCalibration(); });
+    em.appendChild(recal);
     frag.appendChild(em);
 
     // --- motion --------------------------------------------------------
@@ -1252,6 +1417,9 @@
     nextTrack: nextTrack,
     mpOptions: mpOptions,
     shadows: shadows,
-    shadowSize: shadowSize
+    shadowSize: shadowSize,
+
+    overlay: overlay,
+    overlayOpen: overlayOpen
   };
 })();
