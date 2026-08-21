@@ -49,9 +49,6 @@
     smaa: false,
     // nearest-neighbour texture sampling, no mipmaps, no anisotropy
     nearestTextures: true,
-    // hide the app's own options that PSX mode replaces or contradicts, and
-    // pin them to the value that keeps them out of the way
-    stripOptions: true,
     // 'en' | 'pt' - the panel language, and the app's own labels with it
     lang: 'en',
 
@@ -1169,32 +1166,26 @@
     }
   }
 
-  function show(node, visible) {
-    if (!node) return;
-    if (visible) {
-      if (node.__psxHidden) {
-        node.style.display = node.__psxDisplay || '';
-        node.__psxHidden = false;
-      }
-    } else if (!node.__psxHidden) {
-      node.__psxDisplay = node.style.display;
+  function hide(node) {
+    if (node && !node.__psxHidden) {
       node.style.display = 'none';
       node.__psxHidden = true;
     }
   }
 
+  // Not conditional on PSX mode, and not a setting. This fork is for PSX-era
+  // models; an option to bring back a control that costs performance and fights
+  // a PSX one would only be an option to make it worse.
   function applyStrip() {
-    var strip = on() && cfg.stripOptions;
     for (var i = 0; i < STRIP.length; i++) {
       var t = stripTarget(STRIP[i]);
       if (!t) continue;
-      if (strip) pin(t.input, STRIP[i].pin);
-      show(t.card, !strip);
+      pin(t.input, STRIP[i].pin);
+      hide(t.card);
     }
-    // Realtime shadows are off for good in this fork, so these two do nothing
-    // at all any more.
+    // Realtime shadows are off for good, so these two do nothing at all now.
     var sh = document.querySelector('input[name="shadowStrength"]');
-    if (sh) show(sh.closest('.setting'), !strip);
+    if (sh) hide(sh.closest('.setting'));
   }
 
 
@@ -1211,7 +1202,6 @@
     // --- Effects / render ---
     'PSX Render': 'Render PSX',
     'PSX mode': 'Modo PSX',
-    'Hide replaced options': 'Ocultar opcoes substituidas',
     'Nearest textures': 'Texturas nearest',
     'Render scale': 'Escala de render',
     'Vertex snapping': 'Snap de vertices',
@@ -2014,7 +2004,6 @@
 
     var r = card(T('PSX Render'));
     addToggle(r, 'enabled', T('PSX mode'));
-    addToggle(r, 'stripOptions', T('Hide replaced options'));
     addToggle(r, 'nearestTextures', T('Nearest textures'));
     addToggle(r, 'antialias', T('MSAA'));
     addToggle(r, 'smaa', T('SMAA'));

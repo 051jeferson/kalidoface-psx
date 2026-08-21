@@ -202,6 +202,7 @@ models and nothing else:
 | **Realtime shadows** | Two shadow-casting lights at 2048×2048, so two extra full-scene depth passes every frame and ~33 MB of VRAM. The PS1 had no realtime shadows at all — it stamped a blob on the floor. `PSX.shadows()` returns `false`, and upstream's Shadow Strength / Shadow Blur sliders are hidden with it |
 | **Eye aim** | `PSX.gaze()` replaces `lookAt.applyer.lookAt()` and does nothing. A PSX face keeps its eyes on the texture atlas: it blinks by swapping a cell, it does not swivel. Aiming eye bones at a solved pupil is wasted work that reads wrong |
 | **Iris / lip refinement** | `refineFaceLandmarks` is forced off. It is a whole extra network per frame, placing iris landmarks and denser lip contours — detail a texture atlas cannot show, and its main consumer was the eye aim above |
+| **Upstream's replaced controls** | Pixelate, Outline, Water Animation, Light Cube Experiment and Smile Detection are hidden and pinned unconditionally — see below. An option to restore a control that costs performance and fights a PSX one would only be an option to make it worse |
 
 Stack these with **Render scale** in the Effects tab: at `0.5x` the renderer
 draws a quarter of the pixels, which is the single biggest GPU win and the
