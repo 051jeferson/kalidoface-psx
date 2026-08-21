@@ -72,11 +72,17 @@
     // Drive angry / sorrow / fun from the solved face. Off = stock, which
     // never writes those presets at all, so their atlas cells can never win.
     emotions: false,
-    // Normalise the brow and the smile against the range this face actually
-    // produces, instead of against a fixed span. Kalidokit's brow scalar only
-    // swings a few hundredths for most people, so a raw threshold of 0.35 is
-    // unreachable and the emotion never fires.
-    autoCalibrate: true,
+    // Where the 0..1 signal range comes from:
+    //   'calibrated' - the guided calibration below. Records what each face
+    //                  actually reaches, so a brow that furrows far but barely
+    //                  raises gets a different span in each direction.
+    //   'auto'       - learn the range continuously while tracking
+    //   'raw'        - Kalidokit's numbers untouched. Almost never usable:
+    //                  the brow scalar only swings a few hundredths, so a
+    //                  threshold of 0.35 can never be reached.
+    signal: 'auto',
+    // recorded by the guided calibration; null until it has been run
+    cal: null,
     // multiplier applied after normalisation
     browGain: 1,
     // how far the brow has to travel before it reads as that emotion
@@ -536,6 +542,15 @@
   // move is the whole point, so this updates every tracked frame.
   var readoutEl = null;
 
+  function setText(node, text) {
+    if (!node.__psxText) {
+      node.textContent = '';
+      node.__psxText = document.createTextNode('');
+      node.appendChild(node.__psxText);
+    }
+    if (node.__psxText.nodeValue !== text) node.__psxText.nodeValue = text;
+  }
+
   function paintReadout() {
     if (!readoutEl || !readoutEl.isConnected || !lastFace) return;
     var top = null;
@@ -543,27 +558,171 @@
       var k = EMOTION_KEYS[i];
       if (lastFace.out[k] > 0 && (!top || lastFace.out[k] > lastFace.out[top])) top = k;
     }
-    readoutEl.textContent =
+    setText(readoutEl,
       'brow ' + lastFace.brow.toFixed(2) +
       '  ·  smile ' + lastFace.smile.toFixed(2) +
-      '  ·  ' + (top ? top + ' ' + lastFace.out[top].toFixed(2) : 'neutral');
+      '  ·  ' + (top ? top + ' ' + lastFace.out[top].toFixed(2) : 'neutral'));
   }
 
   function resetCalibration() {
     browTrack = tracker();
     smileTrack = tracker();
-    log('calibration reset');
+    log('auto calibration reset');
   }
 
-  function driveEmotions(vrm, rig) {
+  // ------------------------------------------------------ guided calibration
+  //
+  // Continuous auto-calibration has to guess which way the face is going and
+  // treats both brow directions as one span. Most people furrow much further
+  // than they raise, so asking for each pose in turn - the way a game asks you
+  // to hold a stick at its extremes - records a separate span per direction and
+  // gives a much better mapping.
+
+  var CAL_STEPS = [
+    { key: 'rest',  title: 'Relax your face',   hint: 'Neutral, looking at the camera' },
+    { key: 'down',  title: 'Furrow your brows', hint: 'Angry - pull them down and together' },
+    { key: 'up',    title: 'Raise your brows',  hint: 'Surprised - lift them as high as you can' },
+    { key: 'smile', title: 'Smile wide',        hint: 'Big smile, and hold it' }
+  ];
+  var CAL_LEAD = 1200;  // ms to get into the pose
+  var CAL_HOLD = 1800;  // ms of sampling
+  var NL = String.fromCharCode(10);
+  var calRun = null;
+  var calEl = null;
+  var calBtn = null;
+
+  function stepAccum() {
+    return { n: 0, browSum: 0, browMin: Infinity, browMax: -Infinity, smileSum: 0, smileMax: -Infinity };
+  }
+
+  function startCalibration() {
+    calRun = { i: 0, phase: 'lead', until: now() + CAL_LEAD, acc: stepAccum(), out: {}, note: '' };
+    calTick();
+    syncCalUi();
+  }
+
+  function stopCalibration(note) {
+    calRun = null;
+    if (calEl) setText(calEl, note || '');
+    syncCalUi();
+  }
+
+  // Time advances here rather than in the face hook, so a step with no face
+  // tracked still times out instead of hanging on the prompt forever.
+  function calTick() {
+    if (!calRun) return;
+    requestAnimationFrame(calTick);
+    var t = now();
+    if (t >= calRun.until) { advanceCalibration(); return; }
+    paintCalibration(Math.max(0, calRun.until - t));
+  }
+
+  function advanceCalibration() {
+    var st = CAL_STEPS[calRun.i];
+    if (calRun.phase === 'lead') {
+      calRun.phase = 'hold';
+      calRun.until = now() + CAL_HOLD;
+      calRun.acc = stepAccum();
+      return;
+    }
+    var a = calRun.acc;
+    if (!a.n) {
+      stopCalibration('No face was tracked during "' + st.title + '". Start face tracking and try again.');
+      return;
+    }
+    if (st.key === 'rest') {
+      calRun.out.browRest = a.browSum / a.n;
+      calRun.out.smileRest = a.smileSum / a.n;
+    } else if (st.key === 'down') {
+      calRun.out.browDown = a.browMin;
+    } else if (st.key === 'up') {
+      calRun.out.browUp = a.browMax;
+    } else if (st.key === 'smile') {
+      calRun.out.smileMax = a.smileMax;
+    }
+    calRun.i++;
+    if (calRun.i >= CAL_STEPS.length) { finishCalibration(); return; }
+    calRun.phase = 'lead';
+    calRun.until = now() + CAL_LEAD;
+  }
+
+  function finishCalibration() {
+    var c = calRun.out;
+    var down = Math.abs(c.browDown - c.browRest);
+    var up = Math.abs(c.browUp - c.browRest);
+    var sm = c.smileMax - c.smileRest;
+    var weak = [];
+    if (down < 0.004) weak.push('furrow');
+    if (up < 0.004) weak.push('raise');
+    if (sm < 0.01) weak.push('smile');
+
+    cfg.cal = c;
+    cfg.signal = 'calibrated';
+    save();
+    syncControls();
+
+    var msg = 'Calibrated - furrow ' + down.toFixed(3) +
+      ', raise ' + up.toFixed(3) + ', smile ' + sm.toFixed(3) + '.';
+    if (weak.length) {
+      msg += ' The ' + weak.join(' and ') + ' barely moved; redo that step with a ' +
+        'bigger expression if it does not trigger.';
+    }
+    log('calibration', c);
+    stopCalibration(msg);
+  }
+
+  function paintCalibration(left) {
+    if (!calEl) return;
+    var st = CAL_STEPS[calRun.i];
+    var lead = calRun.phase === 'lead';
+    setText(calEl,
+      (calRun.i + 1) + '/' + CAL_STEPS.length + '  ' + st.title +
+      '  ·  ' + (lead ? 'get ready' : 'hold') + ' ' + Math.ceil(left / 100) / 10 + 's' +
+      NL + st.hint);
+  }
+
+  // Fed from the face hook, so it records whatever the tracker is actually
+  // producing rather than the mapped value.
+  function sampleCalibration(rawBrow, rawSmile) {
+    if (!calRun || calRun.phase !== 'hold') return;
+    var a = calRun.acc;
+    a.n++;
+    a.browSum += rawBrow;
+    if (rawBrow < a.browMin) a.browMin = rawBrow;
+    if (rawBrow > a.browMax) a.browMax = rawBrow;
+    a.smileSum += rawSmile;
+    if (rawSmile > a.smileMax) a.smileMax = rawSmile;
+  }
+
+  // Each brow direction gets its own span, which is the whole point of asking
+  // for the poses separately.
+  function calibratedBrow(raw) {
+    var c = cfg.cal;
+    var dev = raw - c.browRest;
+    var span = dev < 0 ? Math.abs(c.browDown - c.browRest) : Math.abs(c.browUp - c.browRest);
+    return dev / Math.max(span, 0.004);
+  }
+
+  function calibratedSmile(raw) {
+    var c = cfg.cal;
+    return (raw - c.smileRest) / Math.max(c.smileMax - c.smileRest, 0.01);
+  }
+
+  function driveEmotions(vrm, rig, rawBrow, rawSmile) {
     if (!cfg.emotions) return;
     var proxy = vrm && vrm.blendShapeProxy;
     if (!proxy || !rig) return;
 
-    var rawBrow = num(rig.brow);
-    var rawSmile = num(rig.mouth && rig.mouth.x);
+    // a recorded calibration is the best mapping, but fall back rather than
+    // going dead if the mode is selected before it has been run
+    var mode = cfg.signal;
+    if (mode === 'calibrated' && !cfg.cal) mode = 'auto';
+
     var brow, smile;
-    if (cfg.autoCalibrate) {
+    if (mode === 'calibrated') {
+      brow = clamp(calibratedBrow(rawBrow) * cfg.browGain, -1, 1);
+      smile = clamp(calibratedSmile(rawSmile) * cfg.browGain, 0, 1);
+    } else if (mode === 'auto') {
       brow = clamp(normalize(browTrack, rawBrow, 0.01) * cfg.browGain, -1, 1);
       // a smile only ever opens the mouth wider than rest, so the closing half
       // of the range is not a smile
@@ -1215,7 +1374,8 @@
     emNote.style.cssText = 'width:100%;opacity:.5;font-size:12px;margin:0 0 4px;text-align:left';
     em.appendChild(emNote);
     addToggle(em, 'emotions', 'Detect emotions', STG);
-    addToggle(em, 'autoCalibrate', 'Auto-calibrate', STG);
+    addChoice(em, 'signal', 'Signal range', ['calibrated', 'auto', 'raw'],
+      ['calibrated', 'auto', 'raw'], STG);
     addToggle(em, 'exclusive', 'Strongest only', STG);
     addRule(em);
     addToggle(em, 'speechFirst', 'Speech first', STG);
@@ -1234,10 +1394,25 @@
     readoutEl.style.cssText = 'width:100%;font-size:12px;opacity:.75;text-align:left;' +
       'font-variant-numeric:tabular-nums;font-feature-settings:"tnum"';
     em.appendChild(readoutEl);
-    var recal = el('button', 'trigger ' + STG, 'Reset calibration');
-    recal.style.marginTop = '12px';
+
+    calEl = el('div', STG, '');
+    calEl.style.cssText = 'width:100%;font-size:12px;opacity:.85;text-align:left;' +
+      'white-space:pre-line;margin-top:10px;line-height:1.5';
+    em.appendChild(calEl);
+
+    calBtn = el('button', 'trigger ' + STG, '');
+    calBtn.style.marginTop = '12px';
+    calBtn.addEventListener('click', function () {
+      if (calRun) stopCalibration('Calibration cancelled.');
+      else startCalibration();
+    });
+    em.appendChild(calBtn);
+
+    var recal = el('button', 'trigger ' + STG, 'Reset auto range');
+    recal.style.marginTop = '8px';
     recal.addEventListener('click', function () { resetCalibration(); });
     em.appendChild(recal);
+    syncCalUi();
     frag.appendChild(em);
 
     // --- motion --------------------------------------------------------
@@ -1290,6 +1465,10 @@
     frag.appendChild(hnd);
 
     return frag;
+  }
+
+  function syncCalUi() {
+    if (calBtn) setText(calBtn, calRun ? 'Cancel calibration' : 'Calibrate expressions');
   }
 
   function syncControls() {
@@ -1350,8 +1529,23 @@
     injectInto(settingsContainer(), buildSettings, true);
   }
 
+  function ownMutation(m) {
+    var n = m.target;
+    while (n) {
+      if (n.classList && n.classList.contains('psx-injected')) return true;
+      n = n.parentNode;
+    }
+    return false;
+  }
+
   function startObserver() {
-    var mo = new MutationObserver(scheduleInject);
+    var mo = new MutationObserver(function (list) {
+      // our own cards mutate constantly (the live readout, the calibration
+      // prompts). Reacting to those would schedule a pass every frame.
+      for (var i = 0; i < list.length; i++) {
+        if (!ownMutation(list[i])) { scheduleInject(); return; }
+      }
+    });
     mo.observe(document.documentElement, { childList: true, subtree: true });
     scheduleInject();
   }
@@ -1406,8 +1600,18 @@
     // called from the face rig, after the app has written its own presets and
     // before blendShapeProxy.update() applies them
     face: function (vrm, rig) {
-      try { driveEmotions(vrm, rig); } catch (e) { log('face hook failed', e); }
+      try {
+        var rawBrow = num(rig && rig.brow);
+        var rawSmile = num(rig && rig.mouth && rig.mouth.x);
+        // calibration has to record even with emotions switched off, since
+        // that is the order people will do it in
+        sampleCalibration(rawBrow, rawSmile);
+        driveEmotions(vrm, rig, rawBrow, rawSmile);
+      } catch (e) { log('face hook failed', e); }
     },
+
+    calibrate: startCalibration,
+    resetCalibration: resetCalibration,
 
     headGain: headGain,
     bodyGain: bodyGain,

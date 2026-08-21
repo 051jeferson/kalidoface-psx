@@ -63,14 +63,33 @@ its smile — drives **fun** and/or **joy**. Each has its own threshold, and
 **Strongest only** keeps a furrowed brow over a wide mouth from landing between
 two cells.
 
-**Auto-calibrate** is what makes this usable. Kalidokit's brow scalar only swings
-a few hundredths for most faces, so a raw threshold of `0.35` is unreachable and
-the emotion simply never fires. With it on, the layer learns where your brow
-rests and how far it actually travels, then reports the signal as a fraction of
-*your* range — a full grimace reads as `1.00` whatever its raw size. The resting
-value only drifts while your face is near rest, so holding an expression doesn't
-turn it into the new neutral and fade out. **Reset calibration** starts the
-learning over.
+**Signal range** is what makes this usable at all. Kalidokit's brow scalar only
+swings a few hundredths for most faces, so a raw threshold of `0.35` is
+unreachable and the emotion simply never fires. Three modes:
+
+| Mode | How the range is decided |
+| --- | --- |
+| `calibrated` | From a recorded **guided calibration** — the best mapping, and what the button below sets |
+| `auto` | Learned continuously while tracking: the layer follows where your brow rests and how far it travels |
+| `raw` | Kalidokit's numbers untouched. Almost never usable — it exists to show what upstream is working with |
+
+**Calibrate expressions** runs a short guided pass, the way a game asks you to
+hold a stick at its extremes. It prompts for four poses — relax, furrow, raise,
+smile — with a get-ready countdown and about two seconds of sampling each, then
+records what your face actually reached and switches the mode to `calibrated`.
+
+This beats `auto` because it records **a separate span per direction**. Most
+people furrow much further than they raise, and continuous auto-calibration has
+only one span for both. A face that furrows to `-0.050` but raises only to
+`+0.012` maps both extremes to a full `1.00` once calibrated; under `auto` the
+raise would barely register.
+
+It also reports what it measured, and says which pose barely moved so you know
+which step to redo.
+
+Under `auto`, the resting value only drifts while your face is near rest, so
+holding an expression doesn't turn it into the new neutral and fade out mid
+grimace. **Reset auto range** starts that learning over.
 
 **Speech first** fixes the other half. On a PSX atlas the vowels and the emotions
 are cells of the *same* face texture, so they cannot both show — an emotion that
@@ -153,7 +172,7 @@ and scoped class names, so they look native. Controls are split by what they do:
 **Settings tab** — per-model calibration, next to the app's own tracking options:
 
 - **Face Expressions** — Texture expressions, Snap to cell, Flip V axis, Trigger threshold, Release margin, Minimum hold, Mouth gain, Blink gain, Preview cell (force one expression for calibration)
-- **Emotion Detection** — Detect emotions, Auto-calibrate, Strongest only, Speech first, Talking at, Signal gain, Angry at, Sorrow at, Smile at, Smile drives (`fun` / `joy` / `fun + joy`), live readout and Reset calibration
+- **Emotion Detection** — Detect emotions, Signal range (`calibrated` / `auto` / `raw`), Strongest only, Speech first, Talking at, Signal gain, Angry at, Sorrow at, Smile at, Smile drives (`fun` / `joy` / `fun + joy`), live readout, Calibrate expressions and Reset auto range
 - **Motion Calibration** — Motion calibration, Head / neck gain, Torso gain, Damping
 - **Performance** — Performance caps, Tracking rate, Render rate, Realtime shadows, Shadow resolution, Iris / lip refinement, Lite pose model
 - **PSX Hands** — Driven fingers (`all fingers` / `thumb only` / `none`) + a diagnostics dump button
@@ -172,7 +191,7 @@ Settings persist in `localStorage` under the key `kf3d.psx`.
 3. If the face chatters between two cells, raise **Release margin** or **Minimum hold**.
 4. If quiet talking doesn't register, raise **Mouth gain**; same for **Blink gain**.
 5. Hit **Log diagnostics to console** for the resolved materials, UV binds, current cell, and the last solved `brow` / `smile` values with the emotion weights they produced.
-6. For emotions, leave **Auto-calibrate** on, pull each face, and watch the card's live readout. Set **Angry at** / **Sorrow at** / **Smile at** just under the values you can actually reach. If an expression stops your lip sync, that is what **Speech first** is for.
+6. For emotions, hit **Calibrate expressions** and follow the four prompts. Then pull each face and watch the card's live readout — the thresholds should already be roughly right, and **Angry at** / **Sorrow at** / **Smile at** trim them. If an expression stops your lip sync, that is what **Speech first** is for.
 
 ---
 
