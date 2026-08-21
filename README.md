@@ -25,6 +25,10 @@ touches the app's own source tree (this repo only ships the built bundle).
 | `PSX.face(vrm, rig)` | Receives the solved Kalidokit face and writes the emotion presets |
 | `PSX.headGain()` / `PSX.bodyGain()` | Neck and chest/spine rotation gain |
 | `PSX.smooth(t)` | Lerp factor for every tracked bone |
+| `PSX.frame()` | Whether this animation frame gets rendered |
+| `PSX.nextTrack(fn)` | Schedules the next Mediapipe inference |
+| `PSX.mpOptions(opts)` | Mediapipe model options, before `setOptions` |
+| `PSX.shadows()` / `PSX.shadowSize()` | Shadow map enable and resolution |
 
 ### Texture-atlas face expressions
 
@@ -75,6 +79,29 @@ Emotion detection and motion calibration are independent of PSX mode — they ar
 tracking fixes, not a render look — so each has its own switch and both default
 to stock behaviour.
 
+### Performance
+
+Upstream runs a **Mediapipe inference on every animation frame** and renders on
+every animation frame, with **two lights casting 2048×2048 shadow maps**. On a
+PSX avatar all three are overkill — and the era's own cadence was 20–30fps, so
+capping the rate is authentic rather than a compromise.
+
+| Knob | What it costs upstream |
+| --- | --- |
+| **Tracking rate** | One Holistic/FaceMesh inference per animation frame. This is where nearly all the CPU goes; 24–30fps is plenty for face tracking |
+| **Render rate** | One full render per animation frame, up to the display's refresh. Capping to 20–30 roughly halves GPU time on a 60Hz screen |
+| **Realtime shadows** | Two shadow-casting lights, so two full depth passes of the scene per frame plus their shadow maps in VRAM. PS1 had no realtime shadows |
+| **Shadow resolution** | 2048×2048 per light. 512 is four times less depth buffer and usually indistinguishable at PSX render scales |
+| **Iris / lip refinement** | `refineFaceLandmarks` runs an extra refinement model over every frame |
+| **Lite pose model** | Holistic `modelComplexity` 1. Dropping to 0 trades pose accuracy for a much cheaper network |
+
+Stack these with **Render scale** in the Effects tab: at `0.5x` the renderer
+draws a quarter of the pixels, which is the single biggest GPU win and the
+reason PSX mode looks right in the first place.
+
+Shadows and the Mediapipe options are read once at startup, so those apply on
+reload; the rate caps take effect immediately.
+
 ## Controls
 
 The layer injects its own cards into the app's existing tabs, reusing their markup
@@ -89,10 +116,13 @@ and scoped class names, so they look native. Controls are split by what they do:
 - **Face Expressions** — Texture expressions, Snap to cell, Flip V axis, Trigger threshold, Release margin, Minimum hold, Mouth gain, Blink gain, Preview cell (force one expression for calibration)
 - **Emotion Detection** — Detect emotions, Strongest only, Brow gain, Angry at, Sorrow at, Smile at, Smile drives (`fun` / `joy` / `fun + joy`)
 - **Motion Calibration** — Motion calibration, Head / neck gain, Torso gain, Damping
+- **Performance** — Performance caps, Tracking rate, Render rate, Realtime shadows, Shadow resolution, Iris / lip refinement, Lite pose model
 - **PSX Hands** — Driven fingers (`all fingers` / `thumb only` / `none`) + a diagnostics dump button
 
-PSX mode is **off by default** — with it off, every hook falls back to stock behaviour.
-PSX mode, MSAA, SMAA and render scale apply on reload; everything else is live.
+Every switch is **off by default**, and with it off the matching hooks fall back
+to stock behaviour. Anything the app reads only at startup — PSX mode, MSAA,
+SMAA, render scale, shadows, Mediapipe model options — applies on reload, and the
+card says so once you touch one. Everything else is live.
 
 Settings persist in `localStorage` under the key `kf3d.psx`.
 

@@ -15,6 +15,10 @@
  *   PSX.face(vrm, rig)           - the solved Kalidokit face, before it lands
  *   PSX.headGain() / bodyGain()  - neck and chest/spine rotation gain
  *   PSX.smooth(t)                - lerp factor for every tracked bone
+ *   PSX.frame()                  - whether this animation frame gets rendered
+ *   PSX.nextTrack(fn)            - schedules the next Mediapipe inference
+ *   PSX.mpOptions(opts)          - Mediapipe model options, before setOptions
+ *   PSX.shadows() / shadowSize() - shadow map enable and resolution
  *
  * The controls are injected into the app's own Effects and Settings tabs and
  * reuse their markup and scoped class names, so they look like the rest of the
@@ -88,11 +92,29 @@
     // 0 = stock responsiveness, 1 = as heavy as it goes
     damping: 0,
 
+    // --- performance --------------------------------------------------
+    // Enable the caps below. Off = the app's own behaviour.
+    perf: false,
+    // Mediapipe inferences per second. 0 = one per animation frame (stock),
+    // which is where nearly all the CPU goes.
+    trackFps: 0,
+    // rendered frames per second. 0 = display rate (stock).
+    renderFps: 0,
+    // realtime shadow maps. Two lights cast at 2048x2048 by default, which is
+    // two full depth passes per frame.
+    shadows: true,
+    shadowSize: 2048,
+    // Mediapipe iris / lip refinement (refineFaceLandmarks). An extra model.
+    faceIris: true,
+    // Holistic modelComplexity 0 (lite) instead of 1
+    poseLite: false,
+
     verbose: false
   };
 
   var STOCK_HEAD_GAIN = 1;
   var STOCK_BODY_GAIN = 0.05;
+  var STOCK_SHADOW_SIZE = 2048;
 
   var MOUTH_KEYS = { a: 1, i: 1, u: 1, e: 1, o: 1 };
   var BLINK_KEYS = { blink: 1, blink_l: 1, blink_r: 1 };
@@ -530,6 +552,55 @@
     return Math.max(t * (1 - cfg.damping), 0.002);
   }
 
+  // ------------------------------------------------------------ performance
+  //
+  // Upstream runs a Mediapipe inference on every animation frame and renders on
+  // every animation frame, with two lights casting 2048x2048 shadow maps. On a
+  // PSX avatar all three are overkill: the models are flat and untextured by
+  // modern standards, and the era's own cadence was 20-30fps.
+
+  function shadows() { return cfg.perf ? !!cfg.shadows : true; }
+  function shadowSize() { return cfg.perf ? cfg.shadowSize : STOCK_SHADOW_SIZE; }
+
+  // Called with whatever options object is about to reach setOptions - Holistic
+  // spells the refinement flag one way, FaceMesh another, so touch whichever
+  // keys are actually present.
+  function mpOptions(opts) {
+    if (!cfg.perf || !opts) return opts;
+    if ('refineFaceLandmarks' in opts) opts.refineFaceLandmarks = !!cfg.faceIris;
+    if ('refineLandmarks' in opts) opts.refineLandmarks = !!cfg.faceIris;
+    if ('modelComplexity' in opts) opts.modelComplexity = cfg.poseLite ? 0 : 1;
+    log('mediapipe options', opts);
+    return opts;
+  }
+
+  // The tracking loop awaits its inference, so the gap between iterations is
+  // inference time plus whatever we wait here. Measure from the start of the
+  // last cycle so the rate holds steady instead of drifting slower.
+  var trackAt = 0;
+
+  function nextTrack(fn) {
+    var fps = cfg.perf ? cfg.trackFps : 0;
+    if (!fps) return requestAnimationFrame(fn);
+    var t = now();
+    var wait = Math.max(0, trackAt + (1000 / fps) - t);
+    trackAt = t + wait;
+    return setTimeout(function () { requestAnimationFrame(fn); }, wait);
+  }
+
+  var frameAt = 0;
+
+  function frame() {
+    var fps = cfg.perf ? cfg.renderFps : 0;
+    if (!fps) return true;
+    var t = now();
+    // a few ms of slack, or a 30fps budget would keep missing 60Hz ticks by a
+    // hair and land on 20
+    if (t - frameAt < (1000 / fps) - 4) return false;
+    frameAt = t;
+    return true;
+  }
+
   // ------------------------------------------------------------------ models
 
   var models = [];
@@ -771,7 +842,12 @@
   var STG = 'svelte-1krauxh'; // Settings panel scope (also: .trigger buttons)
   var TG = 'svelte-yzrsaq';   // Toggle component scope
 
-  var NEEDS_RELOAD = { enabled: 1, pixelRatio: 1, antialias: 1, smaa: 1 };
+  // Keys the app only reads once, at startup: the renderer flags, the shadow
+  // map setup, and the Mediapipe model options.
+  var NEEDS_RELOAD = {
+    enabled: 1, pixelRatio: 1, antialias: 1, smaa: 1,
+    perf: 1, shadows: 1, shadowSize: 1, faceIris: 1, poseLite: 1
+  };
   var pendingReload = false;
 
   function el(tag, cls, text) {
@@ -798,8 +874,8 @@
     save();
     if (NEEDS_RELOAD[key]) {
       pendingReload = true;
-      var note = document.getElementById('psx-reload-note');
-      if (note) note.style.display = '';
+      var notes = document.querySelectorAll('.psx-reload-note');
+      Array.prototype.forEach.call(notes, function (n) { n.style.display = ''; });
     } else {
       applyCanvasFilter();
       refreshModels();
@@ -808,6 +884,8 @@
   }
 
   var controls = [];
+
+  function fpsLabel(v) { return v ? v + ' fps' : 'uncapped'; }
 
   function addRange(parent, key, label, min, max, step, fmt, sc) {
     var h = heading(label, fmt(cfg[key]), sc);
@@ -901,6 +979,21 @@
 
   function addRule(parent) { parent.appendChild(el('hr', FX)); }
 
+  // Shown only once a reload-only key has been touched. Both panels get one,
+  // since either can hold a control the app reads only at startup.
+  function reloadNote(parent, text, sc) {
+    var note = el('div', sc || FX, text);
+    note.className = (sc || FX) + ' psx-reload-note';
+    note.style.cssText = 'width:100%;opacity:.5;font-size:12px;margin-top:16px;text-align:left';
+    note.style.display = pendingReload ? '' : 'none';
+    var btn = el('button', 'trigger ' + STG, 'Reload to apply');
+    btn.style.marginTop = '12px';
+    btn.addEventListener('click', function () { location.reload(); });
+    note.appendChild(btn);
+    parent.appendChild(note);
+    return note;
+  }
+
   function card(title, sc) {
     sc = sc || FX;
     var c = el('div', 'setting ' + sc + ' psx-injected');
@@ -928,15 +1021,7 @@
     addRule(r);
     addRange(r, 'pixelRatio', 'Render scale', 0.25, 2, 0.25, function (v) { return v + 'x'; });
 
-    var note = el('div', FX, 'PSX mode, MSAA, SMAA and render scale apply on reload.');
-    note.id = 'psx-reload-note';
-    note.style.cssText = 'width:100%;opacity:.5;font-size:12px;margin-top:16px;text-align:left';
-    note.style.display = pendingReload ? '' : 'none';
-    var btn = el('button', 'trigger ' + STG, 'Reload to apply');
-    btn.style.marginTop = '12px';
-    btn.addEventListener('click', function () { location.reload(); });
-    note.appendChild(btn);
-    r.appendChild(note);
+    reloadNote(r, 'PSX mode, MSAA, SMAA and render scale apply on reload.', FX);
 
     r.classList.add('last');
     frag.appendChild(r);
@@ -1004,6 +1089,29 @@
     addRange(mo, 'bodyGain', 'Torso gain', 0, 0.2, 0.005, function (v) { return v.toFixed(3) + 'x'; }, STG);
     addRange(mo, 'damping', 'Damping', 0, 0.95, 0.01, function (v) { return v.toFixed(2); }, STG);
     frag.appendChild(mo);
+
+    // --- performance ---------------------------------------------------
+    var pf = card('Performance', STG);
+    var pfNote = el('div', STG,
+      'Upstream runs a Mediapipe inference on every animation frame, renders on ' +
+      'every animation frame, and has two lights casting 2048x2048 shadow maps. ' +
+      'The tracking rate is where nearly all the CPU goes.');
+    pfNote.style.cssText = 'width:100%;opacity:.5;font-size:12px;margin:0 0 4px;text-align:left';
+    pf.appendChild(pfNote);
+    addToggle(pf, 'perf', 'Performance caps', STG);
+    addRule(pf);
+    addRange(pf, 'trackFps', 'Tracking rate', 0, 60, 1, fpsLabel, STG);
+    addRange(pf, 'renderFps', 'Render rate', 0, 60, 1, fpsLabel, STG);
+    addRule(pf);
+    addToggle(pf, 'shadows', 'Realtime shadows', STG);
+    addChoice(pf, 'shadowSize', 'Shadow resolution', [256, 512, 1024, 2048],
+      ['256', '512', '1024', '2048'], STG);
+    addRule(pf);
+    addToggle(pf, 'faceIris', 'Iris / lip refinement', STG);
+    addToggle(pf, 'poseLite', 'Lite pose model', STG);
+    reloadNote(pf, 'Shadows and the Mediapipe model options apply on reload. ' +
+      'The rate caps take effect immediately.', STG);
+    frag.appendChild(pf);
 
     var hnd = card('PSX Hands', STG);
     addChoice(hnd, 'fingers', 'Driven fingers', ['all', 'thumb', 'none'],
@@ -1138,6 +1246,12 @@
 
     headGain: headGain,
     bodyGain: bodyGain,
-    smooth: smooth
+    smooth: smooth,
+
+    frame: frame,
+    nextTrack: nextTrack,
+    mpOptions: mpOptions,
+    shadows: shadows,
+    shadowSize: shadowSize
   };
 })();
