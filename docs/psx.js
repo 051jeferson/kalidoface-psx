@@ -1198,8 +1198,16 @@
 
   // Drive the app's own input so its handler runs; setting the property alone
   // would leave the store untouched.
+  // Give up after a few attempts. This runs on every injection pass, so a value
+  // the app refuses to accept - a slider with its own minimum, say - would mean
+  // dispatching an event into it four times a second forever, and every one of
+  // those is a re-render. The card is hidden either way, so a value that will
+  // not stick is not worth a permanent loop.
+  var PIN_TRIES = 3;
+
   function pin(input, want) {
     if (!input || want === undefined) return;
+    if (input.__psxPinTries >= PIN_TRIES) return;
     if (typeof want === 'boolean') {
       if (input.checked === want) return;
       input.checked = want;
@@ -1210,6 +1218,7 @@
       input.dispatchEvent(new Event('input', { bubbles: true }));
       input.dispatchEvent(new Event('change', { bubbles: true }));
     }
+    input.__psxPinTries = (input.__psxPinTries || 0) + 1;
   }
 
   function hide(node) {
@@ -1248,7 +1257,7 @@
     // --- Effects / render ---
     'PSX Render': 'Render PSX',
     'Render scale': 'Escala de render',
-    'Vertex snapping': 'Snap de vertices',
+    'Vertex snapping': 'Snap de vértices',
     'Snap grid': 'Grade do snap',
     'Dither': 'Dithering',
     'Colour depth': 'Profundidade de cor',
@@ -1259,28 +1268,28 @@
     'Reload to apply': 'Recarregar para aplicar',
 
     // --- expressions ---
-    'Face Expressions': 'Expressoes faciais',
-    'Texture expressions': 'Expressoes por textura',
-    'Snap to cell': 'Encaixar na celula',
+    'Face Expressions': 'Expressões faciais',
+    'Texture expressions': 'Expressões por textura',
+    'Snap to cell': 'Encaixar na célula',
     'Flip V axis': 'Inverter eixo V',
     'Trigger threshold': 'Limiar de disparo',
-    'Release margin': 'Margem de liberacao',
-    'Minimum hold': 'Tempo minimo',
+    'Release margin': 'Margem de liberação',
+    'Minimum hold': 'Tempo mínimo',
     'Mouth gain': 'Ganho da boca',
     'Blink gain': 'Ganho da piscada',
-    'Preview cell': 'Previsualizar celula',
+    'Preview cell': 'Pré-visualizar célula',
     'live tracking': 'rastreio ao vivo',
-    'Load a VRM to calibrate individual cells.': 'Carregue um VRM para calibrar celulas individuais.',
+    'Load a VRM to calibrate individual cells.': 'Carregue um VRM para calibrar células individuais.',
 
     // --- emotions ---
-    'Emotion Detection': 'Deteccao de emocoes',
-    'Detect emotions': 'Detectar emocoes',
+    'Emotion Detection': 'Detecção de emoções',
+    'Detect emotions': 'Detectar emoções',
     'Signal range': 'Faixa do sinal',
     'calibrated': 'calibrado',
     'auto': 'auto',
     'raw': 'bruto',
-    'Strongest only': 'Somente a mais forte',
-    'Speech first': 'Prioridade a fala',
+    'One emotion at a time': 'Uma emoção por vez',
+    'Speech first': 'Prioridade à fala',
     'Talking at': 'Falando a partir de',
     'Signal gain': 'Ganho do sinal',
     'Angry at': 'Bravo a partir de',
@@ -1289,37 +1298,37 @@
     'Smile drives': 'Sorriso aciona',
     'fun + joy': 'fun + joy',
     'waiting for a tracked face...': 'aguardando um rosto rastreado...',
-    'Calibrate expressions': 'Calibrar expressoes',
-    'Cancel calibration': 'Cancelar calibracao',
-    'Reset auto range': 'Zerar faixa automatica',
+    'Calibrate expressions': 'Calibrar expressões',
+    'Cancel calibration': 'Cancelar calibração',
+    'Reset auto range': 'Zerar faixa automática',
     'Calibrate motion': 'Calibrar movimento',
-    'Capture (Space)': 'Capturar (Espaco)',
+    'Capture (Space)': 'Capturar (Espaço)',
     'Reading...': 'Lendo...',
     'Hold the pose, then press Space. Esc cancels.':
-      'Faca a pose, segure, e aperte Espaco. Esc cancela.',
+      'Faça a pose, segure, e aperte Espaço. Esc cancela.',
     'Reading, keep holding...': 'Lendo, continue segurando...',
     'Only': 'Apenas',
     'frames were read - hold the pose and try that step again.':
-      'frames foram lidos - segure a pose e refaca esse passo.',
+      'frames foram lidos - segure a pose e refaça esse passo.',
     'The poses moved a lot while being read; redo it holding stiller for a tighter fit.':
-      'As poses se mexeram bastante durante a leitura; refaca segurando mais firme para um ajuste melhor.',
-    'Face the camera': 'Encare a camera',
+      'As poses se mexeram bastante durante a leitura; refaça segurando mais firme para um ajuste melhor.',
+    'Face the câmera': 'Encare a câmera',
     'Head straight, shoulders square': 'Cabeca reta, ombros alinhados',
-    'Turn your head left': 'Vire a cabeca para a esquerda',
-    'Turn your head right': 'Vire a cabeca para a direita',
-    'As far as is comfortable, and hold': 'Ate onde for confortavel, e segure',
+    'Turn your head left': 'Vire a cabeça para a esquerda',
+    'Turn your head right': 'Vire a cabeça para a direita',
+    'As far as is comfortable, and hold': 'Até onde for confortável, e segure',
     'Look up': 'Olhe para cima',
-    'Tilt your head back and hold': 'Incline a cabeca para tras e segure',
+    'Tilt your head back and hold': 'Incline a cabeça para tras e segure',
     'Look down': 'Olhe para baixo',
     'Tilt your chin down and hold': 'Incline o queixo para baixo e segure',
     'Barely any head movement was tracked. Is face tracking running?':
-      'Quase nenhum movimento de cabeca foi detectado. O rastreio facial esta ligado?',
+      'Quase nenhum movimento de cabeça foi detectado. O rastreio facial está ligado?',
     'No face was tracked during': 'Nenhum rosto foi detectado durante',
     'Start face tracking and try again.': 'Ligue o rastreio facial e tente de novo.',
     'Calibrated': 'Calibrado',
-    'These barely moved:': 'Estes quase nao se mexeram:',
+    'These barely moved:': 'Estes quase não se mexeram:',
     'Redo that step with a bigger expression if it does not trigger.':
-      'Refaca esse passo com uma expressao maior se ele nao disparar.',
+      'Refaça esse passo com uma expressão maior se ele não disparar.',
     'furrow': 'franzir',
     'raise': 'levantar',
     'smile': 'sorriso',
@@ -1329,21 +1338,21 @@
 
     // --- calibration prompts ---
     'Relax your face': 'Relaxe o rosto',
-    'Neutral, looking at the camera': 'Neutro, olhando para a camera',
+    'Neutral, looking at the câmera': 'Neutro, olhando para a câmera',
     'Furrow your brows': 'Franza as sobrancelhas',
     'Angry - pull them down and together': 'Bravo - puxe para baixo e para o centro',
     'Raise your brows': 'Levante as sobrancelhas',
-    'Surprised - lift them as high as you can': 'Surpreso - levante o maximo que conseguir',
+    'Surprised - lift them as high as you can': 'Surpreso - levante o máximo que conseguir',
     'Smile wide': 'Sorria bastante',
     'Big smile, and hold it': 'Sorriso grande, e segure',
     'get ready': 'prepare-se',
     'hold': 'segure',
-    'Calibration cancelled.': 'Calibracao cancelada.',
+    'Calibration cancelled.': 'Calibração cancelada.',
 
     // --- motion ---
     'Motion Calibration': 'Calibragem de movimento',
     'Motion calibration': 'Calibragem de movimento',
-    'Head / neck gain': 'Ganho de cabeca / pescoco',
+    'Head / neck gain': 'Ganho de cabeça / pescoço',
     'Torso gain': 'Ganho do torso',
     'Damping': 'Amortecimento',
 
@@ -1357,49 +1366,68 @@
     'uncapped': 'sem limite',
 
     // --- hands / diagnostics ---
-    'PSX Hands': 'Maos PSX',
+    'PSX Hands': 'Mãos PSX',
     'Driven fingers': 'Dedos animados',
     'all fingers': 'todos os dedos',
-    'thumb only': 'so o polegar',
+    'thumb only': 'só o polegar',
     'none': 'nenhum',
-    'Log diagnostics to console': 'Registrar diagnostico no console',
+    'Log diagnostics to console': 'Registrar diagnóstico no console',
     'Check bundle hooks': 'Conferir hooks do bundle',
     'Reset PSX settings': 'Restaurar ajustes PSX',
     'Language': 'Idioma',
     'English': 'English',
-    'Portuguese (BR)': 'Portugues (BR)',
+    'Portuguese (BR)': 'Português (BR)',
 
     // --- notes ---
     'note.reloadRender': 'A escala de render e aplicada ao recarregar.',
-    'note.reloadPerf': 'As opcoes do modelo Mediapipe sao aplicadas ao recarregar. Os limites de taxa valem na hora.',
-    'note.emotions': 'O app so rastreia piscadas, as cinco vogais e um sorriso. Bravo, triste e fun nunca sao escritos - isto os deriva da sobrancelha e da boca para que essas celulas possam disparar. Faca cada careta e observe a leitura para ajustar os limiares.',
-    'note.motion': 'Os ganhos de pescoco e torso sao fixos no app, entao um movimento real pequeno vira um movimento grande no avatar. Baixe o ganho para mexer menos, aumente o amortecimento para mexer mais devagar.',
-    'note.perf': 'O app roda uma inferencia do Mediapipe a cada frame e renderiza a cada frame. A taxa de rastreio e onde vai quase toda a CPU.',
+    'note.reloadPerf': 'As opções do modelo Mediapipe são aplicadas ao recarregar. Os limites de taxa valem na hora.',
+    'note.emotions': 'O app so rastreia piscadas, as cinco vogais e um sorriso. Bravo, triste e fun nunca são escritos - isto os deriva da sobrancelha e da boca para que essas células possam disparar. Faça cada careta e observe a leitura para ajustar os limiares.',
+    'note.motion': 'Os ganhos de pescoço e torso são fixos no app, entao um movimento real pequeno vira um movimento grande no avatar. Baixe o ganho para mexer menos, aumente o amortecimento para mexer mais devagar.',
+    'note.perf': 'O app roda uma inferencia do Mediapipe a cada frame e renderiza a cada frame. A taxa de rastreio é onde vai quase toda a CPU.',
+
+    // --- the app's own menu, drawn from data-text attributes ---
+    'Start Face Tracking': 'Iniciar rastreio facial',
+    'Stop Face Tracking': 'Parar rastreio facial',
+    'Characters': 'Personagens',
+    'Stickers': 'Adesivos',
+    'Backgrounds': 'Fundos',
+    'Call a friend': 'Ligar para um amigo',
+    'Accessories': 'Acessórios',
+    'Picture-in-Picture': 'Picture-in-Picture',
+    'Selfie Mode': 'Modo selfie',
+    'First Person Mode': 'Modo primeira pessoa',
+    'Flip Camera': 'Inverter câmera',
+    'Settings': 'Ajustes',
+    'Effects': 'Efeitos',
+    'Hide Controls': 'Ocultar controles',
+    'Show Controls': 'Mostrar controles',
+    'FACE / EYE': 'ROSTO / OLHOS',
+    'FULL BODY': 'CORPO INTEIRO',
 
     // --- the app's own hardcoded labels ---
     'Light Color': 'Cor da luz',
-    'Light Position X': 'Posicao da luz X',
-    'Light Position Y': 'Posicao da luz Y',
-    'Shadow Strength': 'Forca da sombra',
+    'Light Position X': 'Posição da luz X',
+    'Light Position Y': 'Posição da luz Y',
+    'Shadow Strength': 'Força da sombra',
     'Shadow Blur': 'Desfoque da sombra',
     'Outline Size': 'Espessura do contorno',
     'Outline Color': 'Cor do contorno',
     'Pixelate': 'Pixelizar',
-    'Water Animation': 'Animacao de agua',
+    'Water Animation': 'Animação de água',
     'Light Cube Experiment': 'Experimento do cubo de luz',
-    'Body Tracking Options': 'Opcoes de rastreio corporal',
+    'Body Tracking Options': 'Opções de rastreio corporal',
     'Enable Wink': 'Ativar piscadela',
-    'Smile Detection [Beta]': 'Deteccao de sorriso [Beta]',
+    'Smile Detection [Beta]': 'Detecção de sorriso [Beta]',
     'Room Tracking': 'Rastreio de ambiente',
     'Leg Tracking [WIP]': 'Rastreio de pernas [WIP]',
-    'Hide Camera Panel': 'Ocultar painel da camera',
-    'Hide Webcam Video': 'Ocultar video da webcam',
-    'Change Camera': 'Trocar camera',
+    'Hide Camera Panel': 'Ocultar painel da câmera',
+    'Hide Webcam Video': 'Ocultar vídeo da webcam',
+    'Change Camera': 'Trocar câmera',
     'Reset Character Tracking': 'Reiniciar rastreio do personagem',
     'For eyetracking, use both face and full body tracking.':
       'Para rastreio ocular, use rastreio facial e de corpo inteiro juntos.',
-    'Allow webcam access to see camera list.':
-      'Permita o acesso a webcam para ver a lista de cameras.'
+    'Allow webcam access to see câmera list.':
+      'Permita o acesso à webcam para ver a lista de cameras.'
   };
 
   var EN = {
@@ -2108,7 +2136,7 @@
     addToggle(em, 'emotions', T('Detect emotions'), STG);
     addSelect(em, 'signal', T('Signal range'), ['calibrated', 'auto', 'raw'],
       [T('calibrated'), T('auto'), T('raw')], STG);
-    addToggle(em, 'exclusive', T('Strongest only'), STG);
+    addToggle(em, 'exclusive', T('One emotion at a time'), STG);
     addRule(em);
     addToggle(em, 'speechFirst', T('Speech first'), STG);
     addRange(em, 'speechAt', T('Talking at'), 0, 1, 0.01, function (v) { return v.toFixed(2); }, STG);
@@ -2372,12 +2400,30 @@
     if ((n.textContent || '').trim() !== want) n.textContent = want;
   }
 
+  // The main menu does not put its labels in the DOM as text: they are
+  // data-text attributes drawn by `content: attr(data-text)` in the CSS. Those
+  // are the only strings the app does keep in an i18n table, and the table has
+  // en and ru - so translating them means writing the attribute.
+  function translateAttr(n) {
+    if (!n || n.nodeType !== 1 || !n.getAttribute || isOurs(n)) return;
+    var cur = n.getAttribute('data-text');
+    if (cur === null) return;
+    var en = n.__psxEnAttr || cur.trim();
+    if (!(en in PT)) return;
+    n.__psxEnAttr = en;
+    var want = cfg.lang === 'pt' ? PT[en] : en;
+    if (cur !== want) n.setAttribute('data-text', want);
+  }
+
   function translateTree(root) {
     if (!root || root.nodeType !== 1) return;
     translateNode(root);
+    translateAttr(root);
     if (!root.querySelectorAll) return;
     var kids = root.querySelectorAll('h4, label, p, button');
     for (var i = 0; i < kids.length; i++) translateNode(kids[i]);
+    var tagged = root.querySelectorAll('[data-text]');
+    for (var j = 0; j < tagged.length; j++) translateAttr(tagged[j]);
   }
 
   // Runs on the raw mutation records rather than the throttled pass: a re-render
@@ -2410,12 +2456,19 @@
     var mo = new MutationObserver(function (list) {
       translateMutations(list);
       // our own cards mutate constantly (the live readout, the calibration
-      // prompts). Reacting to those would schedule a pass every frame.
+      // prompts). Reacting to those would schedule a pass every frame. An
+      // attribute write never adds or removes a card, so it never needs one.
       for (var i = 0; i < list.length; i++) {
-        if (!ownMutation(list[i])) { scheduleInject(); return; }
+        if (list[i].type === 'childList' && !ownMutation(list[i])) {
+          scheduleInject();
+          return;
+        }
       }
     });
-    mo.observe(document.documentElement, { childList: true, subtree: true });
+    mo.observe(document.documentElement, {
+      childList: true, subtree: true,
+      attributes: true, attributeFilter: ['data-text']
+    });
     translateTree(document.body || document.documentElement);
     scheduleInject();
   }

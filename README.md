@@ -88,8 +88,9 @@ Kalidokit does solve the two signals those presets need, so this fork derives
 them: `brow` (negative = furrowed, positive = raised) drives **angry** and
 **sorrow**, and `mouth.x` — the corner-to-corner width upstream already uses for
 its smile — drives **fun** and/or **joy**. Each has its own threshold, and
-**Strongest only** keeps a furrowed brow over a wide mouth from landing between
-two cells.
+**One emotion at a time** keeps a furrowed brow over a wide mouth from landing
+between two cells — these are whole-face swaps, so blending two lands on a patch
+of atlas that is not an expression at all.
 
 **Signal range** is what makes this usable at all. Kalidokit's brow scalar only
 swings a few hundredths for most faces, so a raw threshold of `0.35` is
@@ -160,6 +161,12 @@ So the app's own labels are swapped in the DOM, keeping the English original on
 the node so switching back is exact. That runs on the raw mutation records
 rather than on the throttled pass, because a re-render that reset a label to
 English would otherwise show for a quarter of a second and read as a flicker.
+
+The main menu needs a second path: its labels are not text at all but `data-text`
+attributes drawn by `content: attr(data-text)` in the CSS — 39 of them, and the
+only strings upstream does keep in an i18n table. Those are translated by writing
+the attribute, so the observer also watches `data-text`; an attribute write never
+adds or removes a card, so it never triggers an injection pass.
 
 ### Motion calibration
 
@@ -285,7 +292,7 @@ and scoped class names, so they look native. Controls are split by what they do:
 **Settings tab** — per-model calibration, next to the app's own tracking options:
 
 - **Face Expressions** — Texture expressions, Snap to cell, Flip V axis, Trigger threshold, Release margin, Minimum hold, Mouth gain, Blink gain, Preview cell (force one expression for calibration)
-- **Emotion Detection** — Detect emotions, Signal range (`calibrated` / `auto` / `raw`), Strongest only, Speech first, Talking at, Signal gain, Angry at, Sorrow at, Smile at, Smile drives (`fun` / `joy` / `fun + joy`), live readout, Calibrate expressions and Reset auto range
+- **Emotion Detection** — Detect emotions, Signal range (`calibrated` / `auto` / `raw`), One emotion at a time, Speech first, Talking at, Signal gain, Angry at, Sorrow at, Smile at, Smile drives (`fun` / `joy` / `fun + joy`), live readout, Calibrate expressions and Reset auto range
 - **Motion Calibration** — Motion calibration, Head / neck gain, Torso gain, Damping
 - **Performance** — Performance caps, Tracking rate, Render rate, Realtime shadows, Shadow resolution, Iris / lip refinement, Lite pose model
 - **PSX Hands** — Driven fingers (`all fingers` / `thumb only` / `none`), Log diagnostics to console, Check bundle hooks, Reset PSX settings
