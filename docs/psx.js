@@ -117,8 +117,6 @@
   // --------------------------------------------------------------- textures
 
   var NearestFilter = 1003;
-  var LinearFilter = 1006;
-  var LinearMipmapLinearFilter = 1008;
 
   var TEXTURE_SLOTS = [
     'map', 'shadeTexture', 'emissiveMap', 'emissionMap',
@@ -141,25 +139,57 @@
     });
   }
 
+  // three allocates immutable storage (texStorage2D) for a texture on its first
+  // upload, with a mip level count decided by generateMipmaps/minFilter at that
+  // moment. `needsUpdate` re-uploads but never reallocates, so switching a
+  // 1-level texture to a mipmap minFilter afterwards makes glGenerateMipmap fail
+  // and pushes texSubImage2D at a level that does not exist -> the texture goes
+  // black and stays black, because the broken GL object is reused.
+  //
+  // Disposing first drops the GL texture, so the next render allocates fresh
+  // storage with the right level count. We only do it when the filtering
+  // actually changed, to avoid re-uploading every texture on unrelated edits.
+  //
+  // The restore path puts back what the VRM authored, not a hardcoded
+  // linear+mipmap guess: some of these textures are authored without mipmaps on
+  // purpose (formats that cannot generate them), and anisotropy has to come back
+  // from the original too.
   function applyTextureFilter(vrm) {
     var nearest = on() && cfg.nearestTextures;
     eachMaterial(vrm, function (m) {
+      var touched = false;
       for (var i = 0; i < TEXTURE_SLOTS.length; i++) {
         var t = m[TEXTURE_SLOTS[i]];
         if (!t || !t.isTexture) continue;
-        if (nearest) {
-          t.magFilter = NearestFilter;
-          t.minFilter = NearestFilter;
-          t.generateMipmaps = false;
-          t.anisotropy = 1;
-        } else {
-          t.magFilter = LinearFilter;
-          t.minFilter = LinearMipmapLinearFilter;
-          t.generateMipmaps = true;
+
+        if (!t.__psxOrig) {
+          t.__psxOrig = {
+            magFilter: t.magFilter,
+            minFilter: t.minFilter,
+            generateMipmaps: t.generateMipmaps,
+            anisotropy: t.anisotropy
+          };
         }
+        var want = nearest
+          ? { magFilter: NearestFilter, minFilter: NearestFilter, generateMipmaps: false, anisotropy: 1 }
+          : t.__psxOrig;
+
+        if (t.magFilter === want.magFilter &&
+            t.minFilter === want.minFilter &&
+            t.generateMipmaps === want.generateMipmaps &&
+            t.anisotropy === want.anisotropy) continue;
+
+        t.magFilter = want.magFilter;
+        t.minFilter = want.minFilter;
+        t.generateMipmaps = want.generateMipmaps;
+        t.anisotropy = want.anisotropy;
+
+        // force reallocation, not just a re-upload
+        t.dispose();
         t.needsUpdate = true;
+        touched = true;
       }
-      m.needsUpdate = true;
+      if (touched) m.needsUpdate = true;
     });
   }
 
@@ -204,7 +234,12 @@
       // give this material its own texture instance so sliding its UVs does
       // not drag every other material sharing the same image along with it
       if (mat.map && mat.map.isTexture) {
-        mat.map = mat.map.clone();
+        var src = mat.map;
+        mat.map = src.clone();
+        // Texture.copy() does not carry custom fields, and this clone can be
+        // made while PSX filtering is already applied - without this the clone
+        // would record nearest as its authored state and never restore.
+        if (src.__psxOrig) mat.map.__psxOrig = src.__psxOrig;
         mat.map.needsUpdate = true;
       }
       var e = {
@@ -581,15 +616,27 @@
     console.groupEnd();
   }
 
-  // ------------------------------------------------------- settings tab UI
+  // ----------------------------------------------------------------- panel UI
   //
-  // Rebuilds the app's own Settings markup: <container> > .setting cards, with
-  // h4 headings, styled range inputs and the same checkbox-backed toggle.
+  // Rebuilds the app's own markup: <container> > .setting cards, with h4
+  // headings, styled range inputs and the same checkbox-backed toggle.
   // All class names below are the app's scoped Svelte hashes - keep them.
+  //
+  // The controls are split across two tabs, by what they actually do:
+  //
+  //   Effects  - the render look: PSX mode, texture filtering, AA, render
+  //              scale. Sits next to the app's own Pixelate / Outline effects.
+  //   Settings - per-model calibration: expression cells, thresholds, gains,
+  //              hands. Sits next to the app's own tracking options.
+  //
+  // These are two separate Svelte components with near-identical scoped CSS, so
+  // each card is built with the scope of the panel hosting it. Range, toggle and
+  // hr styling only exists in the Effects scope, so those widgets carry FX
+  // wherever they are used.
 
-  var SV = 'svelte-2t25z9';   // Settings panel scope
+  var FX = 'svelte-2t25z9';   // Effects panel scope (also: range/toggle/hr CSS)
+  var STG = 'svelte-1krauxh'; // Settings panel scope (also: .trigger buttons)
   var TG = 'svelte-yzrsaq';   // Toggle component scope
-  var BTN = 'svelte-1krauxh'; // button scope
 
   var NEEDS_RELOAD = { enabled: 1, pixelRatio: 1, antialias: 1, smaa: 1 };
   var pendingReload = false;
@@ -601,8 +648,8 @@
     return n;
   }
 
-  function heading(text, readout) {
-    var h = el('h4', SV, text);
+  function heading(text, readout, sc) {
+    var h = el('h4', sc || FX, text);
     if (readout != null) {
       var s = el('span', null, readout);
       s.style.marginLeft = 'auto';
@@ -629,9 +676,9 @@
 
   var controls = [];
 
-  function addRange(parent, key, label, min, max, step, fmt) {
-    var h = heading(label, fmt(cfg[key]));
-    var input = el('input', SV);
+  function addRange(parent, key, label, min, max, step, fmt, sc) {
+    var h = heading(label, fmt(cfg[key]), sc);
+    var input = el('input', FX);
     input.type = 'range';
     input.min = min; input.max = max; input.step = step;
     input.value = cfg[key];
@@ -651,13 +698,13 @@
     paint();
     parent.appendChild(h);
     parent.appendChild(input);
-    controls.push({ key: key, sync: function () { input.value = cfg[key]; paint(); } });
+    controls.push({ key: key, node: input, sync: function () { input.value = cfg[key]; paint(); } });
     return input;
   }
 
-  function addToggle(parent, key, label) {
-    var row = el('div', 'toggle ' + SV);
-    var h = el('h4', SV, label);
+  function addToggle(parent, key, label, sc) {
+    var row = el('div', 'toggle ' + FX);
+    var h = el('h4', sc || FX, label);
     h.style.margin = '0';
 
     var lab = el('label', TG);
@@ -688,13 +735,13 @@
     row.appendChild(h);
     row.appendChild(lab);
     parent.appendChild(row);
-    controls.push({ key: key, sync: paint });
+    controls.push({ key: key, node: row, sync: paint });
     return row;
   }
 
-  function addChoice(parent, key, label, values, labels) {
-    var h = heading(label, labels[values.indexOf(cfg[key])] || cfg[key]);
-    var input = el('input', SV);
+  function addChoice(parent, key, label, values, labels, sc) {
+    var h = heading(label, labels[values.indexOf(cfg[key])] || cfg[key], sc);
+    var input = el('input', FX);
     input.type = 'range';
     input.min = 0; input.max = values.length - 1; input.step = 1;
     input.value = Math.max(0, values.indexOf(cfg[key]));
@@ -715,16 +762,17 @@
     paint();
     parent.appendChild(h);
     parent.appendChild(input);
-    controls.push({ key: key, sync: paint });
+    controls.push({ key: key, node: input, sync: paint });
     return input;
   }
 
-  function addRule(parent) { parent.appendChild(el('hr', SV)); }
+  function addRule(parent) { parent.appendChild(el('hr', FX)); }
 
-  function card(title) {
-    var c = el('div', 'setting ' + SV + ' psx-injected');
+  function card(title, sc) {
+    sc = sc || FX;
+    var c = el('div', 'setting ' + sc + ' psx-injected');
     if (title) {
-      var h = el('h4', SV, title);
+      var h = el('h4', sc, title);
       h.style.opacity = '.5';
       h.style.letterSpacing = '.08em';
       h.style.textTransform = 'uppercase';
@@ -734,11 +782,11 @@
     return c;
   }
 
-  function buildSections() {
-    controls = [];
+  // --- Effects tab: how it renders -----------------------------------------
+
+  function buildEffects() {
     var frag = document.createDocumentFragment();
 
-    // --- render -------------------------------------------------------
     var r = card('PSX Render');
     addToggle(r, 'enabled', 'PSX mode');
     addToggle(r, 'nearestTextures', 'Nearest textures');
@@ -747,49 +795,57 @@
     addRule(r);
     addRange(r, 'pixelRatio', 'Render scale', 0.25, 2, 0.25, function (v) { return v + 'x'; });
 
-    var note = el('div', SV, 'PSX mode, MSAA, SMAA and render scale apply on reload.');
+    var note = el('div', FX, 'PSX mode, MSAA, SMAA and render scale apply on reload.');
     note.id = 'psx-reload-note';
     note.style.cssText = 'width:100%;opacity:.5;font-size:12px;margin-top:16px;text-align:left';
     note.style.display = pendingReload ? '' : 'none';
-    var btn = el('button', 'trigger ' + BTN, 'Reload to apply');
+    var btn = el('button', 'trigger ' + STG, 'Reload to apply');
     btn.style.marginTop = '12px';
     btn.addEventListener('click', function () { location.reload(); });
     note.appendChild(btn);
     r.appendChild(note);
-    frag.appendChild(r);
 
-    // --- expressions --------------------------------------------------
-    var x = card('Face Expressions');
-    addToggle(x, 'uvExpressions', 'Texture expressions');
-    addToggle(x, 'snapExpressions', 'Snap to cell');
-    addToggle(x, 'uvFlipV', 'Flip V axis');
+    r.classList.add('last');
+    frag.appendChild(r);
+    return frag;
+  }
+
+  // --- Settings tab: calibrating one model ---------------------------------
+
+  function buildSettings() {
+    var frag = document.createDocumentFragment();
+
+    var x = card('Face Expressions', STG);
+    addToggle(x, 'uvExpressions', 'Texture expressions', STG);
+    addToggle(x, 'snapExpressions', 'Snap to cell', STG);
+    addToggle(x, 'uvFlipV', 'Flip V axis', STG);
     addRule(x);
-    addRange(x, 'threshold', 'Trigger threshold', 0, 1, 0.01, function (v) { return v.toFixed(2); });
-    addRange(x, 'hysteresis', 'Release margin', 0, 0.5, 0.01, function (v) { return v.toFixed(2); });
-    addRange(x, 'holdMs', 'Minimum hold', 0, 400, 10, function (v) { return v + ' ms'; });
+    addRange(x, 'threshold', 'Trigger threshold', 0, 1, 0.01, function (v) { return v.toFixed(2); }, STG);
+    addRange(x, 'hysteresis', 'Release margin', 0, 0.5, 0.01, function (v) { return v.toFixed(2); }, STG);
+    addRange(x, 'holdMs', 'Minimum hold', 0, 400, 10, function (v) { return v + ' ms'; }, STG);
     addRule(x);
-    addRange(x, 'mouthGain', 'Mouth gain', 0.25, 3, 0.05, function (v) { return v.toFixed(2) + 'x'; });
-    addRange(x, 'blinkGain', 'Blink gain', 0.25, 3, 0.05, function (v) { return v.toFixed(2) + 'x'; });
+    addRange(x, 'mouthGain', 'Mouth gain', 0.25, 3, 0.05, function (v) { return v.toFixed(2) + 'x'; }, STG);
+    addRange(x, 'blinkGain', 'Blink gain', 0.25, 3, 0.05, function (v) { return v.toFixed(2) + 'x'; }, STG);
     addRule(x);
     var keys = expressionKeys();
     if (keys.length) {
-      addChoice(x, 'preview', 'Preview cell', [''].concat(keys), ['live tracking'].concat(keys));
+      addChoice(x, 'preview', 'Preview cell', [''].concat(keys), ['live tracking'].concat(keys), STG);
     } else {
-      var hint = el('div', SV, 'Load a VRM to calibrate individual cells.');
+      var hint = el('div', STG, 'Load a VRM to calibrate individual cells.');
       hint.style.cssText = 'width:100%;opacity:.5;font-size:12px;text-align:left';
       x.appendChild(hint);
     }
     frag.appendChild(x);
 
-    // --- hands / debug ------------------------------------------------
-    var hnd = card('PSX Hands');
+    var hnd = card('PSX Hands', STG);
     addChoice(hnd, 'fingers', 'Driven fingers', ['all', 'thumb', 'none'],
-      ['all fingers', 'thumb only', 'none']);
-    var dbg = el('button', 'trigger ' + BTN, 'Log diagnostics to console');
+      ['all fingers', 'thumb only', 'none'], STG);
+    var dbg = el('button', 'trigger ' + STG, 'Log diagnostics to console');
     dbg.style.marginTop = '20px';
     dbg.addEventListener('click', function () { dump(); });
     hnd.appendChild(dbg);
-    hnd.classList.add('last');
+    // .last only exists in the Effects scope, so carry FX along for the margin
+    hnd.classList.add('last', FX);
     frag.appendChild(hnd);
 
     return frag;
@@ -799,10 +855,16 @@
     for (var i = 0; i < controls.length; i++) controls[i].sync();
   }
 
-  function settingsContainer() {
+  // The Effects panel has no class of its own we can rely on, but it owns the
+  // #temp swatch (the Light Color picker mounts into it).
+  function effectsContainer() {
     var probe = document.getElementById('temp');
     if (!probe || !probe.closest) return null;
-    return probe.closest('container.' + SV);
+    return probe.closest('container.' + FX);
+  }
+
+  function settingsContainer() {
+    return document.querySelector('container.' + STG);
   }
 
   var injectQueued = false;
@@ -816,18 +878,35 @@
     });
   }
 
-  function tryInject() {
-    var c = settingsContainer();
+  // A panel is torn down when its tab closes, taking our cards with it. Drop the
+  // orphaned control handles instead of resetting the list, so the panel that is
+  // still mounted keeps syncing.
+  function pruneControls() {
+    var live = [];
+    for (var i = 0; i < controls.length; i++) {
+      if (controls[i].node && controls[i].node.isConnected) live.push(controls[i]);
+    }
+    controls = live;
+  }
+
+  function injectInto(c, build, keyed) {
     if (!c) return;
-    var existing = c.querySelectorAll('.psx-injected');
-    // rebuild if the model changed the available preview cells
+    // only the Settings side lists per-model expression cells, so it is the
+    // only one that has to be rebuilt when the loaded model changes
     var wantKeys = expressionKeys().length;
+    var existing = c.querySelectorAll('.psx-injected');
     if (existing.length) {
-      if (c.__psxKeys === wantKeys) return;
+      if (!keyed || c.__psxKeys === wantKeys) return;
       Array.prototype.forEach.call(existing, function (n) { n.remove(); });
     }
     c.__psxKeys = wantKeys;
-    c.appendChild(buildSections());
+    c.appendChild(build());
+  }
+
+  function tryInject() {
+    pruneControls();
+    injectInto(effectsContainer(), buildEffects, false);
+    injectInto(settingsContainer(), buildSettings, true);
   }
 
   function startObserver() {
