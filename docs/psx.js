@@ -1933,6 +1933,42 @@
     return input;
   }
 
+  // A range input is the right control for something ordinal - a colour depth,
+  // a shadow resolution. It is the wrong one for picking between names, and
+  // absurd for a list that can grow, like the expression cells. Those get the
+  // app's own <select>, whose styling is only defined in the Settings scope, so
+  // the wrapper always carries STG even when the card lives in Effects.
+  function addSelect(parent, key, label, values, labels, sc) {
+    var h = el('h4', sc || FX, label);
+    var wrap = el('div', 'select ' + STG);
+    var sel = el('select', STG);
+    sel.setAttribute('aria-label', label);
+    sel.setAttribute('name', 'psx-' + key);
+
+    for (var i = 0; i < values.length; i++) {
+      var opt = el('option', STG, labels[i]);
+      opt.value = String(i);
+      sel.appendChild(opt);
+    }
+
+    function paint() {
+      var idx = values.indexOf(cfg[key]);
+      sel.value = String(idx < 0 ? 0 : idx);
+    }
+    sel.addEventListener('change', function () {
+      cfg[key] = values[parseInt(sel.value, 10)];
+      onChange(key);
+    });
+    paint();
+
+    wrap.appendChild(sel);
+    wrap.appendChild(el('div', 'select_arrow ' + STG));
+    parent.appendChild(h);
+    parent.appendChild(wrap);
+    controls.push({ key: key, node: sel, sync: paint });
+    return sel;
+  }
+
   function addRule(parent) { parent.appendChild(el('hr', FX)); }
 
   // Shown only once a reload-only key has been touched. Both panels get one,
@@ -2012,7 +2048,7 @@
     addRule(x);
     var keys = expressionKeys();
     if (keys.length) {
-      addChoice(x, 'preview', T('Preview cell'), [''].concat(keys), [T('live tracking')].concat(keys), STG);
+      addSelect(x, 'preview', T('Preview cell'), [''].concat(keys), [T('live tracking')].concat(keys), STG);
     } else {
       var hint = el('div', STG, T('Load a VRM to calibrate individual cells.'));
       hint.style.cssText = 'width:100%;opacity:.5;font-size:12px;text-align:left';
@@ -2026,7 +2062,7 @@
     emNote.style.cssText = 'width:100%;opacity:.5;font-size:12px;margin:0 0 4px;text-align:left';
     em.appendChild(emNote);
     addToggle(em, 'emotions', T('Detect emotions'), STG);
-    addChoice(em, 'signal', T('Signal range'), ['calibrated', 'auto', 'raw'],
+    addSelect(em, 'signal', T('Signal range'), ['calibrated', 'auto', 'raw'],
       [T('calibrated'), T('auto'), T('raw')], STG);
     addToggle(em, 'exclusive', T('Strongest only'), STG);
     addRule(em);
@@ -2038,7 +2074,7 @@
     addRange(em, 'sorrowAt', T('Sorrow at'), 0, 0.95, 0.01, function (v) { return v.toFixed(2); }, STG);
     addRange(em, 'smileAt', T('Smile at'), 0, 0.95, 0.01, function (v) { return v.toFixed(2); }, STG);
     addRule(em);
-    addChoice(em, 'smileKey', T('Smile drives'), ['fun', 'joy', 'both'],
+    addSelect(em, 'smileKey', T('Smile drives'), ['fun', 'joy', 'both'],
       ['fun', 'joy', T('fun + joy')], STG);
     addRule(em);
 
@@ -2112,10 +2148,10 @@
     frag.appendChild(pf);
 
     var hnd = card(T('PSX Hands'), STG);
-    addChoice(hnd, 'lang', T('Language'), ['en', 'pt'],
+    addSelect(hnd, 'lang', T('Language'), ['en', 'pt'],
       [T('English'), T('Portuguese (BR)')], STG);
     addRule(hnd);
-    addChoice(hnd, 'fingers', T('Driven fingers'), ['all', 'thumb', 'none'],
+    addSelect(hnd, 'fingers', T('Driven fingers'), ['all', 'thumb', 'none'],
       [T('all fingers'), T('thumb only'), T('none')], STG);
     var dbg = el('button', 'trigger ' + STG, T('Log diagnostics to console'));
     dbg.style.marginTop = '20px';
