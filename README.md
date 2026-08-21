@@ -1,4 +1,4 @@
-# Kalidoface 3D — PSX Edition
+# Kalidoface PSX
 
 > **This is a fork of [yeemachine/kalidoface-3d](https://github.com/yeemachine/kalidoface-3d), retuned for PSX / low-poly VRM models.**
 >
@@ -8,6 +8,12 @@
 > texture cells* (UV offsets on a face atlas) instead of morph targets.
 > This fork adds a compatibility layer, `docs/psx.js`, that makes those models look
 > and animate the way they're supposed to.
+>
+> **There is no PSX mode to switch on.** Point sampling, no antialiasing, affine
+> texture mapping, no realtime shadows and no eye aim are not options here — the
+> hardware being imitated had no setting for them either. What remains adjustable
+> is what genuinely varies between models and machines: render scale, snap grid,
+> colour depth, tracking rates and per-model calibration.
 
 ## What the PSX layer does
 
@@ -202,7 +208,10 @@ models and nothing else:
 | **Realtime shadows** | Two shadow-casting lights at 2048×2048, so two extra full-scene depth passes every frame and ~33 MB of VRAM. The PS1 had no realtime shadows at all — it stamped a blob on the floor. `PSX.shadows()` returns `false`, and upstream's Shadow Strength / Shadow Blur sliders are hidden with it |
 | **Eye aim** | `PSX.gaze()` replaces `lookAt.applyer.lookAt()` and does nothing. A PSX face keeps its eyes on the texture atlas: it blinks by swapping a cell, it does not swivel. Aiming eye bones at a solved pupil is wasted work that reads wrong |
 | **Iris / lip refinement** | `refineFaceLandmarks` is forced off. It is a whole extra network per frame, placing iris landmarks and denser lip contours — detail a texture atlas cannot show, and its main consumer was the eye aim above |
-| **Upstream's replaced controls** | Pixelate, Outline, Water Animation, Light Cube Experiment and Smile Detection are hidden and pinned unconditionally — see below. An option to restore a control that costs performance and fights a PSX one would only be an option to make it worse |
+| **Antialiasing** | `PSX.aa()` and `PSX.smaa()` both return `false`. The console had none, so neither MSAA nor the SMAA pass is a choice |
+| **Texture filtering** | Always nearest-neighbour, no mipmaps, no anisotropy. The PS1 point-sampled; there was no bilinear filter to turn on |
+| **Affine mapping** | Always on where a material has a uv varying to rescale. Turning it off would not be a preference, it would be a different console |
+| **Upstream's replaced controls** | Pixelate, Outline, Water Animation, Light Cube Experiment, Light Colour, Light Position and Smile Detection are hidden and pinned unconditionally — see below. An option to restore a control that costs performance or fights a PSX one would only be an option to make it worse |
 
 Stack these with **Render scale** in the Effects tab: at `0.5x` the renderer
 draws a quarter of the pixels, which is the single biggest GPU win and the
@@ -257,7 +266,7 @@ and scoped class names, so they look native. Controls are split by what they do:
 
 **Effects tab** — the render look, next to the app's own Pixelate / Outline effects:
 
-- **PSX Render** — PSX mode, Nearest textures, MSAA, SMAA, Render scale (0.25x–2x), Vertex snapping, Snap grid, Affine textures, Dither, Colour depth
+- **PSX Render** — Render scale (0.25x–2x), Vertex snapping, Snap grid, Dither, Colour depth
 
 **Settings tab** — per-model calibration, next to the app's own tracking options:
 

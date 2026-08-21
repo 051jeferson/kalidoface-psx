@@ -38,17 +38,9 @@
   var NL = String.fromCharCode(10);
 
   var DEFAULTS = {
-    // master switch; when false every hook falls back to stock behaviour
-    enabled: false,
     // render at 1 device pixel per CSS pixel and let CSS upscale with
     // image-rendering:pixelated -> hard pixel edges instead of a 2x downsample
     pixelRatio: 1,
-    // WebGL MSAA. Off for PSX.
-    antialias: false,
-    // SMAA post pass. Off for PSX.
-    smaa: false,
-    // nearest-neighbour texture sampling, no mipmaps, no anisotropy
-    nearestTextures: true,
     // 'en' | 'pt' - the panel language, and the app's own labels with it
     lang: 'en',
 
@@ -58,9 +50,6 @@
     // from. Lower grid = coarser = wobblier.
     vertexSnap: true,
     snapGrid: 160,
-    // It also had no perspective correction, so textures visibly warp across
-    // large polygons. This is the single most recognisable PS1 artifact.
-    affine: true,
     // 15-bit output, 5 bits per channel, with ordered dithering to hide the
     // banding. 32 levels per channel is the real thing.
     dither: true,
@@ -245,7 +234,9 @@
     console.log.apply(console, ['[psx]'].concat([].slice.call(arguments)));
   }
 
-  function on() { return !!cfg.enabled; }
+  // There is no "off". This is a PSX fork: a switch back to stock behaviour
+  // would just be a switch to being upstream, which is one clone away.
+  function on() { return true; }
   function now() { return (window.performance && performance.now) ? performance.now() : Date.now(); }
 
   // ---------------------------------------------------------------- renderer
@@ -297,38 +288,30 @@
 
   // three allocates immutable storage (texStorage2D) for a texture on its first
   // upload, with a mip level count decided by generateMipmaps/minFilter at that
-  // moment. `needsUpdate` re-uploads but never reallocates, so switching a
-  // 1-level texture to a mipmap minFilter afterwards makes glGenerateMipmap fail
-  // and pushes texSubImage2D at a level that does not exist -> the texture goes
-  // black and stays black, because the broken GL object is reused.
+  // moment. `needsUpdate` re-uploads but never reallocates, so a texture already
+  // uploaded with mipmaps has to be disposed before it can come back as a
+  // 1-level nearest one - otherwise glGenerateMipmap fails, texSubImage2D writes
+  // at a level that does not exist, and the texture goes black and stays black
+  // because the broken GL object keeps being reused.
   //
-  // Disposing first drops the GL texture, so the next render allocates fresh
-  // storage with the right level count. We only do it when the filtering
-  // actually changed, to avoid re-uploading every texture on unrelated edits.
-  //
-  // The restore path puts back what the VRM authored, not a hardcoded
-  // linear+mipmap guess: some of these textures are authored without mipmaps on
-  // purpose (formats that cannot generate them), and anisotropy has to come back
-  // from the original too.
+  // Only dispose when the filtering actually changes, so unrelated edits do not
+  // re-upload every texture on the model.
+  // Not options. The console point-sampled its textures - there was no bilinear
+  // filter to turn on - and it had no antialiasing of any kind. A switch for
+  // either would only be a switch for looking wrong.
   function applyTextureFilter(vrm) {
-    var nearest = on() && cfg.nearestTextures;
     eachMaterial(vrm, function (m) {
       var touched = false;
       for (var i = 0; i < TEXTURE_SLOTS.length; i++) {
         var t = m[TEXTURE_SLOTS[i]];
         if (!t || !t.isTexture) continue;
 
-        if (!t.__psxOrig) {
-          t.__psxOrig = {
-            magFilter: t.magFilter,
-            minFilter: t.minFilter,
-            generateMipmaps: t.generateMipmaps,
-            anisotropy: t.anisotropy
-          };
-        }
-        var want = nearest
-          ? { magFilter: NearestFilter, minFilter: NearestFilter, generateMipmaps: false, anisotropy: 1 }
-          : t.__psxOrig;
+        var want = {
+          magFilter: NearestFilter,
+          minFilter: NearestFilter,
+          generateMipmaps: false,
+          anisotropy: 1
+        };
 
         if (t.magFilter === want.magFilter &&
             t.minFilter === want.minFilter &&
@@ -375,7 +358,11 @@
     psxU.levels.value = (on() && cfg.dither) ? cfg.colorLevels : 0;
   }
 
-  function affineOn() { return on() && cfg.affine; }
+  // Affine mapping is the single most recognisable PS1 artifact: the console had
+  // no perspective correction, so textures warp across large polygons. Turning
+  // it off would not be a preference, it would be a different console. It is
+  // still skipped per material where there is no uv varying to rescale.
+  function affineOn() { return true; }
 
   // GLSL has no strings, so brace counting is enough to find the end of main.
   function appendToMain(src, code) {
@@ -520,12 +507,7 @@
       // give this material its own texture instance so sliding its UVs does
       // not drag every other material sharing the same image along with it
       if (mat.map && mat.map.isTexture) {
-        var src = mat.map;
-        mat.map = src.clone();
-        // Texture.copy() does not carry custom fields, and this clone can be
-        // made while PSX filtering is already applied - without this the clone
-        // would record nearest as its authored state and never restore.
-        if (src.__psxOrig) mat.map.__psxOrig = src.__psxOrig;
+        mat.map = mat.map.clone();
         mat.map.needsUpdate = true;
       }
       var e = {
@@ -1123,6 +1105,12 @@
     // Composer again, plus a per-frame animation step.
     { aria: ['Animation Off', 'Animation On'], card: '.setting', pin: false },
     { aria: ['Disable Experiment', 'Enable Experiment'], card: '.setting', pin: false },
+    // Light colour and the two light position sliders. A PSX avatar is lit by
+    // its texture, not by a rig the viewer is meant to pose; these only give a
+    // way to make it read worse. Hidden rather than pinned, so whatever the
+    // scene is currently lit by stays as it is. The card also holds #temp,
+    // which effectsContainer() anchors on - display:none keeps it findable.
+    { find: 'input[name="lightRotX"]', card: '.setting' },
     // This one is not merely redundant. The app subtracts its smile value from
     // every vowel and from the blink, so it drags the mouth cells below the
     // expression threshold and the lip sync degrades. PSX.face also overwrites
@@ -1201,12 +1189,9 @@
   var PT = {
     // --- Effects / render ---
     'PSX Render': 'Render PSX',
-    'PSX mode': 'Modo PSX',
-    'Nearest textures': 'Texturas nearest',
     'Render scale': 'Escala de render',
     'Vertex snapping': 'Snap de vertices',
     'Snap grid': 'Grade do snap',
-    'Affine textures': 'Texturas afins',
     'Dither': 'Dithering',
     'Colour depth': 'Profundidade de cor',
     '3 bit': '3 bits',
@@ -1311,7 +1296,7 @@
     'Portuguese (BR)': 'Portugues (BR)',
 
     // --- notes ---
-    'note.reloadRender': 'Modo PSX, MSAA, SMAA e escala de render sao aplicados ao recarregar.',
+    'note.reloadRender': 'A escala de render e aplicada ao recarregar.',
     'note.reloadPerf': 'As opcoes do modelo Mediapipe sao aplicadas ao recarregar. Os limites de taxa valem na hora.',
     'note.emotions': 'O app so rastreia piscadas, as cinco vogais e um sorriso. Bravo, triste e fun nunca sao escritos - isto os deriva da sobrancelha e da boca para que essas celulas possam disparar. Faca cada careta e observe a leitura para ajustar os limiares.',
     'note.motion': 'Os ganhos de pescoco e torso sao fixos no app, entao um movimento real pequeno vira um movimento grande no avatar. Baixe o ganho para mexer menos, aumente o amortecimento para mexer mais devagar.',
@@ -1344,7 +1329,7 @@
   };
 
   var EN = {
-    'note.reloadRender': 'PSX mode, MSAA, SMAA and render scale apply on reload.',
+    'note.reloadRender': 'Render scale applies on reload.',
     'note.reloadPerf': 'The Mediapipe model options apply on reload. ' +
       'The rate caps take effect immediately.',
     'note.emotions': 'The app only tracks blinks, the five vowels and a smile. Angry, ' +
@@ -1780,17 +1765,12 @@
 
   // Keys the app only reads once, at startup: the renderer flags, the shadow
   // map setup, and the Mediapipe model options.
-  // Toggling affine rewrites the shader program, so those materials have to be
-  // rebuilt; the rest are uniforms and take effect on the next frame.
-  var RECOMPILES = { affine: 1 };
-
   // The labels are baked into the DOM when a card is built, so switching
   // language means throwing the cards away and building them again.
   var REBUILDS = { lang: 1 };
 
   var NEEDS_RELOAD = {
-    enabled: 1, pixelRatio: 1, antialias: 1, smaa: 1,
-    perf: 1, poseLite: 1
+    pixelRatio: 1, perf: 1, poseLite: 1
   };
   var pendingReload = false;
 
@@ -1822,7 +1802,7 @@
       Array.prototype.forEach.call(notes, function (n) { n.style.display = ''; });
     } else {
       applyCanvasFilter();
-      if (RECOMPILES[key]) refreshShaders(); else syncShaderUniforms();
+      syncShaderUniforms();
       if (REBUILDS[key]) rebuildPanels();
       applyStrip();
       refreshModels();
@@ -2003,16 +1983,10 @@
     var frag = document.createDocumentFragment();
 
     var r = card(T('PSX Render'));
-    addToggle(r, 'enabled', T('PSX mode'));
-    addToggle(r, 'nearestTextures', T('Nearest textures'));
-    addToggle(r, 'antialias', T('MSAA'));
-    addToggle(r, 'smaa', T('SMAA'));
-    addRule(r);
     addRange(r, 'pixelRatio', T('Render scale'), 0.25, 2, 0.25, function (v) { return v + 'x'; });
     addRule(r);
     addToggle(r, 'vertexSnap', T('Vertex snapping'));
     addRange(r, 'snapGrid', T('Snap grid'), 32, 480, 8, function (v) { return v + ''; });
-    addToggle(r, 'affine', T('Affine textures'));
     addRule(r);
     addToggle(r, 'dither', T('Dither'));
     addChoice(r, 'colorLevels', T('Colour depth'), [8, 16, 32, 64],
@@ -2363,8 +2337,9 @@
       applyCanvasFilter();
       return r;
     },
-    aa: function () { return on() ? !!cfg.antialias : true; },
-    smaa: function () { return on() ? !!cfg.smaa : true; },
+    // The console had no antialiasing of any kind, so neither does this.
+    aa: function () { return false; },
+    smaa: function () { return false; },
     fingers: function () {
       var all = ['Ring', 'Index', 'Little', 'Thumb', 'Middle'];
       if (!on() || cfg.fingers === 'all') return all;
