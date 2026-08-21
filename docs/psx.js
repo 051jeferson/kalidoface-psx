@@ -790,7 +790,13 @@
   // the pose, then samples briefly while they hold it - which is the whole
   // reason a guided calibration beats a continuous one, and it only works if
   // they are actually in the pose when it reads.
-  var CAL_HOLD = 900;   // ms of sampling once they confirm
+  var CAL_HOLD = 1400;   // ms of sampling once they confirm
+  // Pressing the key jolts the head, and people are still settling into the
+  // pose for a moment after they say they are in it. Those frames are the worst
+  // ones in the window, so they are not read at all.
+  var CAL_SETTLE = 250;
+  // Below this there are not enough frames for a percentile to mean anything.
+  var CAL_MIN_SAMPLES = 8;
   var calRun = null;
   var calEl = null;
   var calBtn = null;
@@ -799,11 +805,32 @@
   var calCancelBtn = null;
   var calMotionCancelBtn = null;
 
+  // A single bad frame - a dropped track, a blink, a head jerk - used to define
+  // the whole span, because the extremes were taken as an absolute min or max.
+  // Keeping the samples and reading a percentile off them costs nothing at this
+  // size and throws that frame away instead of building the calibration on it.
   function stepAccum() {
-    return {
-      n: 0, browSum: 0, browMin: Infinity, browMax: -Infinity, smileSum: 0, smileMax: -Infinity,
-      ySum: 0, xSum: 0, yDev: 0, xDev: 0
-    };
+    return { brow: [], smile: [], y: [], x: [] };
+  }
+
+  function pct(arr, q) {
+    if (!arr.length) return 0;
+    var a = arr.slice().sort(function (m, n) { return m - n; });
+    var i = (a.length - 1) * q;
+    var lo = Math.floor(i), hi = Math.ceil(i);
+    return lo === hi ? a[lo] : a[lo] + (a[hi] - a[lo]) * (i - lo);
+  }
+
+  function median(a) { return pct(a, 0.5); }
+
+  // Spread of the middle half. A pose held still has a small one; a shaky pose
+  // has a large one, and its reading is worth less.
+  function spread(a) { return pct(a, 0.75) - pct(a, 0.25); }
+
+  function deviations(arr, rest) {
+    var out = [];
+    for (var i = 0; i < arr.length; i++) out.push(Math.abs(arr[i] - rest));
+    return out;
   }
 
   function steps() { return calRun.kind === 'motion' ? MOTION_STEPS : CAL_STEPS; }
@@ -818,7 +845,8 @@
   function captureStep() {
     if (!calRun || calRun.phase !== 'wait') return;
     calRun.phase = 'hold';
-    calRun.until = now() + CAL_HOLD;
+    calRun.holdFrom = now();
+    calRun.until = calRun.holdFrom + CAL_HOLD;
     calRun.acc = stepAccum();
     calTick();
     syncCalUi();
@@ -856,32 +884,48 @@
   function advanceCalibration() {
     var st = steps()[calRun.i];
     var a = calRun.acc;
-    if (!a.n) {
-      stopCalibration(T('No face was tracked during') + ' "' + T(st.title) + '". ' +
-        T('Start face tracking and try again.'));
+    var motion = calRun.kind === 'motion';
+    var n = motion ? a.y.length : a.brow.length;
+
+    if (n < CAL_MIN_SAMPLES) {
+      // Redo the step rather than record it: a span built on three frames is
+      // worse than no calibration, because it looks like one.
+      calRun.phase = 'wait';
+      paintCalibration(0);
+      syncCalUi();
+      setText(calTarget(), T('Only') + ' ' + n + ' ' +
+        T('frames were read - hold the pose and try that step again.'));
+      syncCalUi();
       return;
     }
-    if (calRun.kind === 'motion') {
+
+    if (motion) {
       if (st.key === 'rest') {
-        calRun.out.restY = a.ySum / a.n;
-        calRun.out.restX = a.xSum / a.n;
+        calRun.out.restY = median(a.y);
+        calRun.out.restX = median(a.x);
       } else {
-        // whichever axis this pose is meant to move; the deviation is measured
-        // against the resting head recorded in step one
-        calRun.out[st.key] = (st.key === 'left' || st.key === 'right') ? a.yDev : a.xDev;
+        var yaw = st.key === 'left' || st.key === 'right';
+        var arr = yaw ? a.y : a.x;
+        var rest = yaw ? calRun.out.restY : calRun.out.restX;
+        // 90th percentile of the deviation, not the largest one seen
+        calRun.out[st.key] = pct(deviations(arr, rest), 0.9);
+        calRun.shake = Math.max(calRun.shake || 0, spread(arr));
       }
       nextStep(MOTION_STEPS.length, finishMotion);
       return;
     }
+
     if (st.key === 'rest') {
-      calRun.out.browRest = a.browSum / a.n;
-      calRun.out.smileRest = a.smileSum / a.n;
+      calRun.out.browRest = median(a.brow);
+      calRun.out.smileRest = median(a.smile);
     } else if (st.key === 'down') {
-      calRun.out.browDown = a.browMin;
+      calRun.out.browDown = pct(a.brow, 0.1);
+      calRun.shake = Math.max(calRun.shake || 0, spread(a.brow));
     } else if (st.key === 'up') {
-      calRun.out.browUp = a.browMax;
+      calRun.out.browUp = pct(a.brow, 0.9);
+      calRun.shake = Math.max(calRun.shake || 0, spread(a.brow));
     } else if (st.key === 'smile') {
-      calRun.out.smileMax = a.smileMax;
+      calRun.out.smileMax = pct(a.smile, 0.9);
     }
     nextStep(CAL_STEPS.length, finishCalibration);
   }
@@ -891,6 +935,14 @@
   // clipping - which is the same fix as the expression calibration, applied to
   // movement. The torso is driven by the same head signal, so it keeps its
   // stock ratio to the head.
+  // The middle half of a held pose should barely move. When it does not, the
+  // percentile is reading a moving target and the result is worth less.
+  function shakeNote(range) {
+    if (!calRun || !calRun.shake || !range) return '';
+    if (calRun.shake < range * 0.35) return '';
+    return T('The poses moved a lot while being read; redo it holding stiller for a tighter fit.') + ' ';
+  }
+
   function finishMotion() {
     var c = calRun.out;
     var devY = Math.max(c.left || 0, c.right || 0);
@@ -908,7 +960,7 @@
     save();
     syncControls();
 
-    stopCalibration(T('Calibrated') + ' - ' + T('turn') + ' ' + devY.toFixed(2) +
+    stopCalibration(shakeNote(dev) + T('Calibrated') + ' - ' + T('turn') + ' ' + devY.toFixed(2) +
       ', ' + T('tilt') + ' ' + devX.toFixed(2) + '  ->  ' +
       T('Head / neck gain') + ' ' + cfg.headGain.toFixed(2) +
       ', ' + T('Torso gain') + ' ' + cfg.bodyGain.toFixed(3) + '.');
@@ -929,11 +981,13 @@
     save();
     syncControls();
 
-    var msg = 'Calibrated - furrow ' + down.toFixed(3) +
-      ', raise ' + up.toFixed(3) + ', smile ' + sm.toFixed(3) + '.';
+    var msg = shakeNote(Math.max(down, up)) + T('Calibrated') +
+      ' - ' + T('furrow') + ' ' + down.toFixed(3) +
+      ', ' + T('raise') + ' ' + up.toFixed(3) +
+      ', ' + T('smile') + ' ' + sm.toFixed(3) + '.';
     if (weak.length) {
-      msg += ' The ' + weak.join(' and ') + ' barely moved; redo that step with a ' +
-        'bigger expression if it does not trigger.';
+      msg += ' ' + T('These barely moved:') + ' ' + weak.join(', ') + '. ' +
+        T('Redo that step with a bigger expression if it does not trigger.');
     }
     log('calibration', c);
     stopCalibration(msg);
@@ -960,25 +1014,17 @@
   // producing rather than the mapped value.
   function sampleCalibration(rawBrow, rawSmile, rig) {
     if (!calRun || calRun.phase !== 'hold') return;
+    if (now() - calRun.holdFrom < CAL_SETTLE) return;
     var a = calRun.acc;
-    a.n++;
     if (calRun.kind === 'motion') {
       var h = rig && rig.head;
-      if (!h) { a.n--; return; }
-      var y = num(h.y), x = num(h.x);
-      a.ySum += y;
-      a.xSum += x;
-      if (calRun.out.restY !== undefined) {
-        a.yDev = Math.max(a.yDev, Math.abs(y - calRun.out.restY));
-        a.xDev = Math.max(a.xDev, Math.abs(x - calRun.out.restX));
-      }
+      if (!h) return;
+      a.y.push(num(h.y));
+      a.x.push(num(h.x));
       return;
     }
-    a.browSum += rawBrow;
-    if (rawBrow < a.browMin) a.browMin = rawBrow;
-    if (rawBrow > a.browMax) a.browMax = rawBrow;
-    a.smileSum += rawSmile;
-    if (rawSmile > a.smileMax) a.smileMax = rawSmile;
+    a.brow.push(rawBrow);
+    a.smile.push(rawSmile);
   }
 
   // Each brow direction gets its own span, which is the whole point of asking
@@ -1252,6 +1298,11 @@
     'Hold the pose, then press Space. Esc cancels.':
       'Faca a pose, segure, e aperte Espaco. Esc cancela.',
     'Reading, keep holding...': 'Lendo, continue segurando...',
+    'Only': 'Apenas',
+    'frames were read - hold the pose and try that step again.':
+      'frames foram lidos - segure a pose e refaca esse passo.',
+    'The poses moved a lot while being read; redo it holding stiller for a tighter fit.':
+      'As poses se mexeram bastante durante a leitura; refaca segurando mais firme para um ajuste melhor.',
     'Face the camera': 'Encare a camera',
     'Head straight, shoulders square': 'Cabeca reta, ombros alinhados',
     'Turn your head left': 'Vire a cabeca para a esquerda',
@@ -1266,6 +1317,12 @@
     'No face was tracked during': 'Nenhum rosto foi detectado durante',
     'Start face tracking and try again.': 'Ligue o rastreio facial e tente de novo.',
     'Calibrated': 'Calibrado',
+    'These barely moved:': 'Estes quase nao se mexeram:',
+    'Redo that step with a bigger expression if it does not trigger.':
+      'Refaca esse passo com uma expressao maior se ele nao disparar.',
+    'furrow': 'franzir',
+    'raise': 'levantar',
+    'smile': 'sorriso',
     'turn': 'giro',
     'tilt': 'inclinacao',
     'neutral': 'neutro',

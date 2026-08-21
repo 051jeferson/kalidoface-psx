@@ -104,9 +104,20 @@ unreachable and the emotion simply never fires. Three modes:
 **Calibrate expressions** runs a short guided pass, the way a game asks you to
 hold a stick at its extremes. It prompts for four poses — relax, furrow, raise,
 smile — and waits: get into the pose, hold it, then press **Space** (or click the
-button) and it reads for under a second. `Esc` cancels. Nothing is on a timer, so
-the reading always happens while you are actually in the pose. It then records
+button) and it reads for about a second and a half. `Esc` cancels. Nothing is on a timer,
+so the reading always happens while you are actually in the pose. It then records
 what your face reached and switches the mode to `calibrated`.
+
+The reading is deliberately not a maximum. Extremes were taken as an absolute
+min/max, so one glitched frame — a dropped track, a blink, a head jerk — defined
+the whole span: a single `-9.0` outlier during a `0.5` head turn produced a gain
+of `0.09` instead of `1.5`. Each step now keeps its samples and reads a
+percentile off them (the 90th for an extreme, the median for the resting pose),
+skips the first 250 ms while you settle after the keypress, and refuses to record
+a step that caught fewer than 8 frames — a span built on three frames is worse
+than no calibration, because it looks like one. It also measures how much the
+middle half of each pose moved and says so if you were too shaky for the fit to
+mean much.
 
 This beats `auto` because it records **a separate span per direction**. Most
 people furrow much further than they raise, and continuous auto-calibration has
