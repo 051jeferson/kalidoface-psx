@@ -12,10 +12,13 @@
  *   PSX.fingers()                - finger list used by the hand rig
  *   PSX.onModel(vrm, gltf)       - called once per loaded VRM
  *   PSX.tick(vrm)                - called once per frame, after vrm.update()
+ *   PSX.face(vrm, rig)           - the solved Kalidokit face, before it lands
+ *   PSX.headGain() / bodyGain()  - neck and chest/spine rotation gain
+ *   PSX.smooth(t)                - lerp factor for every tracked bone
  *
- * The controls are injected into the app's own Settings tab and reuse its
- * markup and scoped class names, so they look like the rest of the panel.
- * Settings live in localStorage under "kf3d.psx".
+ * The controls are injected into the app's own Effects and Settings tabs and
+ * reuse their markup and scoped class names, so they look like the rest of the
+ * panel. Settings live in localStorage under "kf3d.psx".
  */
 (function () {
   'use strict';
@@ -58,8 +61,38 @@
 
     // 'all' | 'thumb' | 'none' - which fingers the hand solver drives
     fingers: 'thumb',
+
+    // --- emotion presets ----------------------------------------------
+    // Drive angry / sorrow / fun from the solved face. Off = stock, which
+    // never writes those presets at all, so their atlas cells can never win.
+    emotions: false,
+    // multiplier on Kalidokit's brow scalar, before the thresholds below
+    browGain: 1,
+    // how far the brow has to travel before it reads as that emotion
+    angryAt: 0.35,
+    sorrowAt: 0.35,
+    // how wide the mouth corners have to go before it reads as a smile
+    smileAt: 0.3,
+    // which preset a smile drives: 'fun' | 'joy' | 'both'
+    smileKey: 'fun',
+    // let only the strongest emotion through
+    exclusive: true,
+
+    // --- motion -------------------------------------------------------
+    // Enable the gains below. Off = the app's own values.
+    motion: false,
+    // neck rotation gain; stock is 1
+    headGain: 1,
+    // chest / spine / upper chest rotation gain; stock is 0.05
+    bodyGain: 0.05,
+    // 0 = stock responsiveness, 1 = as heavy as it goes
+    damping: 0,
+
     verbose: false
   };
+
+  var STOCK_HEAD_GAIN = 1;
+  var STOCK_BODY_GAIN = 0.05;
 
   var MOUTH_KEYS = { a: 1, i: 1, u: 1, e: 1, o: 1 };
   var BLINK_KEYS = { blink: 1, blink_l: 1, blink_r: 1 };
@@ -408,6 +441,95 @@
     return { cell: best, weight: bestW };
   }
 
+  // --------------------------------------------------- emotion presets
+  //
+  // The app solves a full Kalidokit face every frame but only ever writes
+  // Blink / BlinkL / BlinkR, the five vowels, and Joy (and Joy only when
+  // "Smile Detection [Beta]" is on). Angry, Sorrow and Fun are never written,
+  // so on a PSX avatar their atlas cells sit at weight 0 forever and can never
+  // clear the threshold - the expression looks broken when it is simply never
+  // being asked for.
+  //
+  // Kalidokit does hand us the two signals those presets need: `brow`, a single
+  // scalar that goes negative when the brows furrow and positive when they
+  // raise, and `mouth.x`, the corner-to-corner width the app already uses for
+  // its smile. We map them here and write the presets ourselves, before
+  // blendShapeProxy.update() runs.
+
+  var EMOTION_KEYS = ['angry', 'sorrow', 'fun', 'joy'];
+  var lastFace = null;
+
+  function clamp(v, lo, hi) { return v < lo ? lo : (v > hi ? hi : v); }
+  function num(v) { return typeof v === 'number' && isFinite(v) ? v : 0; }
+
+  // 0 below the threshold, then a straight ramp up to 1
+  function ramp(v, at) {
+    if (at >= 1) return 0;
+    return clamp((v - at) / (1 - at), 0, 1);
+  }
+
+  function driveEmotions(vrm, rig) {
+    if (!cfg.emotions) return;
+    var proxy = vrm && vrm.blendShapeProxy;
+    if (!proxy || !rig) return;
+
+    var brow = clamp(num(rig.brow) * cfg.browGain, -1, 1);
+    // same normalisation the app uses for its own smile: 0.4 -> 0.9 maps to 0 -> 1
+    var smile = clamp((num(rig.mouth && rig.mouth.x) - 0.4) / 0.5, 0, 1);
+
+    var out = {
+      angry: ramp(-brow, cfg.angryAt),
+      sorrow: ramp(brow, cfg.sorrowAt),
+      fun: 0,
+      joy: 0
+    };
+    var sm = ramp(smile, cfg.smileAt);
+    if (cfg.smileKey === 'fun' || cfg.smileKey === 'both') out.fun = sm;
+    if (cfg.smileKey === 'joy' || cfg.smileKey === 'both') out.joy = sm;
+
+    // A furrowed brow over a wide mouth reads as neither. On a PSX atlas these
+    // are whole-face swaps, so blending two of them lands between cells - only
+    // the loudest one gets to speak.
+    if (cfg.exclusive) {
+      var top = null;
+      for (var i = 0; i < EMOTION_KEYS.length; i++) {
+        var k = EMOTION_KEYS[i];
+        if (out[k] > 0 && (!top || out[k] > out[top])) top = k;
+      }
+      for (var j = 0; j < EMOTION_KEYS.length; j++) {
+        if (EMOTION_KEYS[j] !== top) out[EMOTION_KEYS[j]] = 0;
+      }
+    }
+
+    lastFace = { brow: brow, smile: smile, out: out };
+
+    // Write all four, including the ones we resolved to 0. The app writes Joy
+    // itself from "Smile Detection [Beta]", and leaving that in place would let
+    // a stale Joy outvote an exclusive pick - so while this is on, the emotion
+    // presets belong to us. Point "Smile drives" at joy to get the stock
+    // behaviour back, with a threshold you can actually tune.
+    for (var n = 0; n < EMOTION_KEYS.length; n++) {
+      try { proxy.setValue(EMOTION_KEYS[n], out[EMOTION_KEYS[n]]); } catch (e) {}
+    }
+  }
+
+  // ----------------------------------------------------------- motion gains
+  //
+  // The neck rig multiplies the solved head rotation by 1 and the chest/spine
+  // rig by 0.05, both hardcoded, then lerps toward the result at 0.04 + dt*4
+  // (neck) or 0.04 + dt*2 (torso). A small real movement therefore lands as a
+  // large avatar movement, with nothing to tune. These hooks put a gain and a
+  // damping factor in front of both.
+
+  function headGain() { return cfg.motion ? cfg.headGain : STOCK_HEAD_GAIN; }
+  function bodyGain() { return cfg.motion ? cfg.bodyGain : STOCK_BODY_GAIN; }
+
+  function smooth(t) {
+    if (!cfg.motion || !cfg.damping) return t;
+    // never return 0, or the bone would freeze instead of easing
+    return Math.max(t * (1 - cfg.damping), 0.002);
+  }
+
   // ------------------------------------------------------------------ models
 
   var models = [];
@@ -512,6 +634,17 @@
       console.log('preset -> group:', presetMap);
       console.log('unknown (non-preset) groups:', proxy.unknownGroupNames);
       var wanted = ['blink', 'blink_l', 'blink_r', 'a', 'i', 'u', 'e', 'o', 'joy'];
+      var emotionMissing = EMOTION_KEYS.filter(function (p) { return !presetMap[p]; });
+      if (emotionMissing.length) {
+        console.warn('emotion presets this model does NOT map:', emotionMissing.join(', '));
+      }
+      if (lastFace) {
+        console.log('last solved face - brow ' + lastFace.brow.toFixed(3) +
+          ', smile ' + lastFace.smile.toFixed(3) + ' ->', lastFace.out);
+      } else if (cfg.emotions) {
+        console.warn('emotion detection is on but no face has been solved yet - ' +
+          'is face tracking running?');
+      }
       var missing = wanted.filter(function (p) { return !presetMap[p]; });
       if (missing.length) {
         console.warn('presets the app drives but the model does NOT map:', missing.join(', '));
@@ -837,6 +970,41 @@
     }
     frag.appendChild(x);
 
+    // --- emotions ------------------------------------------------------
+    var em = card('Emotion Detection', STG);
+    var emNote = el('div', STG,
+      'The app only tracks blinks, the five vowels and a smile. Angry, sorrow ' +
+      'and fun are never written at all - this derives them from the brow and ' +
+      'mouth so those cells can fire.');
+    emNote.style.cssText = 'width:100%;opacity:.5;font-size:12px;margin:0 0 4px;text-align:left';
+    em.appendChild(emNote);
+    addToggle(em, 'emotions', 'Detect emotions', STG);
+    addToggle(em, 'exclusive', 'Strongest only', STG);
+    addRule(em);
+    addRange(em, 'browGain', 'Brow gain', 0.25, 4, 0.05, function (v) { return v.toFixed(2) + 'x'; }, STG);
+    addRange(em, 'angryAt', 'Angry at', 0, 0.95, 0.01, function (v) { return v.toFixed(2); }, STG);
+    addRange(em, 'sorrowAt', 'Sorrow at', 0, 0.95, 0.01, function (v) { return v.toFixed(2); }, STG);
+    addRange(em, 'smileAt', 'Smile at', 0, 0.95, 0.01, function (v) { return v.toFixed(2); }, STG);
+    addRule(em);
+    addChoice(em, 'smileKey', 'Smile drives', ['fun', 'joy', 'both'],
+      ['fun', 'joy', 'fun + joy'], STG);
+    frag.appendChild(em);
+
+    // --- motion --------------------------------------------------------
+    var mo = card('Motion Calibration', STG);
+    var moNote = el('div', STG,
+      'The neck and torso gains are hardcoded upstream, so a small real ' +
+      'movement lands as a large avatar movement. Lower the gain to move less, ' +
+      'raise the damping to move slower.');
+    moNote.style.cssText = 'width:100%;opacity:.5;font-size:12px;margin:0 0 4px;text-align:left';
+    mo.appendChild(moNote);
+    addToggle(mo, 'motion', 'Motion calibration', STG);
+    addRule(mo);
+    addRange(mo, 'headGain', 'Head / neck gain', 0, 1.5, 0.05, function (v) { return v.toFixed(2) + 'x'; }, STG);
+    addRange(mo, 'bodyGain', 'Torso gain', 0, 0.2, 0.005, function (v) { return v.toFixed(3) + 'x'; }, STG);
+    addRange(mo, 'damping', 'Damping', 0, 0.95, 0.01, function (v) { return v.toFixed(2); }, STG);
+    frag.appendChild(mo);
+
     var hnd = card('PSX Hands', STG);
     addChoice(hnd, 'fingers', 'Driven fingers', ['all', 'thumb', 'none'],
       ['all fingers', 'thumb only', 'none'], STG);
@@ -960,6 +1128,16 @@
       if (!vrm) return;
       applyHeld(vrm);
       if (vrm.__psxUvBinds) applyUvBinds(vrm);
-    }
+    },
+
+    // called from the face rig, after the app has written its own presets and
+    // before blendShapeProxy.update() applies them
+    face: function (vrm, rig) {
+      try { driveEmotions(vrm, rig); } catch (e) { log('face hook failed', e); }
+    },
+
+    headGain: headGain,
+    bodyGain: bodyGain,
+    smooth: smooth
   };
 })();

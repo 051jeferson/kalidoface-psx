@@ -22,6 +22,9 @@ touches the app's own source tree (this repo only ships the built bundle).
 | `PSX.fingers()` | Limits which fingers the hand solver drives |
 | `PSX.onModel(vrm, gltf)` | Nearest-neighbour texture filtering, no mipmaps, no anisotropy; collects `_MainTex_ST` UV binds |
 | `PSX.tick(vrm)` | Drives texture-atlas face expressions each frame |
+| `PSX.face(vrm, rig)` | Receives the solved Kalidokit face and writes the emotion presets |
+| `PSX.headGain()` / `PSX.bodyGain()` | Neck and chest/spine rotation gain |
+| `PSX.smooth(t)` | Lerp factor for every tracked bone |
 
 ### Texture-atlas face expressions
 
@@ -39,13 +42,53 @@ Cell selection is deliberately *not* smooth:
 - **Mouth / blink gain** — pre-threshold multipliers, so quiet talking and soft blinks still register
 - **Flip V axis** — Unity samples V upside down relative to glTF; `on` is correct for a normal VRM export
 
+### Emotion detection
+
+Upstream only ever writes `blink`, `blink_l`, `blink_r`, the five vowels, and
+`joy` — and `joy` only when **Smile Detection [Beta]** is on. `angry`, `sorrow`
+and `fun` are **never written at all**, so on a PSX avatar their atlas cells sit
+at weight 0 forever and can never clear the threshold. The expression looks
+broken when it is simply never being asked for.
+
+Kalidokit does solve the two signals those presets need, so this fork derives
+them: `brow` (negative = furrowed, positive = raised) drives **angry** and
+**sorrow**, and `mouth.x` — the corner-to-corner width upstream already uses for
+its smile — drives **fun** and/or **joy**. Each has its own threshold, and
+**Strongest only** keeps a furrowed brow over a wide mouth from landing between
+two cells.
+
+While this is on, the emotion presets belong to the PSX layer: it writes all
+four every frame, including the zeroes, so a stale upstream `joy` cannot outvote
+an exclusive pick. Point **Smile drives** at `joy` for the stock behaviour with
+a threshold you can actually tune.
+
+### Motion calibration
+
+The neck rig multiplies the solved head rotation by `1` and the chest/spine rig
+by `0.05`, both hardcoded, then lerps toward the result at `0.04 + dt*4` and
+`0.04 + dt*2`. A small real movement therefore lands as a large avatar movement,
+with nothing upstream to tune. **Head / neck gain** and **Torso gain** scale the
+rotation; **Damping** scales the lerp, so the avatar eases into a pose instead of
+snapping to it.
+
+Emotion detection and motion calibration are independent of PSX mode — they are
+tracking fixes, not a render look — so each has its own switch and both default
+to stock behaviour.
+
 ## Controls
 
-The layer injects its own cards into the app's existing **Settings** tab, reusing the
-app's markup and scoped class names, so they look native:
+The layer injects its own cards into the app's existing tabs, reusing their markup
+and scoped class names, so they look native. Controls are split by what they do:
+
+**Effects tab** — the render look, next to the app's own Pixelate / Outline effects:
 
 - **PSX Render** — PSX mode, Nearest textures, MSAA, SMAA, Render scale (0.25x–2x)
+
+**Settings tab** — per-model calibration, next to the app's own tracking options:
+
 - **Face Expressions** — Texture expressions, Snap to cell, Flip V axis, Trigger threshold, Release margin, Minimum hold, Mouth gain, Blink gain, Preview cell (force one expression for calibration)
+- **Emotion Detection** — Detect emotions, Strongest only, Brow gain, Angry at, Sorrow at, Smile at, Smile drives (`fun` / `joy` / `fun + joy`)
+- **Motion Calibration** — Motion calibration, Head / neck gain, Torso gain, Damping
 - **PSX Hands** — Driven fingers (`all fingers` / `thumb only` / `none`) + a diagnostics dump button
 
 PSX mode is **off by default** — with it off, every hook falls back to stock behaviour.
@@ -59,7 +102,8 @@ Settings persist in `localStorage` under the key `kf3d.psx`.
 2. Use **Preview cell** to force each expression key in turn and confirm the atlas cell is right. If every expression lands on the wrong cell, toggle **Flip V axis**.
 3. If the face chatters between two cells, raise **Release margin** or **Minimum hold**.
 4. If quiet talking doesn't register, raise **Mouth gain**; same for **Blink gain**.
-5. Hit **Log diagnostics to console** for the resolved materials, UV binds and current cell.
+5. Hit **Log diagnostics to console** for the resolved materials, UV binds, current cell, and the last solved `brow` / `smile` values with the emotion weights they produced.
+6. For emotions, watch those logged values while you pull the face, then set **Angry at** / **Sorrow at** / **Smile at** just under what you can actually reach. Raise **Brow gain** if the brow signal never gets far from 0.
 
 ---
 
