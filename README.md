@@ -67,14 +67,25 @@ cells with a UV offset. three-vrm can only bind those `_MainTex_ST` values on MT
 materials, so this layer drives them directly — which means texture expressions also
 work on plain/unlit materials.
 
-Cell selection is deliberately *not* smooth:
+Cells are picked, never blended, and that is not a setting. Easing from one cell
+to another slides the UV window across the sheet, so the frames in between show
+whatever sits between the two cells — which is not an expression. What is
+adjustable is when a cell wins:
 
 - **Trigger threshold** — weight an expression must clear before it takes over its material
 - **Release margin** (hysteresis) — how far below the threshold it may sag before letting go, so the face doesn't chatter at the boundary
 - **Minimum hold** — ms a cell stays on screen once picked
-- **Snap to cell** — cut straight to the winning cell instead of easing into it
 - **Mouth / blink gain** — pre-threshold multipliers, so quiet talking and soft blinks still register
-- **Flip V axis** — Unity samples V upside down relative to glTF; `on` is correct for a normal VRM export
+
+The V axis is measured rather than configured. Unity samples V upside down
+relative to glTF, and rebasing for that is right for a VRM written by UniVRM —
+but not always for models arriving through the odd pipelines this fork exists
+for, and getting it wrong puts every expression on a vertically mirrored row of
+the atlas, which reads as a broken model rather than a convention mismatch. The
+neutral group is the rest cell, so converting it correctly has to land on the UV
+transform the material already shipped with: both conversions are tried against
+that and the one that actually matches is kept, per material. With no neutral
+bind there is nothing to measure, so the spec wins.
 
 ### Emotion detection
 
@@ -291,7 +302,7 @@ and scoped class names, so they look native. Controls are split by what they do:
 
 **Settings tab** — per-model calibration, next to the app's own tracking options:
 
-- **Face Expressions** — Texture expressions, Snap to cell, Flip V axis, Trigger threshold, Release margin, Minimum hold, Mouth gain, Blink gain, Preview cell (force one expression for calibration)
+- **Face Expressions** — Trigger threshold, Release margin, Minimum hold, Mouth gain, Blink gain, Preview cell (force one expression for calibration)
 - **Emotion Detection** — Detect emotions, Signal range (`calibrated` / `auto` / `raw`), One emotion at a time, Speech first, Talking at, Signal gain, Angry at, Sorrow at, Smile at, Smile drives (`fun` / `joy` / `fun + joy`), live readout, Calibrate expressions and Reset auto range
 - **Motion Calibration** — Motion calibration, Head / neck gain, Torso gain, Damping
 - **Performance** — Performance caps, Tracking rate, Render rate, Realtime shadows, Shadow resolution, Iris / lip refinement, Lite pose model

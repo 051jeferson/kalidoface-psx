@@ -55,14 +55,6 @@
     dither: true,
     colorLevels: 32,
 
-    // drive _MainTex_ST blendshape material values ourselves, so texture-based
-    // expressions work on materials three-vrm cannot bind (non-MToon)
-    uvExpressions: true,
-    // cut straight to the winning atlas cell instead of easing into it
-    snapExpressions: true,
-    // Unity samples V upside down relative to glTF. True is correct for a
-    // normal VRM export; flip it if every expression lands on the wrong cell.
-    uvFlipV: true,
     // weight an expression has to clear before it takes over its material
     threshold: 0.35,
     // how far below `threshold` an expression may sag before it lets go.
@@ -582,6 +574,11 @@
         ent.cells.splice(c, 1);
         break;
       }
+      ent.flipV = detectFlip(ent);
+      if (!ent.flipV) {
+        log('material', ent.material.name || '(unnamed)',
+          'reads as glTF V, not Unity V - using its own convention');
+      }
     }
 
     var used = byMaterial.filter(function (e) { return e.cells.length; });
@@ -591,10 +588,32 @@
   // Unity/UniVRM sample with a flipped V axis relative to glTF, so the vertical
   // offset has to be rebased before it can go into a three.js texture:
   //   v_univrm = oy + sy * (1 - v)   ->   v_three = (1 - oy - sy) + sy * v
-  function toThreeUv(u) {
-    return cfg.uvFlipV
+  //
+  // That rebase is right for a VRM written by UniVRM, which is the spec. It is
+  // not always right for the models this fork is for, which arrive through odd
+  // pipelines - and getting it wrong puts every expression on a vertically
+  // mirrored row of the atlas, which looks like a broken model rather than a
+  // convention mismatch. So it is measured instead of assumed, per material.
+  function toThreeUv(u, flip) {
+    return flip
       ? { ox: u.ox, oy: 1 - u.oy - u.sy, rx: u.sx, ry: u.sy }
       : { ox: u.ox, oy: u.oy, rx: u.sx, ry: u.sy };
+  }
+
+  function uvDist(a, b) {
+    return Math.abs(a.ox - b.ox) + Math.abs(a.oy - b.oy) +
+           Math.abs(a.rx - b.rx) + Math.abs(a.ry - b.ry);
+  }
+
+  // The neutral group is the rest cell, so converting it correctly has to land
+  // on the UV transform the material already shipped with. Convert it both ways
+  // and keep whichever actually matches. Without a neutral bind there is
+  // nothing to measure against, so fall back to the spec.
+  function detectFlip(entry) {
+    if (!entry.neutral) return true;
+    var flipped = toThreeUv(entry.neutral, true);
+    var plain = toThreeUv(entry.neutral, false);
+    return uvDist(flipped, entry.base) <= uvDist(plain, entry.base);
   }
 
   function gainFor(key) {
@@ -614,36 +633,19 @@
     var binds = vrm.__psxUvBinds;
     if (!binds || !vrm.blendShapeProxy) return;
     var proxy = vrm.blendShapeProxy;
-    var snap = !!cfg.snapExpressions;
     var t = now();
 
+    // Cells are picked, never blended. Easing from one to another slides the UV
+    // window across the sheet, so the mid-transition frames show whatever sits
+    // between the two cells - which is not an expression. Snapping is not a
+    // preference here, it is the only reading of an atlas that means anything.
     for (var i = 0; i < binds.length; i++) {
       var e = binds[i];
       if (!e.material.map) continue;
 
-      var neutralUv = e.neutral ? toThreeUv(e.neutral) : e.base;
+      var neutralUv = e.neutral ? toThreeUv(e.neutral, e.flipV) : e.base;
 
-      // in blend mode there is no cell latch, so it just rewrites every frame
-      if (!snap) {
-        var top = pickBest(e, proxy);
-        var uv = neutralUv;
-        if (top.cell && top.weight >= cfg.threshold) {
-          var hit = toThreeUv(top.cell.unity);
-          var w = top.weight;
-          uv = {
-            ox: neutralUv.ox + (hit.ox - neutralUv.ox) * w,
-            oy: neutralUv.oy + (hit.oy - neutralUv.oy) * w,
-            rx: neutralUv.rx + (hit.rx - neutralUv.rx) * w,
-            ry: neutralUv.ry + (hit.ry - neutralUv.ry) * w
-          };
-        }
-        e.current = top.cell ? top.cell.key : null;
-        e.currentCell = top.cell;
-        writeUv(e, uv);
-        continue;
-      }
-
-      // snap mode: hold the current cell for at least holdMs
+      // hold the current cell for at least holdMs
       if (e.since && (t - e.since) < cfg.holdMs) continue;
 
       var best = pickBest(e, proxy);
@@ -658,7 +660,7 @@
       e.current = tag;
       e.currentCell = chosen;
       e.since = t;
-      writeUv(e, chosen ? toThreeUv(chosen.unity) : neutralUv);
+      writeUv(e, chosen ? toThreeUv(chosen.unity, e.flipV) : neutralUv);
     }
   }
 
@@ -1269,9 +1271,6 @@
 
     // --- expressions ---
     'Face Expressions': 'Expressões faciais',
-    'Texture expressions': 'Expressões por textura',
-    'Snap to cell': 'Encaixar na célula',
-    'Flip V axis': 'Inverter eixo V',
     'Trigger threshold': 'Limiar de disparo',
     'Release margin': 'Margem de liberação',
     'Minimum hold': 'Tempo mínimo',
@@ -1634,12 +1633,8 @@
     models.push(vrm);
     // collect first: this may swap in cloned textures, and the filter pass
     // below has to run on whatever textures end up attached
-    if (on() && cfg.uvExpressions) {
-      vrm.__psxUvBinds = collectUvBinds(vrm, gltf);
-      if (vrm.__psxUvBinds) log('driving', vrm.__psxUvBinds.length, 'material(s) via _MainTex_ST');
-    } else {
-      vrm.__psxUvBinds = null;
-    }
+    vrm.__psxUvBinds = collectUvBinds(vrm, gltf);
+    if (vrm.__psxUvBinds) log('driving', vrm.__psxUvBinds.length, 'material(s) via _MainTex_ST');
     applyTextureFilter(vrm);
     eachMaterial(vrm, hookMaterial);
     syncShaderUniforms();
@@ -1650,7 +1645,7 @@
   function refreshModels() {
     for (var i = 0; i < models.length; i++) {
       applyTextureFilter(models[i]);
-      if (on() && cfg.uvExpressions && !models[i].__psxUvBinds) {
+      if (!models[i].__psxUvBinds) {
         models[i].__psxUvBinds = collectUvBinds(models[i], models[i].__psxGltf);
         applyTextureFilter(models[i]);
       }
@@ -1794,9 +1789,9 @@
     var binds = vrm.__psxUvBinds;
     if (!binds) {
       console.error('PSX is driving NOTHING on this model (__psxUvBinds is empty).');
-      if (!on()) console.error('-> PSX mode is off.');
-      else if (!cfg.uvExpressions) console.error('-> "Texture expressions" is off.');
-      else console.error('-> see the tables above: either no materialName matched, or the matched material has no .map');
+      console.error('-> either the VRM has no blendShapeMaster materialValues for ' +
+        '_MainTex_ST, no materialName matched, or the matched material has no .map. ' +
+        'See the tables above.');
     } else {
       console.log('PSX is driving ' + binds.length + ' material(s):');
       console.table(binds.map(function (b) {
@@ -1810,14 +1805,14 @@
       console.log('resolved UV per cell (three.js space):');
       var cellRows = [];
       binds.forEach(function (b) {
-        var n = b.neutral ? toThreeUv(b.neutral) : b.base;
+        var n = b.neutral ? toThreeUv(b.neutral, b.flipV) : b.base;
         cellRows.push({
           material: b.material.name, cell: '(neutral)',
           offset: n.ox.toFixed(3) + ', ' + n.oy.toFixed(3),
           repeat: n.rx.toFixed(3) + ', ' + n.ry.toFixed(3)
         });
         b.cells.forEach(function (c) {
-          var u = toThreeUv(c.unity);
+          var u = toThreeUv(c.unity, b.flipV);
           cellRows.push({
             material: b.material.name, cell: c.key,
             offset: u.ox.toFixed(3) + ', ' + u.oy.toFixed(3),
@@ -2027,6 +2022,11 @@
     for (var i = 0; i < values.length; i++) {
       var opt = el('option', STG, labels[i]);
       opt.value = String(i);
+      // The app styles the closed control white-on-dark, but the popup list is
+      // drawn by the OS on its own light background - so the options inherited
+      // white text onto white. Native popups do honour these two properties.
+      opt.style.color = '#fff';
+      opt.style.backgroundColor = '#2b2a35';
       sel.appendChild(opt);
     }
 
@@ -2107,10 +2107,6 @@
     var frag = document.createDocumentFragment();
 
     var x = card(T('Face Expressions'), STG);
-    addToggle(x, 'uvExpressions', T('Texture expressions'), STG);
-    addToggle(x, 'snapExpressions', T('Snap to cell'), STG);
-    addToggle(x, 'uvFlipV', T('Flip V axis'), STG);
-    addRule(x);
     addRange(x, 'threshold', T('Trigger threshold'), 0, 1, 0.01, function (v) { return v.toFixed(2); }, STG);
     addRange(x, 'hysteresis', T('Release margin'), 0, 0.5, 0.01, function (v) { return v.toFixed(2); }, STG);
     addRange(x, 'holdMs', T('Minimum hold'), 0, 400, 10, function (v) { return v + ' ms'; }, STG);
