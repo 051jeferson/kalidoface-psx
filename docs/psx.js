@@ -31,6 +31,11 @@
 
   var STORE_KEY = 'kf3d.psx';
 
+  // Used to assemble GLSL and the calibration prompts. Declared here because
+  // the shader sources are built at load time, and a `var` further down would
+  // still be undefined then - join(undefined) silently uses a comma.
+  var NL = String.fromCharCode(10);
+
   var DEFAULTS = {
     // master switch; when false every hook falls back to stock behaviour
     enabled: false,
@@ -43,6 +48,20 @@
     smaa: false,
     // nearest-neighbour texture sampling, no mipmaps, no anisotropy
     nearestTextures: true,
+
+    // --- the actual PS1 signatures (all gated behind `enabled`) -------
+    // The console had no floating point in its GPU: vertices were snapped to
+    // an integer screen grid, which is where the characteristic wobble comes
+    // from. Lower grid = coarser = wobblier.
+    vertexSnap: true,
+    snapGrid: 160,
+    // It also had no perspective correction, so textures visibly warp across
+    // large polygons. This is the single most recognisable PS1 artifact.
+    affine: true,
+    // 15-bit output, 5 bits per channel, with ordered dithering to hide the
+    // banding. 32 levels per channel is the real thing.
+    dither: true,
+    colorLevels: 32,
 
     // drive _MainTex_ST blendshape material values ourselves, so texture-based
     // expressions work on materials three-vrm cannot bind (non-MToon)
@@ -145,6 +164,8 @@
   // anything that does not fit its spec falls back to the default.
   var SPEC = {
     pixelRatio: { min: 0.25, max: 2 },
+    snapGrid: { min: 32, max: 480 },
+    colorLevels: { one: [8, 16, 32, 64] },
     threshold: { min: 0, max: 1 },
     hysteresis: { min: 0, max: 0.5 },
     holdMs: { min: 0, max: 400 },
@@ -330,6 +351,136 @@
       }
       if (touched) m.needsUpdate = true;
     });
+  }
+
+  // -------------------------------------------------------- PS1 shader look
+  //
+  // Nearest textures and a low render scale are low-fi, but they are not what
+  // makes something look like a PlayStation. Three things do, and all of them
+  // are shader-level:
+  //
+  //   vertex snapping  - the console had no floating point in its GPU, so
+  //                      vertices landed on an integer screen grid. That is the
+  //                      wobble everyone remembers.
+  //   affine mapping   - no perspective correction, so a texture warps across a
+  //                      large polygon. The most recognisable artifact of all.
+  //   15-bit colour    - 5 bits per channel with ordered dithering.
+  //
+  // These go in through onBeforeCompile, so unlike everything else in this file
+  // they need no new call site in the bundle.
+  //
+  // The tunables are uniforms rather than generated code, so the sliders are
+  // live; only affine changes the program, because it needs a varying.
+
+  var psxU = { grid: { value: 0 }, levels: { value: 0 } };
+
+  function syncShaderUniforms() {
+    psxU.grid.value = (on() && cfg.vertexSnap) ? cfg.snapGrid : 0;
+    psxU.levels.value = (on() && cfg.dither) ? cfg.colorLevels : 0;
+  }
+
+  function affineOn() { return on() && cfg.affine; }
+
+  // GLSL has no strings, so brace counting is enough to find the end of main.
+  function appendToMain(src, code) {
+    var i = src.indexOf('void main(');
+    if (i < 0) return null;
+    var open = src.indexOf('{', i);
+    if (open < 0) return null;
+    var depth = 0;
+    for (var k = open; k < src.length; k++) {
+      if (src[k] === '{') depth++;
+      else if (src[k] === '}' && --depth === 0) {
+        return src.slice(0, k) + code + src.slice(k);
+      }
+    }
+    return null;
+  }
+
+  function prependToMain(src, code) {
+    var i = src.indexOf('void main(');
+    if (i < 0) return null;
+    return src.slice(0, i) + code + src.slice(i);
+  }
+
+  var SNAP_GLSL = [
+    'if (uPsxGrid > 0.0) {',
+    '  vec2 g = vec2(uPsxGrid);',
+    '  gl_Position.xy = floor(gl_Position.xy / gl_Position.w * g + 0.5) / g * gl_Position.w;',
+    '}'
+  ].join(NL);
+
+  // 4x4 ordered Bayer without an array, since GLSL ES 1.0 will not index one
+  // with a non-constant.
+  var DITHER_GLSL = [
+    'if (uPsxLevels > 0.0) {',
+    '  vec2 bp = floor(gl_FragCoord.xy);',
+    '  float b2a = fract(bp.x * 0.5 + bp.y * bp.y * 0.75);',
+    '  vec2 bh = floor(bp * 0.5);',
+    '  float b2b = fract(bh.x * 0.5 + bh.y * bh.y * 0.75);',
+    '  float d = (b2b * 0.25 + b2a) - 0.5;',
+    '  gl_FragColor.rgb = clamp(floor(gl_FragColor.rgb * uPsxLevels + 0.5 + d) / uPsxLevels, 0.0, 1.0);',
+    '}'
+  ].join(NL);
+
+  function hookMaterial(mat) {
+    if (!mat || mat.__psxShader) return;
+    mat.__psxShader = true;
+    var prevCompile = mat.onBeforeCompile;
+    var prevKey = mat.customProgramCacheKey;
+
+    mat.onBeforeCompile = function (shader, renderer) {
+      if (prevCompile) prevCompile.call(this, shader, renderer);
+      try {
+        // affine needs a uv varying to rescale, and one only exists when the
+        // material is actually textured
+        var affine = affineOn() && !!this.map;
+
+        var vsHead = 'uniform float uPsxGrid;' + NL;
+        var fsHead = 'uniform float uPsxLevels;' + NL;
+        var vsTail = SNAP_GLSL;
+
+        if (affine) {
+          vsHead += 'varying float vPsxW;' + NL;
+          // The declaration of vUv lives in an #include that three has not
+          // expanded yet, so anchor on main(): whatever declared vUv is
+          // certainly above it. A macro does not re-expand its own name, so
+          // the vUv inside the body is the varying itself.
+          fsHead += 'varying float vPsxW;' + NL + '#define vUv (vUv / vPsxW)' + NL;
+          vsTail = 'vPsxW = gl_Position.w;' + NL + 'vUv *= gl_Position.w;' + NL + vsTail;
+        }
+
+        var vs = prependToMain(shader.vertexShader, vsHead);
+        vs = vs && appendToMain(vs, NL + vsTail + NL);
+        var fs = prependToMain(shader.fragmentShader, fsHead);
+        fs = fs && appendToMain(fs, NL + DITHER_GLSL + NL);
+        if (!vs || !fs) { log('shader hook skipped, no main() found'); return; }
+
+        shader.uniforms.uPsxGrid = psxU.grid;
+        shader.uniforms.uPsxLevels = psxU.levels;
+        shader.vertexShader = vs;
+        shader.fragmentShader = fs;
+      } catch (e) {
+        log('shader hook failed', e);
+      }
+    };
+
+    // affine rewrites the program, so it has to key the cache or three would
+    // reuse whichever variant it compiled first
+    mat.customProgramCacheKey = function () {
+      return (prevKey ? prevKey.call(this) : '') + '|psx' + (affineOn() && this.map ? 'A' : '');
+    };
+
+    mat.needsUpdate = true;
+  }
+
+  // Walk the live models rather than keeping a list, which would keep disposed
+  // materials alive for as long as the page.
+  function refreshShaders() {
+    syncShaderUniforms();
+    for (var i = 0; i < models.length; i++) {
+      eachMaterial(models[i], function (m) { if (m.__psxShader) m.needsUpdate = true; });
+    }
   }
 
   // -------------------------------- texture-based (_MainTex_ST) expressions
@@ -651,7 +802,6 @@
   ];
   var CAL_LEAD = 1200;  // ms to get into the pose
   var CAL_HOLD = 1800;  // ms of sampling
-  var NL = String.fromCharCode(10);
   var calRun = null;
   var calEl = null;
   var calBtn = null;
@@ -1044,6 +1194,8 @@
       vrm.__psxUvBinds = null;
     }
     applyTextureFilter(vrm);
+    eachMaterial(vrm, hookMaterial);
+    syncShaderUniforms();
     scheduleInject();
     return vrm;
   }
@@ -1268,6 +1420,10 @@
 
   // Keys the app only reads once, at startup: the renderer flags, the shadow
   // map setup, and the Mediapipe model options.
+  // Toggling affine rewrites the shader program, so those materials have to be
+  // rebuilt; the rest are uniforms and take effect on the next frame.
+  var RECOMPILES = { affine: 1 };
+
   var NEEDS_RELOAD = {
     enabled: 1, pixelRatio: 1, antialias: 1, smaa: 1,
     perf: 1, shadows: 1, shadowSize: 1, faceIris: 1, poseLite: 1
@@ -1302,6 +1458,7 @@
       Array.prototype.forEach.call(notes, function (n) { n.style.display = ''; });
     } else {
       applyCanvasFilter();
+      if (RECOMPILES[key]) refreshShaders(); else syncShaderUniforms();
       refreshModels();
     }
     syncControls();
@@ -1444,6 +1601,14 @@
     addToggle(r, 'smaa', 'SMAA');
     addRule(r);
     addRange(r, 'pixelRatio', 'Render scale', 0.25, 2, 0.25, function (v) { return v + 'x'; });
+    addRule(r);
+    addToggle(r, 'vertexSnap', 'Vertex snapping');
+    addRange(r, 'snapGrid', 'Snap grid', 32, 480, 8, function (v) { return v + ''; });
+    addToggle(r, 'affine', 'Affine textures');
+    addRule(r);
+    addToggle(r, 'dither', 'Dither');
+    addChoice(r, 'colorLevels', 'Colour depth', [8, 16, 32, 64],
+      ['3 bit', '4 bit', '5 bit (PS1)', '6 bit']);
 
     reloadNote(r, 'PSX mode, MSAA, SMAA and render scale apply on reload.', FX);
 

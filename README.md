@@ -32,6 +32,28 @@ touches the app's own source tree (this repo only ships the built bundle).
 | `PSX.overlay(inst, opts)` | Queued subnav background animation |
 | `PSX.overlayOpen(inst)` | The state that animation is heading to |
 
+### The PS1 look
+
+Nearest textures and a low render scale are *low-fi*, but they are not what makes
+something look like a PlayStation. Three things do, and all of them are
+shader-level — injected through `onBeforeCompile`, so unlike everything else in
+this fork they need no call site in the bundle:
+
+| Effect | What the hardware did |
+| --- | --- |
+| **Vertex snapping** | The console had no floating point in its GPU, so vertices landed on an integer screen grid. That is the wobble everyone remembers. **Snap grid** sets how coarse — lower is wobblier |
+| **Affine textures** | No perspective correction, so a texture visibly warps across a large polygon. The most recognisable artifact of the era |
+| **Dither** | 15-bit output, 5 bits per channel, with ordered dithering to hide the banding. **Colour depth** defaults to `5 bit (PS1)` |
+
+The tunables are uniforms rather than generated code, so the sliders are live;
+only **Affine textures** rewrites the shader program, because it needs a varying
+to carry `w` across. Affine is skipped on untextured materials, which have no uv
+varying to rescale, and the program cache key accounts for it so three does not
+reuse whichever variant it compiled first.
+
+Dithering applies to the avatar's materials, not to backgrounds or stickers —
+those are not ours to hook.
+
 ### Texture-atlas face expressions
 
 PSX models usually put every mouth and eye state in one face atlas and switch between
@@ -206,7 +228,7 @@ and scoped class names, so they look native. Controls are split by what they do:
 
 **Effects tab** — the render look, next to the app's own Pixelate / Outline effects:
 
-- **PSX Render** — PSX mode, Nearest textures, MSAA, SMAA, Render scale (0.25x–2x)
+- **PSX Render** — PSX mode, Nearest textures, MSAA, SMAA, Render scale (0.25x–2x), Vertex snapping, Snap grid, Affine textures, Dither, Colour depth
 
 **Settings tab** — per-model calibration, next to the app's own tracking options:
 
