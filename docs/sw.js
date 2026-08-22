@@ -3,6 +3,10 @@ self.addEventListener("install", function (event) {
 });
 
 self.addEventListener("fetch", function (event) {
+     // Let analytics / CDNs fail on their own. Intercepting them turns a
+     // blocked gtm.js into an uncaught TypeError in this worker.
+     var url = event.request.url;
+     if (url.indexOf(self.location.origin) !== 0) return;
      event.respondWith(
         // caches.match() will look for a cache entry in all of the caches available to the service worker.
         // It's an alternative to first opening a specific named cache and then matching on that.

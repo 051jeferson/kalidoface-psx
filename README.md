@@ -31,6 +31,9 @@ touches the app's own source tree (this repo only ships the built bundle).
 | `PSX.face(vrm, rig)` | Receives the solved Kalidokit face and writes the emotion presets |
 | `PSX.headGain()` / `PSX.bodyGain()` | Neck and chest/spine rotation gain |
 | `PSX.smooth(t)` | Lerp factor for every tracked bone |
+| `PSX.pose(world)` | Receives the Mediapipe pose world landmarks |
+| `PSX.arm(...)` | Replaces the Euler arm rig with the landmark retarget |
+| `PSX.guide(canvas)` | Whether the tracking preview is worth painting |
 | `PSX.frame()` | Whether this animation frame gets rendered |
 | `PSX.nextTrack(fn)` | Schedules the next Mediapipe inference |
 | `PSX.mpOptions(opts)` | Mediapipe model options, before `setOptions` |
@@ -87,6 +90,41 @@ transform the material already shipped with: both conversions are tried against
 that and the one that actually matches is kept, per material. With no neutral
 bind there is nothing to measure, so the spec wins.
 
+### Vowel calibration
+
+Kalidokit reports five vowel weights (`A`/`I`/`U`/`E`/`O`) that all rise together
+with the jaw, so one of them outranks the rest whatever you say. On a PSX atlas —
+where a viseme is a whole-mouth texture swap, not a blend — that means every open
+mouth lands on the same cell, and the avatar has one talking shape. Deriving the
+vowels from width and openness instead only moves the problem: those constants are
+one person's mouth, and on another face two vowels still collapse onto one cell.
+
+**Calibrate vowels** records what *your* face reads while you say each vowel out
+loud — a closed mouth, a toothy grin, then A, E, I, O, U — and a live frame
+becomes whichever recording it lands nearest. It works on the shape weights precisely because it
+never compares them to each other, only to what they read while you said that
+vowel. Each pose is counted in rather than waiting for a key: someone holding
+"oooo" while hunting for Space has stopped saying it.
+
+Silence is one of the recorded poses, so a closed mouth is a *decision*, not a
+threshold to guess at — and that is what frees the mouth cell for a smile. Without
+the recording, a mouth's width alone used to keep a vowel lit at all times, so the
+smile cell could never win it. **Vowel hold** is how much closer another vowel has
+to be before the mouth swaps cell; two vowels trading the lead frame by frame reads
+as a flicker rather than as speech.
+
+The grin is recorded for the same reason silence is. A smile showing teeth *is* an
+open, spread mouth — it is the same width as "ee" and nearly the same openness as
+"eh" — so no threshold can separate them, because they are not different amounts of
+one thing. Once it is its own recording, the classifier tells a grin from an "ee"
+the way it tells "ee" from "eh", and having already ruled out every vowel it is a
+better smile detector than the width threshold: when it fires, the smile goes in
+past **Smile at** rather than through it. A calibration recorded before that step
+existed still loads and still works, minus the grin.
+
+If two mouths come out reading almost the same, the wizard names the pair rather
+than saving a mapping that quietly cannot work.
+
 ### Emotion detection
 
 Upstream only ever writes `blink`, `blink_l`, `blink_r`, the five vowels, and
@@ -114,11 +152,18 @@ unreachable and the emotion simply never fires. Three modes:
 | `raw` | Kalidokit's numbers untouched. Almost never usable — it exists to show what upstream is working with |
 
 **Calibrate expressions** runs a short guided pass, the way a game asks you to
-hold a stick at its extremes. It prompts for four poses — relax, furrow, raise,
-smile — and waits: get into the pose, hold it, then press **Space** (or click the
-button) and it reads for about a second and a half. `Esc` cancels. Nothing is on a timer,
-so the reading always happens while you are actually in the pose. It then records
+hold a stick at its extremes. It prompts for the brow and smile first — relax,
+furrow, raise, smile — then the blink across head poses: eyes shut facing the
+camera, ~40° left and right with eyes open and shut, look up, look down. Get
+into the pose, hold it, then press **Space** (or click the button) and it reads
+for about a second and a half. `Esc` cancels. Nothing is on a timer, so the
+reading always happens while you are actually in the pose. It then records
 what your face reached and switches the mode to `calibrated`.
+
+The blink poses exist because the eye solver confuses head rotation with a
+half-closed lid. Open samples become the floor (looking down must not fire
+`blink`); closed samples become the peak (a blink while turned must still
+reach it).
 
 The reading is deliberately not a maximum. Extremes were taken as an absolute
 min/max, so one glitched frame — a dropped track, a blink, a head jerk — defined
@@ -156,8 +201,8 @@ each threshold just under what you can actually reach.
 
 While this is on, the emotion presets belong to the PSX layer: it writes all
 four every frame, including the zeroes, so a stale upstream `joy` cannot outvote
-an exclusive pick. Point **Smile drives** at `joy` for the stock behaviour with
-a threshold you can actually tune.
+an exclusive pick. A smile writes `fun` and/or `joy` according to which cells
+the loaded model actually has.
 
 ### Language
 
@@ -188,14 +233,189 @@ with nothing upstream to tune. **Head / neck gain** and **Torso gain** scale the
 rotation; **Damping** scales the lerp, so the avatar eases into a pose instead of
 snapping to it.
 
-**Calibrate motion** sets them for you, the same way the expression wizard does:
-it prompts you to face the camera, then turn left, turn right, look up and look
-down — same rhythm, press **Space** once you are there — and records how far your
-head actually travels. The neck rig clamps its
-rotation to ±0.8, so mapping your widest turn onto that number uses the whole
-available range without clipping — someone who barely moves gets a gain above 1,
-someone who moves a lot gets one below. The torso is driven by the same head
-signal, so it keeps its stock ratio to the head.
+**Calibrate motion** sets them for you. Unlike the expression wizard it does not
+wait for a keypress: a motion pose either has no hand free to reach the keyboard
+or turns back toward it to press the key, jolting the exact signal being read. So
+each step prints its prompt, counts you in for five seconds, then reads while you
+hold. **Space** skips the count-in once you are already set, **Esc** cancels.
+
+The steps, in order:
+
+| Step | What it sets |
+| --- | --- |
+| Face the camera | the rest pose everything else is measured against |
+| Hold completely still | **Steadiness** — the spread of a pose that is not moving is your camera's own noise |
+| Turn left / right / look up / down | **Head / neck gain**, mapping your widest turn onto the neck's ±0.8 clamp |
+| Lean your torso to one side | **Torso lean gain**, against the spine's ±0.7 clamp |
+| Shrug your shoulders up | **Shoulder follow** — how far your own shoulders actually travel |
+| Arms straight out to the sides | **Reach**. Arms out sit in the image plane, where the tracker has no depth to get wrong, so this is the cleanest reach reading there is |
+| Point one arm at the camera | **Depth gain**. What is left of your arm's length after the across and up components have been accounted for has to be depth, so comparing it against the depth Mediapipe reported measures how far that estimate is compressed |
+| Put both hands on your head | raises **Reach** if the avatar's hands still cannot make it to its skull. This pose is foreshortened, so it may only raise the T-pose reading, never pull it back down |
+
+Full-body tracking has to be on for the last three. Torso *pitch* rides on the
+head signal, so **Torso gain** keeps its stock ratio to the head; lean and twist
+come from the pose solver instead and get their own gain.
+
+### Tracking sanity
+
+Visibility never catches the failure that actually hurts. A tracker that has
+locked onto the wrong thing reports its landmarks as perfectly confident — the
+numbers arrive, they are just not you — and that is the frame the arms and the
+head jump on.
+
+Both trackers say where your face is, in the same normalised video frame: the face
+mesh as `head.position`, the pose as its nose landmark. (The call site has always
+passed those pose landmarks as a second argument that this layer used to drop.) The
+gap between the two is never zero — one is a face box, the other a nose tip — but it
+belongs to your face and holds still for as long as both are tracking you. When it
+jumps, one of them has lost you.
+
+Nothing here is a constant: both the gap and how much it normally wobbles are
+learned from your own camera, and a frame is disbelieved when it sits several
+learned deviations out. The two axes are scored separately, so if the mirroring
+leaves the horizontal gap varying it simply learns a wide wobble and stops
+contributing rather than firing all the time. After a long run of rejections it
+gives up and re-learns, or standing up once would lock the gate shut for good.
+
+Arm length is checked the same way, per side — one arm can go missing while the
+rest of the body tracks fine. Only an *over-long* arm is rejected: measured length
+drops whenever the arm turns toward the lens, which is the same depth compression
+the depth calibration exists to undo, and rejecting short arms would throw away
+every gesture toward the camera.
+
+A frame that fails either check is coasted rather than followed. The neck and torso
+have no hook that can drop a frame, so there they get an almost-zero lerp instead —
+the jump becomes a wobble, and the next believable frame pulls it back.
+
+### Adaptive smoothing
+
+A flat damping factor has to choose. Enough of it to settle the tremor of a held
+pose turns a fast movement to rubber; enough responsiveness for the fast movement
+leaves the tremor in. That trade is most of what reads as "jelly".
+
+**Adaptive smoothing** is a one-euro filter: the cutoff is a function of speed, so
+a still pose is filtered hard and a moving one barely at all. **Steadiness** is the
+cutoff at rest, in Hz — lower is smoother, and the hold-still calibration step
+measures it off your own camera. **Responsiveness** is how quickly that cutoff opens
+up once you move. **Damping** still applies on top, and is the whole of the
+smoothing when adaptive is off.
+
+The bundle's smoothing sites hand over only the lerp factor, never the value being
+lerped, so the speed is measured here off the solved head rotation and the tracked
+wrists, and the faster of the two drives the cutoff. Which bone a site belongs to
+is read back out of the factor itself (`0.04 + dt*4` for the neck, `*2` for the
+torso, `*6` for the wrist), so the torso keeps trailing the head by the same ratio
+it does upstream instead of every bone flattening onto one cutoff.
+
+### Arm retarget
+
+Kalidokit hands the rig three Euler angles per arm bone, estimated from the
+landmark directions and then clamped. Replaying those angles puts the avatar's
+hand wherever they happen to point it, which is not where the camera saw the
+hand — put your palms on your skull and the avatar's hands stop at its ears. No
+gain fixes that, because scaling a rotation sweeps the hand along an arc instead
+of moving it toward the target.
+
+**Arm retarget** drives the arm from the landmarks instead. It reads the
+shoulder → wrist vector the camera measured in a torso frame built from your own
+shoulders and hips, rebuilds it in the same frame on the model, scales it by the
+model's arm length over yours, and solves the two bones so the hand lands on it.
+The elbow landmark is the pole, so nothing guesses which way the elbow folds, and
+the wrist angle stays the hand solver's — it is relative to the forearm, which
+the retarget has just put where it belongs.
+
+- **Reach** — how much further than your own elbow angle to extend. It exists
+  for a model whose arms are too short to get to its own head. Now that the bend
+  is measured at the elbow, the hand generally arrives on its own, so on ordinary
+  proportions anything above `1` overshoots — it can only push the hand further
+  along a direction that was already right. Leave it at `1` unless the hands
+  visibly fall short. **Calibrate motion** sets it, and only raises it when the
+  model's hands really do not make it to its head.
+- **Depth gain** — how much the toward-camera axis counts. It used to sit below
+  1 to damp Mediapipe's noisiest axis; damping is the adaptive filter's job now,
+  and since the elbow angle sets how *far* the hand goes, this only steers
+  *direction*. A value under 1 tilts every gesture toward the camera off to one
+  side, so the hand never gets in front of the face — which is why it now
+  defaults to `1`. The depth calibration measures the rest.
+- **Forearm twist** — turning a palm from down to up is forearm rotation, and
+  nothing upstream drives it: `aimBone` deliberately leaves each bone's twist at
+  its rest value, and the wrist solver only ever reports flexion — relative to a
+  forearm it estimated itself and which the retarget has since replaced. So the
+  palm stayed wherever the bind pose left it, and "which way is the hand facing"
+  is almost entirely that axis. The pose landmarks carry the index and little
+  knuckles, and VRM carries `IndexProximal` / `LittleProximal`, so the same
+  anatomical direction can be measured on both and the difference rolled onto the
+  forearm. Models without finger bones fall back to the old behaviour.
+- **Face anchor** — a hand at the face is a gesture *about the head*, and
+  measuring it out from the shoulder in arm-lengths gets it wrong on exactly the
+  models this fork is for. A low-poly avatar is a big head on short arms, so its
+  face sits at a far steeper angle up from its shoulder than a person's does:
+  the direction is carried across faithfully and is faithfully wrong, and the
+  only way to land on the face is to raise the real hand well above one's own
+  head. Near the face, this aims at the head instead — the hand's offset from
+  your own nose, scaled by the two heads, hung off the model's head bone. It
+  blends in by how close the hand is, so an arm doing something unrelated to the
+  head is untouched. Right at the face the hand's position wins and the elbow
+  bend gives; away from it the bend is the honest signal and the distance gives.
+- **Shoulder follow** — nothing upstream drives the shoulder bones at all, so a
+  raised arm keeps its shoulder pinned and the upper arm cuts through the neck.
+  This lets the shoulder turn part of the way toward the target. The hand does
+  not move when it does — the target is fixed before the shoulder is allowed to
+  go anywhere, because the landmarks already carry the person's own shrug and
+  counting it twice would lift the hand back off the head. Models without a
+  shoulder bone ignore it.
+
+- **Prediction** — Mediapipe runs well under the render rate, so most frames re-use
+  a target measured milliseconds ago and the hand trails whatever it is following.
+  The velocity between the last two inferences says where that target has got to
+  since, and this is how much of that gap to carry forward. Capped hard: an
+  extrapolation is a guess, and one that can move the hand further than a knuckle
+  is worse than the lag it removes.
+- **Dropout hold** — a lost landmark used to hand the arm straight back to the
+  stock Euler rig, which writes a completely different pose on the next frame, and
+  that jump is most of what "it lost tracking" feels like. Instead the last solved
+  rotations are held for this long, then eased back to the bone's rest over the
+  same span, and only then is the arm given back — by which point stock's own
+  answer for an arm it cannot see is near rest too, so the handover no longer
+  shows. The shoulder goes back where the model loaded it at the same moment;
+  nothing upstream writes that bone, so one left turned would stay turned.
+
+It needs full-body (holistic) tracking; the pose-only path reports its keypoints
+in another space, so there the arms stay on the stock Euler rig. An arm that was
+never solved at all is left to the stock rig from the first frame rather than
+eased into it. Bone lengths are never stretched.
+
+The elbow angle is measured at the elbow, not derived from how far away the hand
+ended up. It is a ratio between two landmark distances, so it does not care how
+big the person is, how far from the lens they are, or what **Reach** is set to —
+every one of which corrupts the *length* of the wrist offset. Taking the bend from
+that length is what used to weld the arm into one piece: any Reach above 1 pushes
+the length past what the model's arm can span, the solve clamps it, and a clamped
+span is a straight arm in every pose. Reach now closes part of the gap to full
+extension in proportion to how extended the arm already is — all of it when
+straining upward for the model's own head, almost none at a folded elbow.
+
+`mapDir` carries a vector's components from the landmark torso frame into the
+model's. The two routinely disagree about handedness — the landmark frame's up runs
+down the screen, and its front is forced to face the camera — which makes that
+mapping a reflection. A reflection maps *directions* perfectly well, which is why
+the hand lands where it should, but it reverses which way a *rotation* goes: a palm
+turned outward comes out turned inward. Mirroring flips it once more. The twist
+measures that off the two frames rather than assuming either one.
+
+The solve runs in the parent bone's space rather than the world's, so posing an
+arm never rebuilds its subtree — which below the shoulder is every finger bone in
+the hand. Only the target is filtered, not the bones on top of it: the noise is
+in the landmarks, and a second filter would only stack more lag on the first.
+
+### Tracking preview
+
+Every Mediapipe result repaints the preview canvas at the webcam's own
+resolution — the pose skeleton, both hands, and `FACEMESH_TESSELATION`, some two
+and a half thousand 2D line segments, on the thread the inference just finished
+on. Upstream keeps doing all of it after the preview is closed, because closing
+it only sets the wrapper's opacity to `0`. `PSX.guide()` skips the paint while
+nothing can see it. There is no switch: closing the preview *is* the switch.
 
 Emotion detection and motion calibration are independent of PSX mode — they are
 tracking fixes, not a render look — so each has its own switch and both default
@@ -239,11 +459,10 @@ models and nothing else:
 | --- | --- |
 | **Realtime shadows** | Two shadow-casting lights at 2048×2048, so two extra full-scene depth passes every frame and ~33 MB of VRAM. The PS1 had no realtime shadows at all — it stamped a blob on the floor. `PSX.shadows()` returns `false`, and upstream's Shadow Strength / Shadow Blur sliders are hidden with it |
 | **Eye aim** | `PSX.gaze()` replaces `lookAt.applyer.lookAt()` and does nothing. A PSX face keeps its eyes on the texture atlas: it blinks by swapping a cell, it does not swivel. Aiming eye bones at a solved pupil is wasted work that reads wrong |
-| **Iris / lip refinement** | `refineFaceLandmarks` is forced off. It is a whole extra network per frame, placing iris landmarks and denser lip contours — detail a texture atlas cannot show, and its main consumer was the eye aim above |
 | **Antialiasing** | `PSX.aa()` and `PSX.smaa()` both return `false`. The console had none, so neither MSAA nor the SMAA pass is a choice |
 | **Texture filtering** | Always nearest-neighbour, no mipmaps, no anisotropy. The PS1 point-sampled; there was no bilinear filter to turn on |
 | **Affine mapping** | Always on where a material has a uv varying to rescale. Turning it off would not be a preference, it would be a different console |
-| **Upstream's replaced controls** | Pixelate, Outline, Water Animation, Light Cube Experiment, Light Colour, Light Position and Smile Detection are hidden and pinned unconditionally — see below. An option to restore a control that costs performance or fights a PSX one would only be an option to make it worse |
+| **Upstream's replaced controls** | Pixelate, Outline, Water Animation, Light Cube Experiment, Light Colour, Light Position, Smile Detection, Enable Wink and Selfie / First Person Mode are hidden and pinned unconditionally — see below. An option to restore a control that costs performance or fights a PSX one would only be an option to make it worse |
 
 Stack these with **Render scale** in the Effects tab: at `0.5x` the renderer
 draws a quarter of the pixels, which is the single biggest GPU win and the
@@ -254,7 +473,7 @@ rate caps take effect immediately.
 
 ## Keeping the hooks alive
 
-The PSX layer only runs because a call to it was written into ~26 places in the
+The PSX layer only runs because a call to it was written into ~35 places in the
 minified bundle. Those edits are invisible once committed and **do not survive
 the bundle being regenerated** — and this project syncs with Glitch, so that
 happens. When it does, `psx.js` still loads, still builds its panels, and
@@ -272,13 +491,13 @@ locates the bundle through `docs/index.html` rather than by name, so a rebuild
 that changes the content hash still resolves, and it refuses to write if a call
 site is missing or ambiguous rather than guessing.
 
-From the running app, **Check bundle hooks** in the PSX Hands card (or
-`PSX.verify()`) counts the call sites in the bundle the browser actually
-loaded and names the missing ones.
+From the running app, `PSX.verify()` in the console counts the call sites in
+the bundle the browser actually loaded and names the missing ones. `PSX.dump()`
+logs the resolved materials, UV binds and the last solved face.
 
 ### If psx.js does not load
 
-Those ~26 call sites are unguarded and on the hot path — the render loop, the
+Those ~35 call sites are unguarded and on the hot path — the render loop, the
 bone rig, the tracking loop. A 404 or a parse error in `psx.js` would mean a
 `TypeError` per frame and a dead app. So `docs/index.html` defines
 `window.PSX` inline first, with every hook returning exactly what the stock code
@@ -303,17 +522,21 @@ and scoped class names, so they look native. Controls are split by what they do:
 **Settings tab** — per-model calibration, next to the app's own tracking options:
 
 - **Face Expressions** — Trigger threshold, Release margin, Minimum hold, Mouth gain, Blink gain, Preview cell (force one expression for calibration)
-- **Emotion Detection** — Detect emotions, Signal range (`calibrated` / `auto` / `raw`), One emotion at a time, Speech first, Talking at, Signal gain, Angry at, Sorrow at, Smile at, Smile drives (`fun` / `joy` / `fun + joy`), live readout, Calibrate expressions and Reset auto range
-- **Motion Calibration** — Motion calibration, Head / neck gain, Torso gain, Damping
-- **Performance** — Performance caps, Tracking rate, Render rate, Realtime shadows, Shadow resolution, Iris / lip refinement, Lite pose model
-- **PSX Hands** — Driven fingers (`all fingers` / `thumb only` / `none`), Log diagnostics to console, Check bundle hooks, Reset PSX settings
+- **Emotion Detection** — Detect emotions, Signal range (`calibrated` / `auto` / `raw`), One emotion at a time, Speech first, Talking at, Signal gain, Angry at, Sorrow at, Smile at, live readout, Calibrate expressions and Reset auto range
+- **Motion Calibration** — Motion calibration, Head / neck gain, Torso gain, Arm gain, Damping, Arm retarget, Reach, Depth gain, Shoulder follow
+- **Performance** — Performance caps, Tracking rate, Render rate, Lite pose model
+- **PSX Hands** — Language, Driven fingers (`all fingers` / `thumb only` / `none`), Export settings, Import settings, Reset PSX settings
 
 Every switch is **off by default**, and with it off the matching hooks fall back
-to stock behaviour. Anything the app reads only at startup — PSX mode, MSAA,
+to stock behaviour. **Arm retarget** is the one exception: it is a rig rather
+than a gain, it is right for every model, and it is on. Anything the app reads only at startup — PSX mode, MSAA,
 SMAA, render scale, shadows, Mediapipe model options — applies on reload, and the
 card says so once you touch one. Everything else is live.
 
-Settings persist in `localStorage` under the key `kf3d.psx`.
+Settings persist in `localStorage` under the key `kf3d.psx`. **Export settings**
+downloads that snapshot (including calibration) as JSON; **Import settings**
+loads it on another device or after a cache clear. Reload if the card says so
+— render scale and Mediapipe options still apply on startup.
 
 ## Calibrating a model
 
@@ -321,7 +544,7 @@ Settings persist in `localStorage` under the key `kf3d.psx`.
 2. Use **Preview cell** to force each expression key in turn and confirm the atlas cell is right. If every expression lands on the wrong cell, toggle **Flip V axis**.
 3. If the face chatters between two cells, raise **Release margin** or **Minimum hold**.
 4. If quiet talking doesn't register, raise **Mouth gain**; same for **Blink gain**.
-5. Hit **Log diagnostics to console** for the resolved materials, UV binds, current cell, and the last solved `brow` / `smile` values with the emotion weights they produced.
+5. For a material that will not switch, `PSX.dump()` in the console lists the resolved UV binds, the current cell, and the last solved `brow` / `smile` values with the emotion weights they produced.
 6. For emotions, hit **Calibrate expressions** and follow the four prompts. Then pull each face and watch the card's live readout — the thresholds should already be roughly right, and **Angry at** / **Sorrow at** / **Smile at** trim them. If an expression stops your lip sync, that is what **Speech first** is for.
 
 ---

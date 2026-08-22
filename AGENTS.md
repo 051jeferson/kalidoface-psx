@@ -1,0 +1,105 @@
+# Kalidoface PSX
+
+Fork of [yeemachine/kalidoface-3d](https://github.com/yeemachine/kalidoface-3d) retuned for PSX / low-poly VRM models. Product behaviour lives in `README.md`. This file is for agents working the repo.
+
+There is **no app source tree**. `src/` is gitignored leftover from upstream Vite. The running app is the built static site in `docs/`. All fork behaviour is `docs/psx.js` plus ~35 patched call sites in the minified bundle.
+
+## Layout
+
+```
+docs/                 # the app. serve this directory
+  index.html          # PSX stub, then psx.js, then the hashed bundle
+  psx.js              # the compatibility layer (edit here)
+  assets/index.*.js   # minified Kalidoface bundle. do not hand-edit
+tools/
+  patch.mjs           # applies / checks the hooks
+  psx-patches.json    # find/replace pairs for those hooks
+index.html            # upstream Vite entry. not used; points at missing src/
+```
+
+## Run locally
+
+Serve `docs/` over HTTP. Webcam needs `localhost`, not `file://`.
+
+```bash
+python -m http.server 5173 --bind 127.0.0.1 --directory docs
+# http://127.0.0.1:5173/
+```
+
+Do **not** run `npm run dev` / `npm run build` / `vite`. Root `index.html` imports `./src/main.js`, which is not in the repo. A Vite build would overwrite `docs/` and drop the patched bundle.
+
+`node_modules` is not required to run or to edit `psx.js`.
+
+## Commands
+
+```bash
+node tools/patch.mjs           # apply hooks; already-applied patches are skipped
+node tools/patch.mjs --check   # exit 1 if any call site is missing
+```
+
+In the running app console: `PSX.verify()` counts bundle call sites; `PSX.dump()` logs the loaded model.
+
+## Architecture
+
+`docs/index.html` defines a stub `window.PSX` (stock Kalidoface behaviour) so a 404/parse error in `psx.js` does not TypeError the render loop. `psx.js` then replaces it.
+
+The bundle calls `window.PSX.*` at patched sites (renderer, shadows, SMAA, tracking rAF, face rig, overlay, …). Shader-level PS1 look (vertex snap, affine, dither) is injected in `onBeforeCompile` and needs no call site.
+
+Settings: `localStorage` key `kf3d.psx`. New keys need `DEFAULTS`, `SPEC` (if they reach WebGL or would brick the page), the Settings/Effects widget, and both `PT` / `EN` strings.
+
+### Adding a bundle hook
+
+1. Add a find/replace pair to `tools/psx-patches.json`. Use unique minified fragments. `patch.mjs` refuses 0 or >1 matches.
+2. Bump `EXPECTED_HOOKS` in `psx.js` to the new call-site count (`smooth` is 7, `shadowSize` is 4, `overlay` is 3, `mpOptions` is 2).
+3. Add the same hook to the stub in `docs/index.html`, returning stock behaviour.
+4. Expose it on the real `window.PSX` object at the bottom of `psx.js`.
+5. Run `node tools/patch.mjs --check`.
+
+A patch may match text an earlier patch produced. `leanGain` is declared inside the `bodyGain` replacement rather than as its own pair: a separate pair keyed off the patched text would leave the original with a `find` that no longer exists on a clean bundle. Patches apply in array order, so a later one may rely on an earlier one's output - but never on breaking an earlier one's `replace` string.
+
+Never edit `docs/assets/index.*.js` by hand. After a Glitch/Vite rebuild that changes the content hash, re-derive any failed patches — do not guess.
+
+## Code conventions (`docs/psx.js`)
+
+- One IIFE, `'use strict'`, `var`, 2-space indent. No modules, no build step, no `let`/`const` required. Keep it parseable as a classic script.
+- Comments explain non-obvious constraints, not the implementation walk.
+- English UI strings are the i18n keys. `T('Foo')` for our cards; `translateNode` swaps the app's own leaf `h4`/`label`/`p`/`button` text and stores the original on `__psxEn`.
+- Injected cards reuse the host panel's scoped Svelte hashes (`FX = svelte-2t25z9`, `STG = svelte-1krauxh`, `TG = svelte-yzrsaq`). A new upstream bundle can change those hashes.
+- Strip upstream controls in `STRIP`. Headings are translated, so match `__psxEn`, `PT[heading]`, **and** the toggle `aria-label` (those stay English). Pin values that fight the layer (`Smile Detection` → `false`, `Enable Wink` → `true`); hide the rest.
+- Three wizards share one state machine (`calRun.kind`): `face` waits for Space, `motion` and `mouth` count themselves in. `steps()`, `calTarget()` and `syncCalUi()` each need the new kind added.
+- `cfg.mouth.smile` is a prototype like any other, and optional so older saves still load. A toothy grin is an open, spread mouth - the same width as `i` - so it cannot be split off by a threshold, only by being its own recording. When it wins, `mouthSays` carries the confidence into `driveEmotions`, which takes it past `smileAt` rather than through it.
+- Vowels are classified by nearest recorded prototype (`cfg.mouth`), not by Kalidokit's A/I/U/E/O and not by the width/openness formula - both pick one cell for every open mouth. `rest` is one of the prototypes, so silence is a decision rather than a threshold, and that is what leaves the mouth cell free for a smile. The formula is still the uncalibrated fallback, now gated on openness.
+- Nothing a single motion run reads may move a gain by more than half (`nudge`). The T-pose reading is gated on the arms actually being out, and the depth reading on the arm actually pointing at the lens - both are factors against a pose, so a pose nobody made reads as a model that cannot reach and pushes the gain the wrong way.
+- The depth step measures the user's arm length from the *T-pose*, never from the pointing pose: depth is what the tracker compresses, so an arm aimed at the lens has its own length compressed by the very factor being measured, and the ratio would come out 1 on any camera.
+- Expression cells are exclusive — never blend UVs. Emotions write all four presets including zeros while enabled, so stale upstream `joy` cannot win.
+- Wink is always on. A `blink` cell reads `max(blink, blink_l, blink_r)`; a `blink_l`/`blink_r` cell also takes the combined `blink` so a full blink closes that eye. Guided calibration records `blinkOpen` / `blinkClosed` across head poses; those fields are optional on older `cfg.cal` objects.
+- `on()` is hardwired `true`. Do not bring back a PSX-mode switch, realtime shadows, eye aim, MSAA/SMAA, or the stripped Pixelate/Outline/Water/Light-cube/Smile Detection/Enable Wink/Selfie controls as user options.
+- Keep Mediapipe `refineFaceLandmarks` / `refineLandmarks` **on**. Kalidokit returns `brow: 0` and eyes stuck open unless it sees 478 landmarks. Vendor patches also let brow/blink run on a 468 mesh if refinement is missing.
+- Kalidokit's stock brow remap is 0..1 and **clamps the furrow away**. The vendor patch returns the unclamped scalar so rest-relative mapping can go negative (angry) and positive (raise).
+- `PSX.guide` gates the preview canvas repaint on `#drag-cam` not carrying `hide`. Do not widen that to any `.hide` ancestor — the subnav and the menu use the same class and say nothing about the preview.
+- The motion wizard counts itself in (`CAL_PREP`); the face wizard waits for Space. A motion pose has no hand free for the keyboard, or turns back toward it and jolts the signal being read. Do not put a countdown on the face wizard - that was tried and reverted, expressions are still being built when a timer fires.
+- `PSX.pose(world, image)` takes two arguments. The second is `poseLandmarks` in normalised video space, which is the only space the face mesh also reports in (`rig.head.position`) - that is what makes the cross-check possible without mapping either convention. It was being dropped before.
+- The sanity gate learns its own thresholds (`meter` / `learn` / `offBy`); do not put a constant in it, it would be a constant tuned to one webcam. Both give-up counters exist so a genuine change - sitting down, new lighting - cannot lock the gate shut permanently.
+- `armLenOk` rejects only *over-long* arms. Foreshortening legitimately halves the measured length of an arm pointing at the lens; a symmetric check throws away every gesture toward the camera.
+- `smooth()` is handed a lerp alpha, never the value being lerped, so the one-euro cutoff runs on a speed measured in `noteHeadSpeed` / `noteWristSpeed` and decayed once per rendered frame in `stepMotionClock`. Which bone a site belongs to is recovered from the alpha itself (`0.04 + dt*N`); do not flatten that, or the torso turns as fast as the neck. The arm retarget has its own target in hand and calls `euroAlpha` directly.
+- `bodyGain` is the torso's *pitch*, which rides on the head signal and keeps its stock ratio to it. `leanGain` is the lean and twist, which come from the pose solver. Upstream shares one constant between them, which is why opening the lean up used to over-pitch the torso.
+- A lost arm coasts (`coast`) instead of snapping back to the stock rig, timed from when it was lost rather than from the last good solve - a whole-pose dropout is already being held through `POSE_STALE_MS`. `giveUpArm` has to put the shoulder back at rest: nothing upstream writes that bone.
+- Head-relative gestures are anchored on the head (`headAnchor`), not the shoulder. Scaling a wrist offset by arm length preserves the direction exactly, and on a big-headed short-armed model that direction is faithfully wrong - its face is at a much steeper elevation from its shoulder than a person's. Measure such things in head-heights, never arm-lengths; an arm-length yardstick hides the very error, which is how this was missed twice.
+- `armDepth` steers direction only now that the elbow angle sets distance, so a value under 1 no longer damps noise - it aims every toward-camera gesture off to the side. Default is 1; the adaptive filter does the damping. `armReach` above 1 overshoots on ordinary proportions for the same reason, and `REACH_STRAIGHTEN` caps how much of the person's bend it may take away.
+- The elbow bend comes from the angle measured at the elbow, never from `vlen(toT)`. That length carries the person's size, their distance from the lens and `armReach`; the angle carries none of them. Deriving the bend from the length is what welded the arm into one piece, because any `armReach > 1` clamps the span at `a + b`.
+- `mapFlip` exists because `mapDir` is often a reflection: the landmark frame's up runs down the screen and its front is forced toward the camera, so the two frames disagree about handedness, and `sx` flips it again. Reflections preserve directions but reverse rotations - anything angular through `mapDir` needs this, anything positional does not.
+- `PSX.arm` drives the forearm twist off the index/little pose landmarks against the model's `IndexProximal` / `LittleProximal`. `aimBone` leaves twist at rest by design, and the wrist solver only reports flexion, so without this the palm never turns. A rig with no finger bones must fall back, not throw.
+- The arms do not run on Kalidokit's Euler angles. `PSX.pose` captures the holistic world landmarks and `PSX.arm` retargets shoulder/elbow/wrist onto the model's own arm, returning `true` to suppress the stock rig. It aims bones from their captured rest quaternion, so never assume the arm bones are at identity. Falling back (`false`) is the correct answer for stale landmarks, an unseen limb, or the pose-only tracking path.
+- Upstream never copies `brow` (or live `eye`) onto `tracking.Face` — only into a spring store. The bundle patches write `n.brow` / `n.eye` after Face.solve and copy both from the spring on subscribe. Without those, `PSX.face` always sees `brow: 0` and `eye: {l:1,r:1}`.
+
+## Do not
+
+- Restore `src/` as the place to work. The fork is `docs/psx.js`.
+- Commit an unpatched bundle. If `docs/index.html`'s module `src` hash changes, run the patcher before considering the change done.
+- Dispatch pin events in a loop. `PIN_TRIES` is 3 on purpose: a value the app rejects would re-render forever.
+
+## Git
+
+Working branch is `glitch` (Glitch sync). `origin` is this fork; `upstream` is yeemachine/kalidoface-3d.
+
+Commits: `feat:` / `fix:` plus a short description of the user-visible change.

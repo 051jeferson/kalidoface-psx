@@ -206,7 +206,7 @@
     })(window,document,'script','dataLayer','GTM-5V3VF28');</script>
     <!-- End Google Tag Manager -->
     <!--
-      The bundle calls window.PSX.* at ~26 patched call sites, unguarded and on
+      The bundle calls window.PSX.* at ~35 patched call sites, unguarded and on
       the hot path - the render loop, the bone rig, the tracking loop. If psx.js
       fails to load or throws while parsing, every one of those becomes a
       TypeError per frame and the app is simply dead.
@@ -226,7 +226,13 @@
         face: function () {},
         headGain: function () { return 1; },
         bodyGain: function () { return 0.05; },
+        leanGain: function () { return 0.05; },
+        armGain: function () { return 1; },
         smooth: function (t) { return t; },
+        pose: function () {},
+        // false = leave the arms to the stock Euler rig
+        arm: function () { return false; },
+        guide: function () { return true; },
         frame: function () { return true; },
         nextTrack: function (fn) { return requestAnimationFrame(fn); },
         mpOptions: function (o) { return o; },

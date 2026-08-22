@@ -1,97 +1,159 @@
 {
- "bundle": "docs/assets/index.e2bec78d.js",
- "patches": [
-  {
-   "find": ")),f.setOptions({maxNumFaces:1,r",
-   "replace": ")),f.setOptions(window.PSX.mpOptions({maxNumFaces:1,r"
-  },
-  {
-   "find": "gConfidence:.5}),f.onResults(p=>",
-   "replace": "gConfidence:.5})),f.onResults(p=>"
-  },
-  {
-   "find": ")),c.setOptions(n.holistic.model),c.onResults(lr",
-   "replace": ")),c.setOptions(window.PSX.mpOptions(n.holistic.model)),c.onResults(lr"
-  },
-  {
-   "find": ".detected=!0,a),requestAnimationFrame(C)}}return l.$$",
-   "replace": ".detected=!0,a),window.PSX.nextTrack(C)}}return l.$$"
-  },
-  {
-   "find": "i))),n.update(e)},Al=l=>{!l||(E(",
-   "replace": "i))),n.update(e),window.PSX.tick(n)},Al=l=>{!l||(E("
-  },
-  {
-   "find": "eturn;y.id=z.id,y.isUser=z.id===",
-   "replace": "eturn;y.id=z.id,window.PSX.onModel(y,g),y.isUser=z.id==="
-  },
-  {
-   "find": "w.mapSize.width=2048,M.shadow.mapSize.height=2048,M.shadow.camera",
-   "replace": "w.mapSize.width=window.PSX.shadowSize(),M.shadow.mapSize.height=window.PSX.shadowSize(),M.shadow.camera"
-  },
-  {
-   "find": "p),C.addPass(z),C.addPass(v),C.a",
-   "replace": "p),C.addPass(z),window.PSX.smaa()&&C.addPass(v),C.a"
-  },
-  {
-   "find": "=e;function m(){requestAnimationFrame(m),Ke=zi.getDelta()",
-   "replace": "=e;function m(){if(requestAnimationFrame(m),!window.PSX.frame())return;Ke=zi.getDelta()"
-  },
-  {
-   "find": "PI,Math.PI):0,c=1;o&&zt(o,{y:ae(e",
-   "replace": "PI,Math.PI):0,c=window.PSX.headGain();o&&zt(o,{y:ae(e"
-  },
-  {
-   "find": ",-.3,.3)*a},i?1:.04+Ke*4)},Ms=(l,e,t,n=!",
-   "replace": ",-.3,.3)*a},i?1:window.PSX.smooth(.04+Ke*4))},Ms=(l,e,t,n=!"
-  },
-  {
-   "find": "me.Spine);let c=.05;r&&zt(r,{x:ae(e",
-   "replace": "me.Spine);let c=window.PSX.bodyGain();r&&zt(r,{x:ae(e"
-  },
-  {
-   "find": "*2,-.3,.3)},i?1:.04+Ke*2),u&&zt(u,{x:ae(",
-   "replace": "*2,-.3,.3)},i?1:window.PSX.smooth(.04+Ke*2)),u&&zt(u,{x:ae("
-  },
-  {
-   "find": "*2,-.1,.1)},i?1:.04+Ke*2),o&&zt(o,{x:ae(",
-   "replace": "*2,-.1,.1)},i?1:window.PSX.smooth(.04+Ke*2)),o&&zt(o,{x:ae("
-  },
-  {
-   "find": "*2,-.3,.3)},i?1:.04+Ke*2)},Ps=(l,e,t=!1)",
-   "replace": "*2,-.3,.3)},i?1:window.PSX.smooth(.04+Ke*2))},Ps=(l,e,t=!1)"
-  },
-  {
-   "find": "upil.x,0,\"XYZ\"),l.lookAt.applyer.lookAt(u)},un=(l,e,t=\"Ri",
-   "replace": "upil.x,0,\"XYZ\"),window.PSX.gaze(l,u),window.PSX.face(l,e)},un=(l,e,t=\"Ri"
-  },
-  {
-   "find": "t\":n,r=i?-1:1,u=[\"Ring\",\"Index\",\"Little\",\"Thumb\",\"Middle\"],c=[\"Proximal\",\"",
-   "replace": "t\":n,r=i?-1:1,u=window.PSX.fingers(),c=[\"Proximal\",\""
-  },
-  {
-   "find": "ance\",antialias:!0,stencil:!0,alph",
-   "replace": "ance\",antialias:window.PSX.aa(),stencil:!0,alph"
-  },
-  {
-   "find": "ow.innerHeight),p.setPixelRatio(Math.max(2,window.devicePixelRatio)),p.shadowMap.enabled=!0;let z=null;cons",
-   "replace": "ow.innerHeight),window.PSX.setupRenderer(p),p.shadowMap.enabled=window.PSX.shadows();let z=null;cons"
-  },
-  {
-   "find": "w.mapSize.width=2048,g.shadow.mapSize.height=2048;const y=new ba(",
-   "replace": "w.mapSize.width=window.PSX.shadowSize(),g.shadow.mapSize.height=window.PSX.shadowSize();const y=new ba("
-  },
-  {
-   "find": "=0;const _=()=>{fl.isOpen?(!i||i===\"close\")&&b():fl.isOpen||w()},b=()=>{mn(i);let g=n.w<600;fl.animate({action:\"close\",",
-   "replace": "=0;const _=()=>{window.PSX.overlayOpen(fl)?(!i||i===\"close\")&&b():w()},b=()=>{mn(i);let g=n.w<600;window.PSX.overlay(fl,{action:\"close\","
-  },
-  {
-   "find": ">{let g=n.w<600;fl.animate({action:\"open\",a",
-   "replace": ">{let g=n.w<600;window.PSX.overlay(fl,{action:\"open\",a"
-  },
-  {
-   "find": "0);return}mn(p),fl.animate({action:\"close\",",
-   "replace": "0);return}mn(p),window.PSX.overlay(fl,{action:\"close\","
-  }
- ]
+  "bundle": "docs/assets/index.e2bec78d.js",
+  "patches": [
+    {
+      "find": ")),f.setOptions({maxNumFaces:1,r",
+      "replace": ")),f.setOptions(window.PSX.mpOptions({maxNumFaces:1,r"
+    },
+    {
+      "find": "gConfidence:.5}),f.onResults(p=>",
+      "replace": "gConfidence:.5})),f.onResults(p=>"
+    },
+    {
+      "find": ")),c.setOptions(n.holistic.model),c.onResults(lr",
+      "replace": ")),c.setOptions(window.PSX.mpOptions(n.holistic.model)),c.onResults(lr"
+    },
+    {
+      "find": ".detected=!0,a),requestAnimationFrame(C)}}return l.$$",
+      "replace": ".detected=!0,a),window.PSX.nextTrack(C)}}return l.$$"
+    },
+    {
+      "find": "i))),n.update(e)},Al=l=>{!l||(E(",
+      "replace": "i))),n.update(e),window.PSX.tick(n)},Al=l=>{!l||(E("
+    },
+    {
+      "find": "eturn;y.id=z.id,y.isUser=z.id===",
+      "replace": "eturn;y.id=z.id,window.PSX.onModel(y,g),y.isUser=z.id==="
+    },
+    {
+      "find": "w.mapSize.width=2048,M.shadow.mapSize.height=2048,M.shadow.camera",
+      "replace": "w.mapSize.width=window.PSX.shadowSize(),M.shadow.mapSize.height=window.PSX.shadowSize(),M.shadow.camera"
+    },
+    {
+      "find": "p),C.addPass(z),C.addPass(v),C.a",
+      "replace": "p),C.addPass(z),window.PSX.smaa()&&C.addPass(v),C.a"
+    },
+    {
+      "find": "=e;function m(){requestAnimationFrame(m),Ke=zi.getDelta()",
+      "replace": "=e;function m(){if(requestAnimationFrame(m),!window.PSX.frame())return;Ke=zi.getDelta()"
+    },
+    {
+      "find": "PI,Math.PI):0,c=1;o&&zt(o,{y:ae(e",
+      "replace": "PI,Math.PI):0,c=window.PSX.headGain();o&&zt(o,{y:ae(e"
+    },
+    {
+      "find": ",-.3,.3)*a},i?1:.04+Ke*4)},Ms=(l,e,t,n=!",
+      "replace": ",-.3,.3)*a},i?1:window.PSX.smooth(.04+Ke*4))},Ms=(l,e,t,n=!"
+    },
+    {
+      "find": "me.Spine);let c=.05;r&&zt(r,{x:ae(e",
+      "replace": "me.Spine);let c=window.PSX.bodyGain(),ps=window.PSX.leanGain();r&&zt(r,{x:ae(e"
+    },
+    {
+      "find": "*2,-.3,.3)},i?1:.04+Ke*2),u&&zt(u,{x:ae(",
+      "replace": "*2,-.3,.3)},i?1:window.PSX.smooth(.04+Ke*2)),u&&zt(u,{x:ae("
+    },
+    {
+      "find": "*2,-.1,.1)},i?1:.04+Ke*2),o&&zt(o,{x:ae(",
+      "replace": "*2,-.1,.1)},i?1:window.PSX.smooth(.04+Ke*2)),o&&zt(o,{x:ae("
+    },
+    {
+      "find": "*2,-.3,.3)},i?1:.04+Ke*2)},Ps=(l,e,t=!1)",
+      "replace": "*2,-.3,.3)},i?1:window.PSX.smooth(.04+Ke*2))},Ps=(l,e,t=!1)"
+    },
+    {
+      "find": "upil.x,0,\"XYZ\"),l.lookAt.applyer.lookAt(u)},un=(l,e,t=\"Ri",
+      "replace": "upil.x,0,\"XYZ\"),window.PSX.gaze(l,u),window.PSX.face(l,e)},un=(l,e,t=\"Ri"
+    },
+    {
+      "find": "t\":n,r=i?-1:1,u=[\"Ring\",\"Index\",\"Little\",\"Thumb\",\"Middle\"],c=[\"Proximal\",\"",
+      "replace": "t\":n,r=i?-1:1,u=window.PSX.fingers(),c=[\"Proximal\",\""
+    },
+    {
+      "find": "ance\",antialias:!0,stencil:!0,alph",
+      "replace": "ance\",antialias:window.PSX.aa(),stencil:!0,alph"
+    },
+    {
+      "find": "ow.innerHeight),p.setPixelRatio(Math.max(2,window.devicePixelRatio)),p.shadowMap.enabled=!0;let z=null;cons",
+      "replace": "ow.innerHeight),window.PSX.setupRenderer(p),p.shadowMap.enabled=window.PSX.shadows();let z=null;cons"
+    },
+    {
+      "find": "w.mapSize.width=2048,g.shadow.mapSize.height=2048;const y=new ba(",
+      "replace": "w.mapSize.width=window.PSX.shadowSize(),g.shadow.mapSize.height=window.PSX.shadowSize();const y=new ba("
+    },
+    {
+      "find": "=0;const _=()=>{fl.isOpen?(!i||i===\"close\")&&b():fl.isOpen||w()},b=()=>{mn(i);let g=n.w<600;fl.animate({action:\"close\",",
+      "replace": "=0;const _=()=>{window.PSX.overlayOpen(fl)?(!i||i===\"close\")&&b():w()},b=()=>{mn(i);let g=n.w<600;window.PSX.overlay(fl,{action:\"close\","
+    },
+    {
+      "find": ">{let g=n.w<600;fl.animate({action:\"open\",a",
+      "replace": ">{let g=n.w<600;window.PSX.overlay(fl,{action:\"open\",a"
+    },
+    {
+      "find": "0);return}mn(p),fl.animate({action:\"close\",",
+      "replace": "0);return}mn(p),window.PSX.overlay(fl,{action:\"close\","
+    },
+    {
+      "find": "n.head.z=i.head.z,an.user.face.set({eye:i.eye",
+      "replace": "n.head.z=i.head.z,n.brow=i.brow,n.eye=i.eye,an.user.face.set({eye:i.eye"
+    },
+    {
+      "find": "e.head.x>=-.4&&e.head.x<=.4&&e.head.y>=-.6&&e.head.y<=.6&&(t.eye=hs.stabilizeBlink(e.eye,e.head.y,{enableWink:E(de).face.enableWink,maxRot:.5}))",
+      "replace": "(t.brow=e.brow,t.eye=hs.stabilizeBlink(e.eye,e.head.y,{enableWink:E(de).face.enableWink,maxRot:.5}))"
+    },
+    {
+      "find": "o=n?-1:1;const r=l.humanoid.getBoneNode(Je.HumanoidBoneName[a+\"UpperArm\"])",
+      "replace": "o=n?-1:1,g=window.PSX.armGain();const r=l.humanoid.getBoneNode(Je.HumanoidBoneName[a+\"UpperArm\"])"
+    },
+    {
+      "find": "zt(r,{z:e[t+\"UpperArm\"].z*o,y:e[t+\"UpperArm\"].y*o,x:e[t+\"UpperArm\"].x},i?1:.04+Ke*4)",
+      "replace": "zt(r,{z:e[t+\"UpperArm\"].z*o*g,y:e[t+\"UpperArm\"].y*o*g,x:e[t+\"UpperArm\"].x*g},i?1:window.PSX.smooth(.04+Ke*4))"
+    },
+    {
+      "find": "zt(u,{z:e[t+\"LowerArm\"].z*o,y:e[t+\"LowerArm\"].y*o,x:e[t+\"LowerArm\"].x},i?1:.04+Ke*4)",
+      "replace": "zt(u,{z:e[t+\"LowerArm\"].z*o*g,y:e[t+\"LowerArm\"].y*o*g,x:e[t+\"LowerArm\"].x*g},i?1:window.PSX.smooth(.04+Ke*4))"
+    },
+    {
+      "find": "zt(c,{z:e[t+\"Hand\"].z*o,y:e[t+\"Hand\"].y*o,x:e[t+\"Hand\"].x},i?1:.04+Ke*6)",
+      "replace": "zt(c,{z:e[t+\"Hand\"].z*o*g,y:e[t+\"Hand\"].y*o*g,x:e[t+\"Hand\"].x*g},i?1:window.PSX.smooth(.04+Ke*6))"
+    },
+    {
+      "find": ",n){er.set(n);const o=E(V).user.tracking.Pose",
+      "replace": ",n){window.PSX.pose(n,t),er.set(n);const o=E(V).user.tracking.Pose"
+    },
+    {
+      "find": ",c=l.humanoid.getBoneNode(Je.HumanoidBoneName[a+\"Hand\"]);zt(r,{z:e[t+\"UpperArm\"]",
+      "replace": ",c=l.humanoid.getBoneNode(Je.HumanoidBoneName[a+\"Hand\"]);if(window.PSX.arm(l,e,t,n,i,r,u,c))return;zt(r,{z:e[t+\"UpperArm\"]"
+    },
+    {
+      "find": "function Xn(l,e=\"holistic\",t=null){switch(kl.width=",
+      "replace": "function Xn(l,e=\"holistic\",t=null){if(!window.PSX.guide(kl))return;switch(kl.width="
+    },
+    {
+      "find": "r&&zt(r,{x:ae(e.head.x*c,-.3,.3),z:E(de).holistic.enable?ae(t.Spine.z*c,-.7,.7)*a:ae(e.head.z*c,-.1,.1)*a,y:E(de).holistic.enable?ae(t.Spine.y*c*.2,-.7,.7)",
+      "replace": "r&&zt(r,{x:ae(e.head.x*c,-.3,.3),z:E(de).holistic.enable?ae(t.Spine.z*ps,-.7,.7)*a:ae(e.head.z*c,-.1,.1)*a,y:E(de).holistic.enable?ae(t.Spine.y*ps*.2,-.7,.7)"
+    },
+    {
+      "find": "u&&zt(u,{x:ae(e.head.x*c,-.3,.3),z:E(de).holistic.enable?ae(t.Spine.z*c,-.7,.7)*a:ae(e.head.z*c,-.3,.3)*a,y:E(de).holistic.enable?ae(t.Spine.y*c*.2,-.4,.4)",
+      "replace": "u&&zt(u,{x:ae(e.head.x*c,-.3,.3),z:E(de).holistic.enable?ae(t.Spine.z*ps,-.7,.7)*a:ae(e.head.z*c,-.3,.3)*a,y:E(de).holistic.enable?ae(t.Spine.y*ps*.2,-.4,.4)"
+    },
+    {
+      "find": "o&&zt(o,{x:ae(e.head.x*c,-.3,.3),z:E(de).holistic.enable?ae(t.Spine.z*c,-.7,.7)*a:ae(e.head.z*c,-.1,.1)*a,y:E(de).holistic.enable?ae(t.Spine.y*c*.2,-.4,.4)",
+      "replace": "o&&zt(o,{x:ae(e.head.x*c,-.3,.3),z:E(de).holistic.enable?ae(t.Spine.z*ps,-.7,.7)*a:ae(e.head.z*c,-.1,.1)*a,y:E(de).holistic.enable?ae(t.Spine.y*ps*.2,-.4,.4)"
+    }
+  ],
+  "vendorPatches": [
+    {
+      "find": "J4=n=>{if(n.length!==478)return 0;",
+      "replace": "J4=n=>{if(n.length<468)return 0;"
+    },
+    {
+      "find": "if(n.length!==478)return{l:1,r:1};const r=Rb(n,ls,{high:e,low:t})",
+      "replace": "if(n.length<468)return{l:1,r:1};const r=Rb(n,ls,{high:e,low:t})"
+    },
+    {
+      "find": "a=r/i-1;return(tr(a,o,s)-o)/(s-o)}",
+      "replace": "a=r/i-1;return a}"
+    }
+  ]
 }
