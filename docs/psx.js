@@ -14,6 +14,8 @@
  *   PSX.tick(vrm)                - called once per frame, after vrm.update()
  *   PSX.face(vrm, rig)           - the solved Kalidokit face, before it lands
  *   PSX.headGain() / bodyGain() / armGain()  - neck, torso, and arm rotation gain
+ *   PSX.pose(world, image, hands) - the holistic landmarks, before Kalidokit
+ *   PSX.arm(...)                 - retargets one arm; true suppresses the rig
  *   PSX.smooth(t)                - lerp factor for every tracked bone
  *   PSX.frame()                  - whether this animation frame gets rendered
  *   PSX.nextTrack(fn)            - schedules the next Mediapipe inference
@@ -150,6 +152,12 @@
     // Aim the arm at the hand the camera saw instead of replaying Kalidokit's
     // solved angles. Not gated behind `motion`: it is a rig, not a gain.
     armIK: true,
+    // Aim the wrist from the hand model's own 21 landmarks instead of from
+    // Kalidokit's Euler wrist. The hand model is the only tracker that looks at
+    // the hand, and it is the one already driving the fingers - but holistic
+    // only runs it when it thinks it has found a hand, and a hand it has found
+    // in the wrong place is reported as confidently as a right one.
+    handIK: true,
     // model arm lengths per unit of the user's. 1 = the model reaches exactly
     // as far, in its own proportions, as the person does. Raise it when a
     // short-armed model cannot get its hands to its own head.
@@ -338,6 +346,14 @@
     return { kind: EXPORT_KIND, version: EXPORT_VERSION, settings: data };
   }
 
+  // The panel is rebuilt whenever the language changes, so this is looked up
+  // through a variable the rebuild reassigns rather than held across it.
+  var importNoteEl = null;
+
+  function setImportNote(msg) {
+    if (importNoteEl) setText(importNoteEl, msg);
+  }
+
   function exportSettings() {
     var blob = new Blob([JSON.stringify(snapshotSettings(), null, 2)], {
       type: 'application/json'
@@ -362,14 +378,27 @@
     return null;
   }
 
+  // What each calibration is called when the import reports on it. A file that
+  // carried none is a file exported before that calibration was run, and the
+  // one already loaded is kept - so the import has to say which of the three
+  // arrived, or a half-imported profile looks exactly like a whole one.
+  var CAL_PARTS = [
+    { key: 'cal', name: 'expression calibration' },
+    { key: 'mouth', name: 'vowel calibration' }
+  ];
+
   function applyImported(parsed) {
     var body = settingsFromPayload(parsed);
-    if (!body) return false;
+    if (!body) return null;
     var langChanged = false;
     var needsReload = false;
+    var bad = {};
     for (var k in DEFAULTS) {
       if (k === 'preview' || !(k in body)) continue;
       var next = sanitize(k, body[k]);
+      // a calibration that did not survive validation is not the same as one
+      // the file never had, and only the first is worth telling anyone about
+      if (body[k] && next == null && DEFAULTS[k] === null) bad[k] = true;
       if (cfg[k] === next) continue;
       if (k === 'lang') langChanged = true;
       if (NEEDS_RELOAD[k]) needsReload = true;
@@ -382,7 +411,28 @@
     if (langChanged) rebuildPanels();
     else syncControls();
     if (needsReload) askReload();
-    return true;
+    return importReport(body, bad);
+  }
+
+  // Motion calibration has no object of its own - it lands as a handful of
+  // gains - so it counts as carried when the file brought any of them.
+  var MOTION_KEYS = ['headGain', 'bodyGain', 'leanGain', 'armReach', 'armDepth',
+    'shoulder', 'minCutoff'];
+
+  function importReport(body, bad) {
+    var lines = [T('Settings imported')];
+    for (var i = 0; i < CAL_PARTS.length; i++) {
+      var p = CAL_PARTS[i];
+      lines.push(T(p.name) + ': ' + (bad[p.key] ? T('unusable, kept the current one')
+        : (p.key in body) && body[p.key] ? T('imported') : T('not in the file')));
+    }
+    var motion = false;
+    for (var j = 0; j < MOTION_KEYS.length; j++) {
+      if (MOTION_KEYS[j] in body) motion = true;
+    }
+    lines.push(T('motion calibration') + ': ' +
+      (motion ? T('imported') : T('not in the file')));
+    return lines.join(NL);
   }
 
   function importSettingsFile(file) {
@@ -391,10 +441,16 @@
     reader.onload = function () {
       try {
         var ok = applyImported(JSON.parse(reader.result));
-        if (!ok) console.warn('[psx] that file is not PSX settings');
-        else console.log('[psx] settings imported');
+        if (!ok) {
+          console.warn('[psx] that file is not PSX settings');
+          setImportNote(T('That file is not PSX settings'));
+        } else {
+          console.log('[psx] settings imported');
+          setImportNote(ok);
+        }
       } catch (e) {
         console.warn('[psx] could not read that file', e);
+        setImportNote(T('That file is not PSX settings'));
       }
     };
     reader.readAsText(file);
@@ -2255,6 +2311,9 @@
     Left: { shoulder: 12, elbow: 14, wrist: 16, hip: 24, pinky: 18, index: 20 }
   };
   var LM_NOSE = 0;
+  // The hand model's own 21 landmarks. Only the knuckle row is read: the
+  // fingertips curl out of the palm's plane, the knuckles are the palm.
+  var HAND_LM = { wrist: 0, index: 5, middle: 9, pinky: 17 };
   // a tracking drop should hand the arms back to the stock rig, not freeze them
   var POSE_STALE_MS = 500;
   // how much of the elbow's bend Reach is allowed to take away, in radians
@@ -2365,18 +2424,27 @@
 
   var poseLm = null;
   var poseImg = null;
+  // { Right: [21 landmarks] | null, Left: ... } from the hand model, in image
+  // space. Same Right/Left convention as ARM_LM - the bundle builds this map
+  // by crossing the sides over, and so does the rest of this layer.
+  var poseHand = null;
   var poseLmAt = 0;
   var poseSeq = 0;
   // the torso frame those landmarks gave, and which result it came from
   var lmBasis = null;
   var lmBasisSeq = -1;
+  // the same frame built from the image-space landmarks, which is where the
+  // hand model reports
+  var imgBasis = null;
+  var imgBasisSeq = -1;
 
   // called with the world landmarks of every holistic result
   // `image` is the second argument the call site has always passed and this
   // layer has always dropped: the same landmarks in normalised video space,
   // which is the one space the face mesh also reports in.
-  function pose(world, image) {
+  function pose(world, image, hands) {
     poseImg = (image && image.length > LM_NOSE) ? image : null;
+    poseHand = hands || null;
     if (!world || world.length <= ARM_LM.Left.hip) { poseLm = null; return; }
     poseLm = world;
     poseLmAt = now();
@@ -2469,7 +2537,7 @@
         ok: true, ru: ru, lu: lu, hips: hips, at: {}, off: {},
         // per-side dead-reckoning state: the raw target of the last inference,
         // when it was taken, and the velocity between the last two
-        raw: {}, rawAt: {}, rawSeq: {}, vel: {}, elb: {},
+        raw: {}, rawAt: {}, rawSeq: {}, vel: {}, elb: {}, aim: {},
         // per-side coast state: when this arm was last solved from live
         // landmarks, and the three rotations it was left in
         goodAt: {}, lostAt: {}, sb: {}, held: {
@@ -2508,9 +2576,15 @@
   // optional VRM bone and plenty of low-poly models leave it out. Taken only
   // when it really is this arm's parent, so a rig that names it something else
   // cannot get twisted by mistake.
+  // Which of the model's sides this tracked side drives. Mirrored is the
+  // normal case - the preview is a mirror, so the person's right arm is the
+  // one the viewer sees where the model's left arm is.
+  function boneSide(side, mirrored) {
+    return mirrored ? (side === 'Right' ? 'left' : 'right') : side.toLowerCase();
+  }
+
   function shoulderBone(vrm, upper, side, mirrored) {
-    var s = mirrored ? (side === 'Right' ? 'left' : 'right') : side.toLowerCase();
-    var sb = boneNode(vrm, s + 'Shoulder');
+    var sb = boneNode(vrm, boneSide(side, mirrored) + 'Shoulder');
     return sb && upper.parent === sb ? sb : null;
   }
 
@@ -2534,21 +2608,6 @@
     var to = qRotate(c.qC.copy(c.qB).invert(), dir);  // wanted aim, parent space
     bone.quaternion.copy(c.qA.setFromUnitVectors(
       c.vA.set(from.x, from.y, from.z), c.vB.set(to.x, to.y, to.z)).multiply(rest));
-  }
-
-  // Whether `mapDir` reflects, as +1 or -1. It carries a vector's components
-  // from one frame into another, and when the two disagree about handedness -
-  // which they routinely do, because the landmark frame's up runs down the
-  // screen and its front is forced to face the camera - that mapping is a
-  // reflection. A reflection maps directions perfectly well, which is why the
-  // hand still lands where it should, but it reverses which way a rotation
-  // goes: a palm turned outward comes out turned inward. Mirroring flips it
-  // once more. Measured off the frames rather than assumed, since either can
-  // come out either way depending on where the person is standing.
-  function mapFlip(ub, mb, sx) {
-    var u = vdot(vcross(ub.x, ub.y), ub.z);
-    var m = vdot(vcross(mb.x, mb.y), mb.z);
-    return (u * m * sx) < 0 ? -1 : 1;
   }
 
   function perpTo(v, axis) { return vsub(v, vmul(axis, vdot(v, axis))); }
@@ -2581,11 +2640,72 @@
   // pose landmarks. Comparing the same anatomical direction on each is what
   // makes the twist measurable without knowing either rig's axis convention.
   function palmAcross(vrm, side, mirrored) {
-    var s = mirrored ? (side === 'Right' ? 'left' : 'right') : side.toLowerCase();
+    var s = boneSide(side, mirrored);
     var ix = boneNode(vrm, s + 'IndexProximal');
     var li = boneNode(vrm, s + 'LittleProximal');
     if (!ix || !li) return null;
     return vnorm(vsub(worldPos(ix), worldPos(li)));
+  }
+
+  // A difference between two landmarks, tolerant of a missing z. The hand
+  // model always reports one, but a landmark array that has been through a
+  // serialisation somewhere may not, and a NaN here silently kills the whole
+  // arm rather than one axis of it.
+  function lmVec(a, b) {
+    return v3(num(a.x) - num(b.x), num(a.y) - num(b.y), num(a.z) - num(b.z));
+  }
+
+  // The torso frame, in image space. The hand model reports there and the pose
+  // world landmarks do not, so a hand vector cannot be read in `lmBasis` - the
+  // two are different spaces. It is the frame, not the space, that makes a
+  // direction anatomical, so building the same frame here is all it takes.
+  //
+  // Image y runs down the screen and image z is a rough depth in x's units;
+  // neither matters once both are read as components of this frame.
+  function imageBasis() {
+    if (imgBasisSeq === poseSeq) return imgBasis;
+    imgBasisSeq = poseSeq;
+    imgBasis = null;
+    var p = poseImg;
+    if (!p || p.length <= ARM_LM.Left.hip) return null;
+    var shR = p[ARM_LM.Right.shoulder], shL = p[ARM_LM.Left.shoulder];
+    if (!vis(shR) || !vis(shL)) return null;
+    imgBasis = torsoBasis(shR, shL, vmid(p[ARM_LM.Right.hip], p[ARM_LM.Left.hip]),
+      lmVec(p[LM_NOSE], vmid(shR, shL)));
+    return imgBasis;
+  }
+
+  // Where this hand points and which way its palm faces, in the model's space.
+  //
+  // The pose model also reports an index and a pinky landmark, and this used to
+  // run on those - but it finds them as a by-product of finding the arm, and
+  // they jitter by more than the palm is wide. The hand model is the only
+  // tracker that actually looks at the hand. It is also the one that drives the
+  // fingers, so when it has the hand the fingers and the wrist finally agree.
+  //
+  // Null whenever the hand is not being seen, which is often: holistic drops
+  // the hand model the moment the hand blurs or leaves the frame.
+  function handWant(side, mb, sx, depth) {
+    if (!poseHand) return null;
+    var p = poseHand[side];
+    if (!p || p.length <= HAND_LM.pinky) return null;
+    var ib = imageBasis();
+    if (!ib) return null;
+    var w = p[HAND_LM.wrist], md = p[HAND_LM.middle];
+    var ix = p[HAND_LM.index], pk = p[HAND_LM.pinky];
+    if (!w || !md || !ix || !pk) return null;
+    var fwd = vnorm(mapDir(lmVec(md, w), ib, mb, sx, depth));
+    var across = vnorm(mapDir(lmVec(ix, pk), ib, mb, sx, depth));
+    if (!fwd || !across) return null;
+    return { fwd: fwd, across: across };
+  }
+
+  // Something on the far side of the wrist to aim the hand bone by. The middle
+  // knuckle is the hand's own axis. A rig with no finger bones has to fall
+  // back, and there the Euler wrist is still the right answer.
+  function handChild(vrm, side, mirrored) {
+    var s = boneSide(side, mirrored);
+    return boneNode(vrm, s + 'MiddleProximal') || boneNode(vrm, s + 'IndexProximal');
   }
 
   // three.js XYZ order, so the wrist keeps reading the way the stock rig set it
@@ -2882,39 +3002,66 @@
     aimBone(c, upper, lower, upDir);
     aimBone(c, lower, hand, loDir);
 
-    // The wrist angle stays the hand solver's. It is relative to the forearm,
-    // which the retarget has just put where it belongs, so it reads better here
-    // than it did on the stock rig.
-    var h = rig[side + 'Hand'];
-    if (h) {
-      var g = armGain();
-      var want = quatFromEuler(c.qA, num(h.x) * g, num(h.y) * sx * g, num(h.z) * sx * g);
-      var hk = instant ? 1 : clamp(smooth(0.04 + dt * 6), 0.002, 1);
-      hand.quaternion.copy(hk >= 1 ? want : c.keep.copy(hand.quaternion).slerp(want, hk));
+    // The wrist, from the hand model when it has this hand and from Kalidokit's
+    // Euler wrist when it does not. The Euler pose is not a failure case - it
+    // is relative to a forearm this retarget has just placed correctly, so it
+    // reads better here than it ever did on the stock rig - but it is a wrist
+    // angle inferred from the arm, and the hand model is looking straight at
+    // the thing it is measuring.
+    var hw = cfg.handIK ? handWant(side, mb, sx, depth) : null;
+    var hChild = hw ? handChild(vrm, side, mirrored) : null;
+    if (hw && hChild) {
+      // Filtered as a direction, on the target's own alpha. The wrist is the
+      // noisiest joint in the chain and an unfiltered aim buzzes visibly, but
+      // it must not get its own second filter either - that is another lag
+      // stacked on the one the target already carries.
+      var hf = hw.fwd;
+      if (!instant && c.aim[side]) hf = vnorm(vlerp(c.aim[side], hf, k)) || hf;
+      c.aim[side] = hf;
+      aimBone(c, hand, hChild, hf);
+    } else {
+      c.aim[side] = null;
+      var h = rig[side + 'Hand'];
+      if (h) {
+        var g = armGain();
+        var wantQ = quatFromEuler(c.qA, num(h.x) * g, num(h.y) * sx * g, num(h.z) * sx * g);
+        var hk = instant ? 1 : clamp(smooth(0.04 + dt * 6), 0.002, 1);
+        hand.quaternion.copy(hk >= 1 ? wantQ : c.keep.copy(hand.quaternion).slerp(wantQ, hk));
+      }
     }
 
     // Nothing upstream ever turns the forearm about its own axis, so the palm
     // stays wherever the bind pose left it - and "which way is the hand facing"
-    // is almost all that axis. The wrist solver cannot supply it: it reports
-    // flexion, relative to a forearm it estimated itself and which the retarget
-    // has since replaced.
+    // is almost all that axis. Neither wrist source can supply it: both report
+    // flexion, relative to a forearm they estimated themselves and which the
+    // retarget has since replaced.
     //
     // Measured last, once both bones are where they belong, and against the
     // model's own knuckles rather than an assumed axis. `aimBone` rewrites the
     // forearm from rest every frame, so this is an absolute reading each time,
     // not a correction stacking on the last one.
-    if (cfg.twist > 0 && vis(lm[idx.index]) && vis(lm[idx.pinky])) {
-      var wantAcross = vnorm(mapDir(vsub(lm[idx.index], lm[idx.pinky]), ub, mb, sx, depth));
+    //
+    // Both vectors are in the model's space by the time they are compared, so
+    // the angle between them is the angle to turn. The reflection in `mapDir`
+    // is spent on carrying the target direction across and must not be spent a
+    // second time on the rotation - doing that turned every palm the wrong way.
+    if (cfg.twist > 0) {
+      var wantAcross = hw ? hw.across
+        : (vis(lm[idx.index]) && vis(lm[idx.pinky])
+          ? vnorm(mapDir(vsub(lm[idx.index], lm[idx.pinky]), ub, mb, sx, depth))
+          : null);
       var haveAcross = palmAcross(vrm, side, mirrored);
       var ang = (wantAcross && haveAcross)
         ? twistAngle(haveAcross, wantAcross, loDir) : null;
       if (ang != null) {
         // a forearm does not rotate past about 150 degrees, and a landmark that
         // says it did is a landmark that has flipped the hand over
-        ang = clamp(ang * mapFlip(ub, mb, sx), -2.6, 2.6) * cfg.twist;
+        ang = clamp(ang, -2.6, 2.6) * cfg.twist;
         if (!instant && isNum(c.roll[side])) ang = c.roll[side] + (ang - c.roll[side]) * k;
         c.roll[side] = ang;
         rollBone(c, lower, loDir, ang);
+        // the roll turned the forearm, and the hand rode along with it
+        if (hw && hChild) aimBone(c, hand, hChild, c.aim[side]);
       }
     }
 
@@ -2979,7 +3126,12 @@
     // stage, not a phone. The same control is the only way out of selfie, so
     // pin it off before hiding or a leftover session would be stuck there.
     { dataText: ['Selfie Mode', 'First Person Mode'],
-      card: '.menu-item', pin: false }
+      card: '.menu-item', pin: false },
+    // Peer-to-peer voice chat with a stranger's browser. Nothing to do with
+    // driving a PSX avatar, and it owns a whole subnav of its own. Anchored on
+    // the menu item's own "call" class rather than on its label: the label is
+    // replaced by the live chat ID once a call connects.
+    { find: '.menu-item.call', card: '.menu-item' }
   ];
 
   function headingMatches(h, want) {
@@ -3274,8 +3426,17 @@
     'all fingers': 'todos os dedos',
     'thumb only': 'só o polegar',
     'none': 'nenhum',
+    'Wrist from hand model': 'Pulso pelo modelo de mão',
     'Export settings': 'Exportar ajustes',
     'Import settings': 'Importar ajustes',
+    'Settings imported': 'Ajustes importados',
+    'That file is not PSX settings': 'Esse arquivo não é de ajustes PSX',
+    'expression calibration': 'calibragem de expressões',
+    'vowel calibration': 'calibragem de vogais',
+    'motion calibration': 'calibragem de movimento',
+    'imported': 'importada',
+    'not in the file': 'não estava no arquivo',
+    'unusable, kept the current one': 'inválida, mantida a atual',
     'Reset PSX settings': 'Restaurar ajustes PSX',
     'Language': 'Idioma',
     'English': 'English',
@@ -4196,6 +4357,7 @@
     ikNote.style.cssText = 'width:100%;opacity:.5;font-size:12px;margin:0 0 4px;text-align:left';
     mo.appendChild(ikNote);
     addToggle(mo, 'armIK', T('Arm retarget'), STG);
+    addToggle(mo, 'handIK', T('Wrist from hand model'), STG);
     addRange(mo, 'armReach', T('Reach'), 0.5, 2, 0.05, function (v) { return v.toFixed(2) + 'x'; }, STG);
     addRange(mo, 'armDepth', T('Depth gain'), 0, 2, 0.05, function (v) { return v.toFixed(2) + 'x'; }, STG);
     addRange(mo, 'shoulder', T('Shoulder follow'), 0, 0.6, 0.05, function (v) { return v.toFixed(2); }, STG);
@@ -4273,6 +4435,11 @@
     imp.style.marginTop = '8px';
     imp.addEventListener('click', function () { file.click(); });
     hnd.appendChild(imp);
+
+    importNoteEl = el('div', STG, '');
+    importNoteEl.style.cssText = 'width:100%;font-size:12px;opacity:.85;text-align:left;' +
+      'white-space:pre-line;margin-top:10px;line-height:1.5';
+    hnd.appendChild(importNoteEl);
 
     var rst = el('button', 'trigger reset ' + STG, T('Reset PSX settings'));
     rst.style.marginTop = '8px';

@@ -320,9 +320,7 @@ of moving it toward the target.
 shoulder → wrist vector the camera measured in a torso frame built from your own
 shoulders and hips, rebuilds it in the same frame on the model, scales it by the
 model's arm length over yours, and solves the two bones so the hand lands on it.
-The elbow landmark is the pole, so nothing guesses which way the elbow folds, and
-the wrist angle stays the hand solver's — it is relative to the forearm, which
-the retarget has just put where it belongs.
+The elbow landmark is the pole, so nothing guesses which way the elbow folds.
 
 - **Reach** — how much further than your own elbow angle to extend. It exists
   for a model whose arms are too short to get to its own head. Now that the bend
@@ -337,15 +335,26 @@ the retarget has just put where it belongs.
   *direction*. A value under 1 tilts every gesture toward the camera off to one
   side, so the hand never gets in front of the face — which is why it now
   defaults to `1`. The depth calibration measures the rest.
+- **Wrist from hand model** — Mediapipe runs a separate hand model, and it is
+  the only tracker that actually looks at your hand; it is already the one
+  driving the fingers. The wrist used to be the hand solver's Euler angle
+  instead — an angle inferred from where the *arm* was pointing, which is why
+  the fingers and the wrist could disagree about which way the palm faced. The
+  wrist is now aimed straight at the hand's own middle knuckle. Holistic drops
+  the hand model whenever the hand blurs or leaves frame, and the Euler wrist
+  takes over for those frames — it reads better here than it ever did on the
+  stock rig, because the forearm under it is now in the right place. Turn this
+  off to go back to the Euler wrist everywhere.
 - **Forearm twist** — turning a palm from down to up is forearm rotation, and
   nothing upstream drives it: `aimBone` deliberately leaves each bone's twist at
-  its rest value, and the wrist solver only ever reports flexion — relative to a
-  forearm it estimated itself and which the retarget has since replaced. So the
+  its rest value, and neither wrist source reports anything but flexion. So the
   palm stayed wherever the bind pose left it, and "which way is the hand facing"
-  is almost entirely that axis. The pose landmarks carry the index and little
+  is almost entirely that axis. The hand model carries the index and little
   knuckles, and VRM carries `IndexProximal` / `LittleProximal`, so the same
-  anatomical direction can be measured on both and the difference rolled onto the
-  forearm. Models without finger bones fall back to the old behaviour.
+  anatomical direction is measured on both and the difference rolled onto the
+  forearm. The pose model's own knuckle landmarks are the fallback; it finds
+  them as a by-product of finding the arm and they jitter by more than the palm
+  is wide. Models without finger bones fall back to no twist at all.
 - **Face anchor** — a hand at the face is a gesture *about the head*, and
   measuring it out from the shoulder in arm-lengths gets it wrong on exactly the
   models this fork is for. A low-poly avatar is a big head on short arms, so its
@@ -462,7 +471,7 @@ models and nothing else:
 | **Antialiasing** | `PSX.aa()` and `PSX.smaa()` both return `false`. The console had none, so neither MSAA nor the SMAA pass is a choice |
 | **Texture filtering** | Always nearest-neighbour, no mipmaps, no anisotropy. The PS1 point-sampled; there was no bilinear filter to turn on |
 | **Affine mapping** | Always on where a material has a uv varying to rescale. Turning it off would not be a preference, it would be a different console |
-| **Upstream's replaced controls** | Pixelate, Outline, Water Animation, Light Cube Experiment, Light Colour, Light Position, Smile Detection, Enable Wink and Selfie / First Person Mode are hidden and pinned unconditionally — see below. An option to restore a control that costs performance or fights a PSX one would only be an option to make it worse |
+| **Upstream's replaced controls** | Pixelate, Outline, Water Animation, Light Cube Experiment, Light Colour, Light Position, Smile Detection, Enable Wink, Selfie / First Person Mode and **Call a friend** are hidden and pinned unconditionally — see below. An option to restore a control that costs performance or fights a PSX one would only be an option to make it worse |
 
 Stack these with **Render scale** in the Effects tab: at `0.5x` the renderer
 draws a quarter of the pixels, which is the single biggest GPU win and the
@@ -523,7 +532,7 @@ and scoped class names, so they look native. Controls are split by what they do:
 
 - **Face Expressions** — Trigger threshold, Release margin, Minimum hold, Mouth gain, Blink gain, Preview cell (force one expression for calibration)
 - **Emotion Detection** — Detect emotions, Signal range (`calibrated` / `auto` / `raw`), One emotion at a time, Speech first, Talking at, Signal gain, Angry at, Sorrow at, Smile at, live readout, Calibrate expressions and Reset auto range
-- **Motion Calibration** — Motion calibration, Head / neck gain, Torso gain, Arm gain, Damping, Arm retarget, Reach, Depth gain, Shoulder follow
+- **Motion Calibration** — Motion calibration, Head / neck gain, Torso gain, Arm gain, Damping, Arm retarget, Wrist from hand model, Reach, Depth gain, Shoulder follow, Forearm twist, Face anchor, Prediction, Dropout hold, Tracking sanity
 - **Performance** — Performance caps, Tracking rate, Render rate, Lite pose model
 - **PSX Hands** — Language, Driven fingers (`all fingers` / `thumb only` / `none`), Export settings, Import settings, Reset PSX settings
 
@@ -534,8 +543,12 @@ SMAA, render scale, shadows, Mediapipe model options — applies on reload, and 
 card says so once you touch one. Everything else is live.
 
 Settings persist in `localStorage` under the key `kf3d.psx`. **Export settings**
-downloads that snapshot (including calibration) as JSON; **Import settings**
-loads it on another device or after a cache clear. Reload if the card says so
+downloads that snapshot as JSON — every setting plus all three calibrations, the
+recorded expression spans, the vowel prototypes and the motion gains.
+**Import settings** loads it on another device or after a cache clear, and says
+underneath which of the three calibrations the file actually carried: a file
+exported before you ran one does not have it, and the one already loaded is kept
+rather than wiped. Reload if the card says so
 — render scale and Mediapipe options still apply on startup.
 
 ## Calibrating a model

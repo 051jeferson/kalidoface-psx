@@ -119,7 +119,7 @@
     },
     {
       "find": ",n){er.set(n);const o=E(V).user.tracking.Pose",
-      "replace": ",n){window.PSX.pose(n,t),er.set(n);const o=E(V).user.tracking.Pose"
+      "replace": ",n){window.PSX.pose(n,t,i),er.set(n);const o=E(V).user.tracking.Pose"
     },
     {
       "find": ",c=l.humanoid.getBoneNode(Je.HumanoidBoneName[a+\"Hand\"]);zt(r,{z:e[t+\"UpperArm\"]",
