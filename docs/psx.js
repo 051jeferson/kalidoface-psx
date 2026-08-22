@@ -3427,6 +3427,11 @@
     'thumb only': 'só o polegar',
     'none': 'nenhum',
     'Wrist from hand model': 'Pulso pelo modelo de mão',
+    'Save colour': 'Salvar cor',
+    'Update colour': 'Atualizar cor',
+    'Delete colour': 'Apagar cor',
+    'No colours saved yet': 'Nenhuma cor salva ainda',
+    'note.bgColour': 'Cores salvas ficam na lista de fundos 2D, junto com as imagens enviadas - clique lá para aplicar. Aqui: clique num quadrinho para carregá-lo no seletor e editar, × apaga.',
     'Export settings': 'Exportar ajustes',
     'Import settings': 'Importar ajustes',
     'Settings imported': 'Ajustes importados',
@@ -3515,6 +3520,11 @@
       'gain sets how much the toward-camera axis counts, which is Mediapipe’s ' +
       'noisiest number. Nothing upstream drives the shoulder at all, so shoulder ' +
       'follow lets it turn a little and keeps a raised arm out of the neck.',
+    'note.bgColour': 'The picker keeps one colour, and there was no way to keep a '
+      + 'second one or drop one you are done with. A saved colour goes into the 2D '
+      + 'background list beside your uploaded images, where clicking it applies it. '
+      + 'Here, clicking a swatch loads it back into the picker to edit, and × '
+      + 'deletes it.',
     'note.mouth': 'Upstream reports five vowel weights that all rise together with '
       + 'the jaw, so one of them wins whatever you say and the mouth ends up with a '
       + 'single open shape. This records what your own face reads while you say each '
@@ -3562,7 +3572,7 @@
     face: 1, headGain: 1, bodyGain: 1, leanGain: 1, armGain: 1,
     smooth: 7, frame: 1, nextTrack: 1,
     mpOptions: 2, shadows: 1, shadowSize: 4, overlay: 3, overlayOpen: 1, gaze: 1,
-    pose: 1, arm: 1, guide: 1
+    pose: 1, arm: 1, guide: 1, bg: 1, bgDrop: 1
   };
 
   function verify() {
@@ -4522,6 +4532,192 @@
     controls = live;
   }
 
+  // ------------------------------------------------------ background colours
+  //
+  // The app can already put a flat colour behind the avatar - five presets and
+  // an iro picker - but the picker keeps exactly one colour under `savedIro`,
+  // so there is nowhere to keep a second one and no way to drop one you are
+  // done with.
+  //
+  // The uploaded-background list is already the right shape for that: it
+  // renders a `color` entry as a swatch, gives anything marked `uploaded` a
+  // delete button, and is persisted with the rest of the app's state. So a
+  // saved colour is an entry in that list, and it appears in the 2D tab next
+  // to the uploaded images rather than in some parallel PSX place.
+
+  var bgStores = null;
+  // the swatch the picker is currently loaded from, so Save replaces it rather
+  // than piling up a near-identical colour every time one is nudged
+  var bgEditUrl = null;
+  var bgCard = null;
+
+  // called when the Backgrounds panel mounts, with the app's own stores
+  function bg(stores) { bgStores = stores; }
+
+  // Svelte stores only hand their value to a subscriber. Subscribing runs the
+  // callback once, synchronously, before returning the unsubscriber.
+  function readStore(st) {
+    if (!st || typeof st.subscribe !== 'function') return null;
+    var v = null;
+    var un = st.subscribe(function (x) { v = x; });
+    if (typeof un === 'function') un();
+    else if (un && typeof un.unsubscribe === 'function') un.unsubscribe();
+    return v;
+  }
+
+  // The list is filtered by `pano` before it is rendered, and the delete button
+  // reports the index it was rendered at - so with one 3D upload sitting ahead
+  // of them, every 2D delete removes the wrong entry. Count through the same
+  // filter the renderer used instead of trusting that index against the whole
+  // list.
+  function bgDrop(list, idx, tab) {
+    var out = (list || []).slice();
+    var seen = -1;
+    for (var i = 0; i < out.length; i++) {
+      if ((out[i] && out[i].pano ? '3D' : '2D') !== tab) continue;
+      seen++;
+      if (seen === idx) { out.splice(i, 1); return out; }
+    }
+    // an index that does not land anywhere is not one worth guessing at
+    return out;
+  }
+
+  function savedColours() {
+    var list = bgStores && readStore(bgStores.list);
+    if (!list || !list.length) return [];
+    var out = [];
+    for (var i = 0; i < list.length; i++) {
+      if (list[i] && list[i].type === 'color' && list[i].uploaded) out.push(list[i]);
+    }
+    return out;
+  }
+
+  function saveColour() {
+    if (!bgStores) return;
+    var hex = readStore(bgStores.saved);
+    if (typeof hex !== 'string' || !hex) return;
+    var list = (readStore(bgStores.list) || []).slice();
+    var at = -1;
+    if (bgEditUrl) {
+      for (var i = 0; i < list.length; i++) {
+        if (list[i] && list[i].type === 'color' && list[i].url === bgEditUrl) { at = i; break; }
+      }
+    }
+    // `uploaded` is what earns the entry its delete button, and `pano` false is
+    // what files it under the 2D tab. Both are the app's own conventions.
+    var item = { type: 'color', name: hex, url: hex, pano: false, uploaded: now() };
+    if (at >= 0) list[at] = item;
+    else list.unshift(item);
+    bgStores.list.set(list);
+    bgStores.current.set({ type: 'color', url: hex });
+    bgEditUrl = hex;
+    injectBgColours();
+  }
+
+  function dropColour(url) {
+    if (!bgStores) return;
+    var list = readStore(bgStores.list) || [];
+    var out = [];
+    for (var i = 0; i < list.length; i++) {
+      if (list[i] && list[i].type === 'color' && list[i].url === url) continue;
+      out.push(list[i]);
+    }
+    bgStores.list.set(out);
+    if (bgEditUrl === url) bgEditUrl = null;
+    injectBgColours();
+  }
+
+  // Load a saved colour back into the picker by driving the picker's own hex
+  // field, the same way the stripped app controls are driven. Setting the
+  // `savedIro` store instead would do nothing: the picker reads it once, when
+  // it is constructed, and it is constructed when the tab mounts.
+  function editColour(url) {
+    bgEditUrl = url;
+    var input = document.querySelector('#picker .hex input');
+    if (input) {
+      input.value = String(url).replace('#', '');
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    }
+    if (bgStores) bgStores.current.set({ type: 'color', url: url });
+    injectBgColours();
+  }
+
+  function bgHost() {
+    var picker = document.getElementById('picker');
+    if (!picker) return null;
+    return (picker.closest && picker.closest('.bg-list')) || picker.parentElement;
+  }
+
+  function bgSwatch(item) {
+    var box = el('div', '', '');
+    var on = bgEditUrl === item.url;
+    box.style.cssText = 'position:relative;width:32px;height:32px;border-radius:6px;' +
+      'cursor:pointer;background:' + item.url + ';' +
+      'box-shadow:0 0 0 ' + (on ? '2px #fff' : '1px rgba(0,0,0,.45)');
+    box.title = item.url;
+    box.addEventListener('click', function () { editColour(item.url); });
+
+    var x = el('button', '', '×');
+    x.style.cssText = 'position:absolute;top:-6px;right:-6px;width:16px;height:16px;' +
+      'line-height:14px;padding:0;border:0;border-radius:8px;font-size:13px;' +
+      'background:#2b2a35;color:#fff;cursor:pointer';
+    x.setAttribute('aria-label', T('Delete colour'));
+    x.addEventListener('click', function (e) {
+      e.stopPropagation();
+      dropColour(item.url);
+    });
+    box.appendChild(x);
+    return box;
+  }
+
+  function buildBgColours() {
+    var wrap = el('div', 'psx-injected', '');
+    wrap.style.cssText = 'width:100%;margin-top:14px;text-align:left';
+
+    var note = el('div', '', T('note.bgColour'));
+    note.style.cssText = 'opacity:.5;font-size:12px;margin:0 0 8px;line-height:1.4';
+    wrap.appendChild(note);
+
+    var row = el('div', '', '');
+    row.style.cssText = 'display:flex;flex-wrap:wrap;gap:8px;margin-bottom:10px';
+    var cols = savedColours();
+    for (var i = 0; i < cols.length; i++) row.appendChild(bgSwatch(cols[i]));
+    if (!cols.length) {
+      var none = el('div', '', T('No colours saved yet'));
+      none.style.cssText = 'opacity:.5;font-size:12px';
+      row.appendChild(none);
+    }
+    wrap.appendChild(row);
+
+    var save = el('button', 'trigger ' + STG, bgEditUrl ? T('Update colour') : T('Save colour'));
+    save.style.width = '100%';
+    save.addEventListener('click', saveColour);
+    wrap.appendChild(save);
+    return wrap;
+  }
+
+  // Rebuilt only when what it shows has changed. The injection pass runs
+  // several times a second, and a swatch replaced under a cursor is a swatch
+  // whose click never lands.
+  function bgSignature() {
+    var cols = savedColours();
+    var s = bgEditUrl || '-';
+    for (var i = 0; i < cols.length; i++) s += '|' + cols[i].url;
+    return s;
+  }
+
+  function injectBgColours() {
+    if (!bgStores) return;
+    var host = bgHost();
+    if (!host) { bgCard = null; return; }
+    var sig = bgSignature();
+    if (bgCard && bgCard.parentNode === host && bgCard.__psxSig === sig) return;
+    if (bgCard && bgCard.parentNode) bgCard.parentNode.removeChild(bgCard);
+    bgCard = buildBgColours();
+    bgCard.__psxSig = sig;
+    host.appendChild(bgCard);
+  }
+
   function injectInto(c, build, keyed) {
     if (!c) return;
     // only the Settings side lists per-model expression cells, so it is the
@@ -4545,6 +4741,7 @@
     controls = [];
     calEl = calMotionEl = calBtn = calMotionBtn = readoutEl = null;
     calCancelBtn = calMotionCancelBtn = null;
+    bgCard = null;
     lastInject = 0;
     translateTree(document.body || document.documentElement);
     tryInject();
@@ -4555,6 +4752,7 @@
     pruneControls();
     injectInto(effectsContainer(), buildEffects, false);
     injectInto(settingsContainer(), buildSettings, true);
+    injectBgColours();
   }
 
   function isOurs(n) {
@@ -4755,6 +4953,8 @@
 
     pose: pose,
     arm: arm,
+    bg: bg,
+    bgDrop: bgDrop,
     guide: guide,
 
     frame: frame,

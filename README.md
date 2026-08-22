@@ -551,6 +551,26 @@ exported before you ran one does not have it, and the one already loaded is kept
 rather than wiped. Reload if the card says so
 — render scale and Mediapipe options still apply on startup.
 
+### Background colours
+
+The app ships five colour presets and an iro picker, but the picker keeps
+exactly one colour under `savedIro` — so there was nowhere to keep a second one
+and no way to drop one you were done with.
+
+**Save colour** puts the picker's current colour into the app's own uploaded-
+background list, which means it shows up as a swatch in the **2D** tab next to
+your uploaded images, applies when you click it there, is deleted by the same
+button an uploaded image has, and is persisted with everything else. Under the
+picker, clicking a saved swatch loads it back in to edit — **Save colour**
+becomes **Update colour** and replaces that swatch rather than adding a
+near-identical one — and **×** deletes it.
+
+Deleting an uploaded background also got less exciting. The list is filtered by
+`pano` before it is drawn, but the delete button reported the index it was drawn
+at and spliced that out of the *unfiltered* list, so with one 3D upload sitting
+ahead of your 2D ones every 2D delete removed the wrong background. It now walks
+the same filter the renderer did.
+
 ## Calibrating a model
 
 1. Load your `.vrm`, open **Settings**, turn on **PSX mode**, reload.

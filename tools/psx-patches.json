@@ -140,6 +140,14 @@
     {
       "find": "o&&zt(o,{x:ae(e.head.x*c,-.3,.3),z:E(de).holistic.enable?ae(t.Spine.z*c,-.7,.7)*a:ae(e.head.z*c,-.1,.1)*a,y:E(de).holistic.enable?ae(t.Spine.y*c*.2,-.4,.4)",
       "replace": "o&&zt(o,{x:ae(e.head.x*c,-.3,.3),z:E(de).holistic.enable?ae(t.Spine.z*ps,-.7,.7)*a:ae(e.head.z*c,-.1,.1)*a,y:E(de).holistic.enable?ae(t.Spine.y*ps*.2,-.4,.4)"
+    },
+    {
+      "find": "class oo extends pe{constructor(e){super();_e(this,e,ro,ao,me,{})}}",
+      "replace": "class oo extends pe{constructor(e){super();_e(this,e,ro,ao,me,{}),window.PSX.bg({list:al,current:Ft,saved:ei,tab:Tl})}}"
+    },
+    {
+      "find": "const f=v=>{let g=i;g.splice(v,1),v>-1&&Ce(al,i=g,i)}",
+      "replace": "const f=v=>{let g=window.PSX.bgDrop(i,v,u);Ce(al,i=g,i)}"
     }
   ],
   "vendorPatches": [

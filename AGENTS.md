@@ -92,6 +92,10 @@ Never edit `docs/assets/index.*.js` by hand. After a Glitch/Vite rebuild that ch
 - The arms do not run on Kalidokit's Euler angles. `PSX.pose` captures the holistic world landmarks and `PSX.arm` retargets shoulder/elbow/wrist onto the model's own arm, returning `true` to suppress the stock rig. It aims bones from their captured rest quaternion, so never assume the arm bones are at identity. Falling back (`false`) is the correct answer for stale landmarks, an unseen limb, or the pose-only tracking path.
 - Upstream never copies `brow` (or live `eye`) onto `tracking.Face` — only into a spring store. The bundle patches write `n.brow` / `n.eye` after Face.solve and copy both from the spring on subscribe. Without those, `PSX.face` always sees `brow: 0` and `eye: {l:1,r:1}`.
 
+- Saved background colours are entries in the app's own uploaded-background list (`PSX.bg` captures its store when the Backgrounds panel mounts). A `{type:'color', url:'#rrggbb', pano:false, uploaded:<ms>}` entry gets the app's swatch, its delete button and its persistence for free - do not build a parallel PSX list. `pano:false` is what files it under the 2D tab.
+- The app's own delete button reports the index the item was **rendered** at, which is an index into the list after it has been filtered by `pano`. `PSX.bgDrop` re-walks that filter; deleting by the raw index removes the wrong background as soon as a 3D upload sits ahead of a 2D one.
+- The iro picker reads `savedIro` once, when it is constructed, and it is constructed when the Color tab mounts. To move it, drive its own hex field (`#picker .hex input`) with an `input` event - setting the store does nothing.
+
 ## Do not
 
 - Restore `src/` as the place to work. The fork is `docs/psx.js`.
