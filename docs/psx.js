@@ -3001,6 +3001,17 @@
     return !!p && (p.visibility == null || p.visibility > MIN_VIS);
   }
 
+  // `vis` answers whether a landmark may be used at all. This answers how much
+  // it should be believed, which is a different question and the one that
+  // matters where a reading is allowed to undo something.
+  function conf(p) {
+    if (!p) return 0;
+    return p.visibility == null ? 1 : p.visibility;
+  }
+
+  // A wrist this sure is being seen; below it, it is being guessed at.
+  var SURE_VIS = 0.7;
+
   // The local rotation a bone loaded with. The stock rig writes solved angles
   // as absolute local rotations, i.e. it assumes this is identity; the retarget
   // measures its aim from whatever it actually is, so a rig with a baked-in
@@ -3403,6 +3414,27 @@
         var flatLen = vlen(flatH);
         near = flatLen > 1e-4 ? vlen(flatFace) / flatLen : vlen(toFace) / uH;
         anchorW = clamp((HEAD_FAR - near) / (HEAD_FAR - HEAD_ON), 0, 1) * cfg.headAnchor;
+
+        // Engaging is an observation; releasing may only be occlusion.
+        //
+        // Hands behind the head hide the wrists behind the skull, and the
+        // tracker answers anyway - one arm read 0.67 head-heights from the nose
+        // while its twin, in the same symmetric pose, read 1.21. There is no
+        // arithmetic that recovers a wrist reported in the wrong place. What
+        // there is: the wrist was in plain view on the way up, and it said the
+        // hand was at the head.
+        //
+        // So a rising anchor is taken at once, and a falling one only counts
+        // when the wrist is actually being seen. While it is a guess the last
+        // engaged value stands - the same answer `coast` gives an arm that
+        // leaves the frame, and the same one the palm roll gives when nothing
+        // can see it.
+        c.anch = c.anch || {};
+        var held = c.anch[side];
+        if (!instant && isNum(held) && anchorW < held && conf(wr) < SURE_VIS) {
+          anchorW = held;
+        }
+        c.anch[side] = anchorW;
         if (anchorW > 0) {
           // the head bone sits at the base of the skull and the nose on the
           // front of the face, so the two scales are head-sized rather than
@@ -3553,6 +3585,7 @@
       clamped: want >= a + b - 1e-4,
       anchor: +anchorW.toFixed(2),
       near: isNum(near) ? +near.toFixed(2) : null,
+      wristSeen: +conf(wr).toFixed(2),
       reach: +sideReach(side).toFixed(2),
       straighten: bend == null ? null
         : Math.round(REACH_STRAIGHTEN * Math.pow((1 - bend) / 2, 4) * 180 / Math.PI)
