@@ -3897,6 +3897,11 @@
   // So: remember the state each request is heading to, and hold the request that
   // arrived mid-animation instead of dropping it.
 
+  // The one the subnav animates. Captured rather than looked up: it is a
+  // component instance, not a node, and the only reference to it the app ever
+  // offers is the one it passes here.
+  var subnavShape = null;
+
   function overlayOpen(inst) {
     if (!inst) return false;
     return inst.__psxWant === undefined ? !!inst.isOpen : inst.__psxWant;
@@ -3904,6 +3909,7 @@
 
   function overlay(inst, opts) {
     if (!inst) return;
+    subnavShape = inst;
     if (opts && (opts.action === 'open' || opts.action === 'close')) {
       inst.__psxWant = opts.action === 'open';
     }
@@ -5144,8 +5150,58 @@
     }
   }
 
+  // ------------------------------------------------ stuck panel escape
+  //
+  // The panel is two pieces that can disagree. Its background is an animated
+  // SVG shape; its content is a separate component driven by which tab is
+  // selected. When the shape finishes closing while a tab is still selected,
+  // the content is left sitting on the 3D canvas with nothing behind it.
+  //
+  // What makes that unrecoverable is that the app has exactly one close path -
+  // clicking the tab that is already open - and the click that got lost is the
+  // very same one. Nothing else in the UI dismisses the panel, so the session
+  // has to be restarted.
+  //
+  // Esc does nothing outside a calibration run, so it is free to be that way
+  // out. It closes through the app's own handler rather than hiding anything:
+  // the content, the shape and the store all have to move together, and only
+  // the app's handler moves all three.
+  function selectedTab() {
+    var all = document.querySelectorAll('nav .menu-item.selected');
+    for (var i = 0; i < all.length; i++) {
+      // the camera button wears `selected` to mean the camera is running, which
+      // is not a panel and must not be clicked shut
+      if (!all[i].classList.contains('video')) return all[i];
+    }
+    return null;
+  }
+
+  function closePanel() {
+    var tab = selectedTab();
+    if (!tab) return false;
+    // What the shape was doing at the moment the panel could not be dismissed.
+    // The disagreement is a race and it is not reproducible to order, so the
+    // one run that hits it is worth a line in the console.
+    // console.warn rather than `log`: `log` is gated on verbose, and a panel
+    // that had to be rescued is the one event worth seeing without having
+    // turned anything on first.
+    var sh = subnavShape;
+    console.warn('[psx] closed a stuck panel', {
+      tab: tab.getAttribute('data-text') || tab.className,
+      isOpen: sh ? !!sh.isOpen : null,
+      want: sh ? sh.__psxWant : null,
+      animating: sh ? !!sh.transition : null,
+      queued: !!(sh && sh.__psxQueued)
+    });
+    tab.click();
+    return true;
+  }
+
   function onCalKey(e) {
-    if (!calRun) return;
+    if (!calRun) {
+      if (e.key === 'Escape' && closePanel()) e.preventDefault();
+      return;
+    }
     if (e.key === 'Escape') {
       e.preventDefault();
       stopCalibration(T('Calibration cancelled.'));
