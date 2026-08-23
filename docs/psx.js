@@ -3586,6 +3586,21 @@
       anchor: +anchorW.toFixed(2),
       near: isNum(near) ? +near.toFixed(2) : null,
       wristSeen: +conf(wr).toFixed(2),
+      // The two arms have the same bones. Any difference between these is the
+      // tracker's error and nothing else, which makes them the one measurement
+      // here that needs no reference to be read.
+      upper: +dist3(sh, el).toFixed(3),
+      fore: +dist3(el, wr).toFixed(3),
+      // How far apart the two wrists are, in the person's own head-heights.
+      // The report is that the pose degrades as the hands converge, so this is
+      // the number the rest has to be read against.
+      gap: (function () {
+        var a = lm[ARM_LM.Right.wrist], b = lm[ARM_LM.Left.wrist];
+        var nose2 = lm[LM_NOSE];
+        if (!a || !b || !nose2) return null;
+        var h = vlen(vsub(nose2, vmid(lm[ARM_LM.Right.shoulder], lm[ARM_LM.Left.shoulder])));
+        return h > 1e-4 ? +(dist3(a, b) / h).toFixed(2) : null;
+      })(),
       reach: +sideReach(side).toFixed(2),
       straighten: bend == null ? null
         : Math.round(REACH_STRAIGHTEN * Math.pow((1 - bend) / 2, 4) * 180 / Math.PI)
