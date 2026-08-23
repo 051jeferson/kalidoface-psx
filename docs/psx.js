@@ -2711,6 +2711,10 @@
     Left: { shoulder: 12, elbow: 14, wrist: 16, hip: 24, pinky: 18, index: 20 }
   };
   var LM_NOSE = 0;
+  // Mediapipe pose carries both ears. Their midpoint is inside the skull, which
+  // is where "at the head" has to be measured from - see `headRef`.
+  var LM_EAR_L = 7;
+  var LM_EAR_R = 8;
   // The hand model's own 21 landmarks. Only the knuckle row is read: the
   // fingertips curl out of the palm's plane, the knuckles are the palm.
   var HAND_LM = { wrist: 0, index: 5, middle: 9, pinky: 17 };
@@ -2999,6 +3003,14 @@
 
   function vis(p) {
     return !!p && (p.visibility == null || p.visibility > MIN_VIS);
+  }
+
+  // The middle of the head, not the front of the face. Falls back to the nose
+  // where the ears are not tracked - a worse reference, but the only other one.
+  function headRef(lm) {
+    var a = lm[LM_EAR_L], b = lm[LM_EAR_R];
+    if (vis(a) && vis(b)) return vmid(a, b);
+    return lm[LM_NOSE];
   }
 
   // `vis` answers whether a landmark may be used at all. This answers how much
@@ -3386,7 +3398,19 @@
     var near = null;
     var headB = cfg.headAnchor > 0 ? boneNode(vrm, 'head') : null;
     if (headB && vis(lm[LM_NOSE])) {
-      var nose = lm[LM_NOSE];
+      // The nose is on the *front* of the face and the hands go on the back and
+      // sides of the skull, so measuring from it calls a hand resting on the
+      // nape 1.3 to 1.6 head-heights away - past HEAD_ON, most of the way to
+      // HEAD_FAR - and the anchor is half gone for a hand that is touching the
+      // head. Both hands go there at once, which is why the fault needed two
+      // hands to show and why one hand, which tends to land higher and more to
+      // the front, always looked right.
+      //
+      // The ears bracket the skull, so their midpoint sits inside it. That is
+      // the point a hand on the head is near, whichever side it is on - and it
+      // is also the better twin for `mHead`, the model's head bone, which sits
+      // at the base of the skull rather than on the face.
+      var nose = headRef(lm);
       var uH = vlen(vsub(nose, vmid(lm[ARM_LM.Right.shoulder], lm[ARM_LM.Left.shoulder])));
       var mHead = worldPos(headB);
       var mH = vlen(vsub(mHead, vmid(worldPos(c.ru), worldPos(c.lu))));
