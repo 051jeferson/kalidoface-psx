@@ -148,6 +148,22 @@
     {
       "find": "const f=v=>{let g=i;g.splice(v,1),v>-1&&Ce(al,i=g,i)}",
       "replace": "const f=v=>{let g=window.PSX.bgDrop(i,v,u);Ce(al,i=g,i)}"
+    },
+    {
+      "find": "b=[\"2D\",\"3D\",\"Color\"],w=[];for(let k=0;k<3;k+=1)",
+      "replace": "b=[\"Color\"],w=[];for(let k=0;k<1;k+=1)"
+    },
+    {
+      "find": "b=[\"2D\",\"3D\",\"Color\"];let y;for(y=0;y<3;y+=1){",
+      "replace": "b=[\"Color\"];let y;for(y=0;y<1;y+=1){"
+    },
+    {
+      "find": "for(;y<3;y+=1)w[y].d(1)",
+      "replace": "for(;y<1;y+=1)w[y].d(1)"
+    },
+    {
+      "find": "const Tl=J(\"2D\")",
+      "replace": "const Tl=J(\"Color\")"
     }
   ],
   "vendorPatches": [

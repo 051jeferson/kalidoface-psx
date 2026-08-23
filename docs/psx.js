@@ -3700,6 +3700,8 @@
     'Save colour': 'Salvar cor',
     'Update colour': 'Atualizar cor',
     'Delete colour': 'Apagar cor',
+    'Chroma green': 'Verde chroma key',
+    'Transparent': 'Transparente',
     'No colours saved yet': 'Nenhuma cor salva ainda',
     'note.bgColour': 'Cores salvas ficam na lista de fundos 2D, junto com as imagens enviadas - clique lá para aplicar. Aqui: clique num quadrinho para carregá-lo no seletor e editar, × apaga.',
     'Export settings': 'Exportar ajustes',
@@ -4818,6 +4820,19 @@
   // saved colour is an entry in that list, and it appears in the 2D tab next
   // to the uploaded images rather than in some parallel PSX place.
 
+  // The two the Color tab exists for, and neither was ever a swatch: a chroma
+  // key green to pull the avatar into OBS, and the app's own transparent, which
+  // is a hex with an alpha byte - the background component reads `length > 7`
+  // and sets `scene.background = null`, which the renderer supports because it
+  // is built with `alpha`. They are not saved colours and have no delete: a
+  // fresh profile has to arrive with both already there.
+  var BG_PRESETS = [
+    { url: '#00FF00', name: 'Chroma green' },
+    { url: '#00000000', name: 'Transparent' }
+  ];
+
+  function isAlphaHex(url) { return String(url).length > 7; }
+
   var bgStores = null;
   // the swatch the picker is currently loaded from, so Save replaces it rather
   // than piling up a near-identical colour every time one is nudged
@@ -4907,7 +4922,10 @@
   function editColour(url) {
     bgEditUrl = url;
     var input = document.querySelector('#picker .hex input');
-    if (input) {
+    // iro's hex field takes six digits. Handing it the transparent preset would
+    // have it read the alpha byte as part of the colour and answer with a
+    // different one, so that preset is applied without touching the picker.
+    if (input && !isAlphaHex(url)) {
       input.value = String(url).replace('#', '');
       input.dispatchEvent(new Event('input', { bubbles: true }));
     }
@@ -4921,14 +4939,26 @@
     return (picker.closest && picker.closest('.bg-list')) || picker.parentElement;
   }
 
-  function bgSwatch(item) {
+  // The checkerboard the app uses for its own transparent swatch is a remote
+  // png. Drawn here instead, so a preset that ships with the fork does not need
+  // a network round trip to look like anything.
+  var CHECKER = 'background-color:#fff;background-image:' +
+    'linear-gradient(45deg,#bbb 25%,transparent 25%,transparent 75%,#bbb 75%),' +
+    'linear-gradient(45deg,#bbb 25%,transparent 25%,transparent 75%,#bbb 75%);' +
+    'background-size:12px 12px;background-position:0 0,6px 6px;';
+
+  function bgSwatch(item, fixed) {
     var box = el('div', '', '');
     var on = bgEditUrl === item.url;
     box.style.cssText = 'position:relative;width:32px;height:32px;border-radius:6px;' +
-      'cursor:pointer;background:' + item.url + ';' +
+      'cursor:pointer;' +
+      (isAlphaHex(item.url) ? CHECKER : 'background:' + item.url + ';') +
       'box-shadow:0 0 0 ' + (on ? '2px #fff' : '1px rgba(0,0,0,.45)');
-    box.title = item.url;
+    box.title = fixed ? T(item.name) : item.url;
     box.addEventListener('click', function () { editColour(item.url); });
+    // A preset is not a saved colour. Nothing to delete, and deleting it would
+    // leave a profile with no way back to the two colours it is meant to have.
+    if (fixed) return box;
 
     var x = el('button', '', '×');
     x.style.cssText = 'position:absolute;top:-6px;right:-6px;width:16px;height:16px;' +
@@ -4950,6 +4980,13 @@
     var note = el('div', '', T('note.bgColour'));
     note.style.cssText = 'opacity:.5;font-size:12px;margin:0 0 8px;line-height:1.4';
     wrap.appendChild(note);
+
+    var fixed = el('div', '', '');
+    fixed.style.cssText = 'display:flex;flex-wrap:wrap;gap:8px;margin-bottom:10px';
+    for (var f = 0; f < BG_PRESETS.length; f++) {
+      fixed.appendChild(bgSwatch(BG_PRESETS[f], true));
+    }
+    wrap.appendChild(fixed);
 
     var row = el('div', '', '');
     row.style.cssText = 'display:flex;flex-wrap:wrap;gap:8px;margin-bottom:10px';
@@ -5142,6 +5179,33 @@
     translateTree(document.body || document.documentElement);
     scheduleInject();
   }
+
+  // ------------------------------------------------------------ app CSS
+  //
+  // Rules the fork wants over the app's own. A stylesheet rather than a patch
+  // in the bundle: the bundle's class names carry a Svelte hash that changes on
+  // every rebuild, but these are the app's own semantic names and survive it -
+  // and a rule that stops matching costs nothing, where a patch that stops
+  // matching fails the build.
+  var APP_CSS = [
+    // The free-camera cluster, bottom left. It orbits the scene, which this
+    // fork does not want touched by hand - the camera is where the capture is
+    // framed from and nudging it mid-session silently reframes the shot. The
+    // flip control lives inside the same cluster and goes with it.
+    '.cameraMenu{display:none !important}'
+  ].join('');
+
+  function injectAppCss() {
+    if (document.getElementById('psx-app-css')) return;
+    var head = document.head || document.documentElement;
+    if (!head) return;
+    var st = document.createElement('style');
+    st.id = 'psx-app-css';
+    st.textContent = APP_CSS;
+    head.appendChild(st);
+  }
+
+  injectAppCss();
 
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', startObserver);
