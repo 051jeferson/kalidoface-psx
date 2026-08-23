@@ -1,0 +1,26 @@
+# Static deploy of the patched bundle in docs/.
+# No build step: the app source is not in the repo (src/ is gitignored) and a
+# Vite build would overwrite docs/ and drop the PSX patches. See AGENTS.md.
+[build]
+  publish = "docs"
+  command = ""
+
+[[headers]]
+  for = "/sw.js"
+  [headers.values]
+    Cache-Control = "no-cache"
+
+[[headers]]
+  for = "/index.html"
+  [headers.values]
+    Cache-Control = "no-cache"
+
+[[headers]]
+  for = "/psx.js"
+  [headers.values]
+    Cache-Control = "no-cache"
+
+[[headers]]
+  for = "/assets/*"
+  [headers.values]
+    Cache-Control = "public, max-age=31536000, immutable"
