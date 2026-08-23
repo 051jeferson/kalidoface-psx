@@ -1097,14 +1097,14 @@
     // This one reads the whole arm: hundreds of samples spread over every
     // direction it can reach, which is what lets the three axes be separated
     // from each other instead of averaged into one number.
-    { key: 'sweep', title: 'Elbows locked - sweep both arms all around you',
-      hint: 'Keep them dead straight: out to the sides, overhead, forward at the lens, down low. Big slow circles until the bar fills.',
+    { key: 'sweep', title: 'Straight arms - draw big slow circles',
+      hint: 'Elbows completely straight, as if reaching for a far wall. Sweep both arms around: out to the sides, up overhead, forward at the camera, down by your legs. Bend an elbow and that moment is thrown away - watch the sample count rise.',
       ms: 12000, fit: true },
     // Changes nothing. A calibration that is run once and then trusted forever
     // has to say out loud whether it worked, or a bad run is indistinguishable
     // from a good one for as long as the profile survives.
-    { key: 'check', title: 'Once more, to check the fit',
-      hint: 'Same sweep, elbows still locked. This step only measures - it cannot make anything worse.',
+    { key: 'check', title: 'Once more, to check the result',
+      hint: 'Same circles, elbows just as straight. This step only measures - it cannot make anything worse.',
       ms: 8000, fit: true, check: true }
   ];
 
@@ -1448,7 +1448,8 @@
         o.resL = sideResidual(a.fit, 'Left');
       } else if (st.fit) {
         o.fitN = a.fit.n;
-        if (applyFit(a.fit)) o.fitRes = fitResidual(a.fit);
+        if (applyFit(a.fit, o.depth)) o.fitRes = fitResidual(a.fit);
+        else o.fitBad = true;
       } else {
         var yaw = st.key === 'left' || st.key === 'right';
         var arr = yaw ? a.y : a.x;
@@ -1587,9 +1588,24 @@
   // bend, so it already agrees with the person's in each one's own proportions.
   // Vertical stays with the hands-on-head pose, which is a known pose and
   // therefore has a ground truth of its own.
-  function applyFit(f) {
+  // The depth pose measured this same compression a few steps earlier, from a
+  // pose that is hard to get wrong: one arm at the lens. The sweep is the better
+  // instrument when it is performed right and worthless when it is not, and the
+  // one thing that separates those cases is whether it agrees with the pose.
+  //
+  // A bent elbow only ever inflates the ratio - the hand is nearer than the arm
+  // is long and the shortfall is read as depth - so a sweep that comes back far
+  // above the pose is a sweep that was performed with bent arms, and taking it
+  // would distort every mapped direction and weld the model's elbows straight.
+  var FIT_AGREE = 1.6;
+
+  function applyFit(f, pose) {
     if (!f.r.length) return false;
-    cfg.armDepth = clamp(nudge(cfg.armDepth, median(f.r), FIT_BAND), 0.3, 2);
+    var got = median(f.r);
+    if (isNum(pose) && pose > 0 && (got > pose * FIT_AGREE || got < pose / FIT_AGREE)) {
+      return false;
+    }
+    cfg.armDepth = clamp(nudge(cfg.armDepth, got, FIT_BAND), 0.3, 2);
     return true;
   }
 
@@ -1654,6 +1670,8 @@
     if (isNum(c.fitRes)) {
       notes.push(T('Fit') + ' ' + fitPct(c.fitRes) + ' ' + T('over') + ' ' +
         c.fitN + ' ' + T('samples'));
+    } else if (c.fitBad) {
+      notes.push(T('sweep ignored - it disagreed with the depth pose, so the elbows were probably bent'));
     }
     // The check ran against the finished rig, so this number is the one that
     // says whether the calibration is any good - not the fit's own residual,
@@ -1791,6 +1809,15 @@
       line = T('Hold the pose, then press Space. Esc cancels.');
     } else {
       line = T('Reading, keep holding...');
+      // A sweep is the one step whose samples are mostly thrown away - a bent
+      // elbow counts for nothing - and without a number on screen there is no
+      // way to tell a pose that is working from one that is not. This step was
+      // shipped without it once and a run that gathered nothing looked exactly
+      // like a run that gathered everything.
+      if (st.fit) {
+        line += '  ' + calRun.acc.fit.n + ' ' + T('samples');
+        if (calRun.acc.fit.n < FIT_MIN) line += ' - ' + T('straighten your elbows');
+      }
     }
     setText(calEl,
       (calRun.i + 1) + '/' + steps().length + '  ' + T(st.title) +
@@ -2396,9 +2423,19 @@
       if (!vis(sh) || !vis(el) || !vis(wr)) continue;
       var seg = dist3(sh, el) + dist3(el, wr);
       var d = vsub(wr, sh);
-      // A bent elbow breaks the ground truth: the hand is nearer than the arm
-      // is long, and the shortfall would be read as depth that was never there.
-      if (seg < 1e-4 || vlen(d) < seg * 0.9) continue;
+      // A bent elbow breaks the ground truth: the hand is nearer than the arm is
+      // long, and every bit of that shortfall is read as depth that was never
+      // there, straight into the gain.
+      //
+      // Gate on the two segments being in line rather than on the hand being
+      // far enough away. Depth compression scales one axis, and a scaling maps
+      // parallel vectors to parallel vectors - so collinearity survives it
+      // exactly, while a distance does not survive it at all. The old distance
+      // gate was measuring the arm with the very error being calibrated, and it
+      // admitted an elbow bent 37 degrees, which inflates the ratio by a third.
+      if (seg < 1e-4) continue;
+      var uArm = vnorm(vsub(el, sh)), lArm = vnorm(vsub(wr, el));
+      if (!uArm || !lArm || vdot(uArm, lArm) < 0.995) continue;
       var dx = vdot(d, ub.x), dy = vdot(d, ub.y), dz = vdot(d, ub.z);
       var plane = dx * dx + dy * dy;
       var want = L * L - plane;
@@ -3648,15 +3685,18 @@
     'Check': 'Conferência',
     'good': 'bom',
     'redo this': 'refaça a calibragem',
-    'Elbows locked - sweep both arms all around you':
-      'Cotovelos travados - gire os dois braços ao seu redor',
-    'Keep them dead straight: out to the sides, overhead, forward at the lens, down low. Big slow circles until the bar fills.':
-      'Mantenha-os bem retos: para os lados, acima da cabeça, à frente da lente, embaixo. Círculos grandes e lentos até a barra encher.',
-    'Once more, to check the fit': 'Mais uma vez, para conferir o ajuste',
+    'Straight arms - draw big slow circles':
+      'Braços retos - faça círculos grandes e lentos',
+    'straighten your elbows': 'estique bem os cotovelos',
+    'sweep ignored - it disagreed with the depth pose, so the elbows were probably bent':
+      'giro ignorado - discordou da pose de profundidade, provavelmente os cotovelos estavam dobrados',
+    'Elbows completely straight, as if reaching for a far wall. Sweep both arms around: out to the sides, up overhead, forward at the camera, down by your legs. Bend an elbow and that moment is thrown away - watch the sample count rise.':
+      'Cotovelos totalmente esticados, como se fosse alcançar uma parede distante. Gire os dois braços: para os lados, acima da cabeça, à frente da câmera, embaixo junto às pernas. Se dobrar o cotovelo, aquele instante é descartado - acompanhe a contagem de amostras subir.',
+    'Once more, to check the result': 'Mais uma vez, para conferir o resultado',
     'Skipped - no body tracking was read for that step.':
       'Pulado - nenhum rastreio de corpo foi lido nesse passo.',
-    'Same sweep, elbows still locked. This step only measures - it cannot make anything worse.':
-      'Mesmo giro, cotovelos ainda travados. Este passo só mede - não piora nada.',
+    'Same circles, elbows just as straight. This step only measures - it cannot make anything worse.':
+      'Mesmos círculos, cotovelos igualmente retos. Este passo só mede - não piora nada.',
     'Shoulder follow': 'Acompanhamento do ombro',
     'Forearm twist': 'Torção do antebraço',
     'Face anchor': 'Âncora no rosto',
