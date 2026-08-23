@@ -45,6 +45,11 @@
     pixelRatio: 1,
     // 'en' | 'pt' - the panel language, and the app's own labels with it
     lang: 'en',
+    // A calibration pose is held at arm's length from the screen, where the
+    // prompt cannot be read and - worse - there is no way to tell the count-in
+    // from the reading. Both cues carry that across the room.
+    calSound: true,
+    calVoice: true,
 
     // --- the actual PS1 signatures (all gated behind `enabled`) -------
     // The console had no floating point in its GPU: vertices were snapped to
@@ -1099,7 +1104,7 @@
     // from each other instead of averaged into one number.
     { key: 'sweep', title: 'Straight arms - draw big slow circles',
       hint: 'Elbows completely straight, as if reaching for a far wall. Sweep both arms around: out to the sides, up overhead, forward at the camera, down by your legs. Bend an elbow and that moment is thrown away - watch the sample count rise.',
-      ms: 12000, fit: true },
+      ms: 12000, prep: 11000, fit: true },
     // Changes nothing. A calibration that is run once and then trusted forever
     // has to say out loud whether it worked, or a bad run is indistinguishable
     // from a good one for as long as the profile survives.
@@ -1167,6 +1172,80 @@
   // Pressing the key jolts the head, and people are still settling into the
   // pose for a moment after they say they are in it. Those frames are the worst
   // ones in the window, so they are not read at all.
+  // ---------------------------------------------------- calibration cues
+  //
+  // Tones are synthesised rather than loaded. A sample would be one more file
+  // to serve, one more thing to go missing on a rebuild, and the whole
+  // vocabulary here is six notes.
+  //
+  // The context is created on the first cue, which always follows the click
+  // that started the wizard - browsers refuse one built any earlier.
+  var actx = null;
+
+  function tone(freq, at, ms, vol) {
+    var t0 = actx.currentTime + at;
+    var osc = actx.createOscillator();
+    var g = actx.createGain();
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(freq, t0);
+    // A square-edged gate clicks. Ramping the envelope is the difference
+    // between a note and a pop.
+    g.gain.setValueAtTime(0, t0);
+    g.gain.linearRampToValueAtTime(vol, t0 + 0.012);
+    g.gain.setValueAtTime(vol, t0 + ms / 1000 - 0.03);
+    g.gain.linearRampToValueAtTime(0, t0 + ms / 1000);
+    osc.connect(g);
+    g.connect(actx.destination);
+    osc.start(t0);
+    osc.stop(t0 + ms / 1000 + 0.02);
+  }
+
+  function cue(notes) {
+    if (!cfg.calSound) return;
+    try {
+      var AC = window.AudioContext || window.webkitAudioContext;
+      if (!AC) return;
+      if (!actx) actx = new AC();
+      if (actx.state === 'suspended') actx.resume();
+      for (var i = 0; i < notes.length; i++) {
+        tone(notes[i][0], notes[i][1], notes[i][2], notes[i][3]);
+      }
+    } catch (e) { /* audio is a courtesy, never a dependency */ }
+  }
+
+  // Each state gets a shape, not just a pitch: from across the room the
+  // direction of a two-note move reads where an absolute pitch does not.
+  // Rising means the reading has started; falling means it has not.
+  var CUE = {
+    step:   [[660, 0, 120, 0.16]],
+    tick:   [[440, 0, 60, 0.09]],
+    read:   [[660, 0, 90, 0.2], [990, 0.09, 160, 0.2]],
+    done:   [[880, 0, 110, 0.16]],
+    retry:  [[400, 0, 160, 0.18], [300, 0.17, 260, 0.18]],
+    finish: [[660, 0, 110, 0.18], [880, 0.11, 110, 0.18], [1320, 0.22, 240, 0.18]]
+  };
+
+  // Voice runs off the same translated strings the prompt shows, so it never
+  // needs its own script - and never drifts from what is on screen.
+  function say(text) {
+    if (!cfg.calVoice || !text) return;
+    try {
+      var synth = window.speechSynthesis;
+      if (!synth) return;
+      // The queue is not a transcript. A prompt that has been replaced is not
+      // worth hearing, and a backlog would still be talking three steps later.
+      synth.cancel();
+      var u = new SpeechSynthesisUtterance(String(text));
+      u.lang = cfg.lang === 'pt' ? 'pt-BR' : 'en-US';
+      u.rate = 1.05;
+      synth.speak(u);
+    } catch (e) { /* as with the tones */ }
+  }
+
+  function hush() {
+    try { if (window.speechSynthesis) window.speechSynthesis.cancel(); } catch (e) {}
+  }
+
   var CAL_SETTLE = 250;
   // Below this there are not enough frames for a percentile to mean anything.
   var CAL_MIN_SAMPLES = 8;
@@ -1289,12 +1368,24 @@
   // Arm the next step: the motion wizard counts itself in, the face wizard
   // waits. Either way the same call, so a step is only ever set up in one place.
   function enterWait() {
+    var st = steps()[calRun.i];
+    cue(CUE.step);
+    // Title and hint, the same two lines the prompt shows. The note from a
+    // failed step goes first when there is one - it is the reason this step is
+    // being asked for again, and it is useless after the instruction.
+    say((calRun.note ? calRun.note + '. ' : '') +
+      T(st.title) + '. ' + T(st.hint));
+    calRun.tickAt = -1;
     // Only the face wizard waits for the key. A vowel has to be voiced to read
     // right, and someone holding "oooo" while hunting for Space stops voicing
     // it - the same reason the motion poses are counted in.
     if (calRun.kind !== 'face') {
       calRun.phase = 'prep';
-      calRun.prepUntil = now() + CAL_PREP;
+      // A step whose instruction takes longer to say than the count-in lasts
+      // would be cut off mid-sentence by its own reading. The sweep is the one
+      // that needs saying in full, and it is also the one the person should
+      // already be moving for when the reading starts.
+      calRun.prepUntil = now() + (st.prep || CAL_PREP);
       calTick();
     } else {
       calRun.phase = 'wait';
@@ -1307,6 +1398,15 @@
   // person is in the pose, read it.
   function captureStep() {
     if (!calRun || (calRun.phase !== 'wait' && calRun.phase !== 'prep')) return;
+    // Rising, and it is the only rising cue in the set: this is the instant the
+    // pose starts counting, and not knowing it is what made the wizard guesswork
+    // from across the room.
+    cue(CUE.read);
+    // Silence the voice only for the vowels, where the pose *is* a sound and
+    // talking over it is talking over the thing being measured. Elsewhere the
+    // instruction is worth finishing - a sweep is easier to hold to when the
+    // description is still arriving.
+    if (calRun.kind === 'mouth') hush();
     calRun.note = '';
     calRun.phase = 'hold';
     calRun.holdFrom = now();
@@ -1321,7 +1421,12 @@
   function startMotionCalibration() { begin('motion'); }
   function startMouthCalibration() { begin('mouth'); }
 
-  function stopCalibration(note) {
+  function stopCalibration(note, spoken) {
+    hush();
+    cue(CUE.finish);
+    // The full note is a line of gains and percentages - unreadable aloud and
+    // useless across a room. Say the verdict; leave the numbers on screen.
+    if (spoken) say(spoken);
     var el0 = calTarget();
     calRun = null;
     if (el0) setText(el0, note || '');
@@ -1345,6 +1450,13 @@
     var again = function () { calTick(seq); };
     if (calRun.phase === 'prep') {
       if (t >= calRun.prepUntil) { captureStep(); return; }
+      // One click per whole second left, so the count-in is audible as a count
+      // rather than as a wait of unknown length.
+      var left = Math.ceil((calRun.prepUntil - t) / 1000);
+      if (left !== calRun.tickAt) {
+        calRun.tickAt = left;
+        if (left <= 3) cue(CUE.tick);
+      }
       requestAnimationFrame(again);
       paintCalibration(calRun.prepUntil - t);
       return;
@@ -1356,6 +1468,7 @@
   }
 
   function nextStep(total, finish) {
+    cue(CUE.done);
     calRun.tries = 0;
     calRun.i++;
     if (calRun.i >= total) { finish(); return; }
@@ -1374,6 +1487,7 @@
   var FIT_TRIES = 2;
 
   function retryStep(n) {
+    cue(CUE.retry);
     var st = steps()[calRun.i];
     if (st.fit) {
       calRun.tries = (calRun.tries || 0) + 1;
@@ -1626,7 +1740,8 @@
     var dev = Math.max(devY, devX);
 
     if (dev < 0.05) {
-      stopCalibration(T('Barely any head movement was tracked. Is face tracking running?'));
+      stopCalibration(T('Barely any head movement was tracked. Is face tracking running?'),
+        T('No head movement was tracked. Check the camera.'));
       return;
     }
 
@@ -1698,7 +1813,13 @@
       ', ' + T('tilt') + ' ' + devX.toFixed(2) + '  ->  ' +
       T('Head / neck gain') + ' ' + cfg.headGain.toFixed(2) +
       ', ' + T('Torso gain') + ' ' + cfg.bodyGain.toFixed(3) +
-      (notes.length ? ', ' + notes.join(', ') : '') + '.');
+      (notes.length ? ', ' + notes.join(', ') : '') + '.',
+      // The verdict, not the reading. Whether it worked is the one thing worth
+      // hearing from across the room; the numbers stay on screen for later.
+      T('Motion calibration done') + '. ' +
+      (isNum(c.checkRes)
+        ? T(c.checkRes <= FIT_GOOD ? 'It came out good.' : 'It came out poor - run it again.')
+        : ''));
   }
 
   function finishMouth() {
@@ -1733,7 +1854,7 @@
         T('Redo those, exaggerating the shape and voicing the sound out loud.');
     }
     log('mouth calibration', m);
-    stopCalibration(msg);
+    stopCalibration(msg, T('Calibration done'));
   }
 
   function finishCalibration() {
@@ -1786,7 +1907,7 @@
         T('Redo that step with a bigger expression if it does not trigger.');
     }
     log('calibration', c);
-    stopCalibration(msg);
+    stopCalibration(msg, T('Calibration done'));
   }
 
   // Each wizard writes into the card it was started from.
@@ -3743,6 +3864,15 @@
     'Reach': 'Alcance',
     'Depth gain': 'Ganho de profundidade',
     'Reach up': 'Alcance para cima',
+    'Calibration beeps': 'Bipes na calibragem',
+    'Spoken prompts': 'Instruções faladas',
+    'Motion calibration done': 'Calibragem de movimento concluída',
+    'It came out good.': 'Ficou boa.',
+    'It came out poor - run it again.': 'Ficou ruim - rode de novo.',
+    'Calibration done': 'Calibragem concluída',
+    'Cancelled.': 'Cancelada.',
+    'No head movement was tracked. Check the camera.':
+      'Nenhum movimento de cabeça foi rastreado. Verifique a câmera.',
     'Right arm': 'Braço direito',
     'Left arm': 'Braço esquerdo',
     'up': 'cima',
@@ -4689,7 +4819,7 @@
     calCancelBtn.style.marginTop = '8px';
     calCancelBtn.style.display = 'none';
     calCancelBtn.addEventListener('click', function () {
-      stopCalibration(T('Calibration cancelled.'));
+      stopCalibration(T('Calibration cancelled.'), T('Cancelled.'));
     });
     em.appendChild(calCancelBtn);
 
@@ -4716,7 +4846,7 @@
     calMouthCancelBtn.style.marginTop = '8px';
     calMouthCancelBtn.style.display = 'none';
     calMouthCancelBtn.addEventListener('click', function () {
-      stopCalibration(T('Calibration cancelled.'));
+      stopCalibration(T('Calibration cancelled.'), T('Cancelled.'));
     });
     em.appendChild(calMouthCancelBtn);
     addRule(em);
@@ -4734,6 +4864,8 @@
     moNote.style.cssText = 'width:100%;opacity:.5;font-size:12px;margin:0 0 4px;text-align:left';
     mo.appendChild(moNote);
     addToggle(mo, 'motion', T('Motion calibration'), STG);
+    addToggle(mo, 'calSound', T('Calibration beeps'), STG);
+    addToggle(mo, 'calVoice', T('Spoken prompts'), STG);
     addRule(mo);
     addRange(mo, 'headGain', T('Head / neck gain'), 0, 1.5, 0.05, function (v) { return v.toFixed(2) + 'x'; }, STG);
     addRange(mo, 'bodyGain', T('Torso gain'), 0, 0.2, 0.005, function (v) { return v.toFixed(3) + 'x'; }, STG);
@@ -4789,7 +4921,7 @@
     calMotionCancelBtn.style.marginTop = '8px';
     calMotionCancelBtn.style.display = 'none';
     calMotionCancelBtn.addEventListener('click', function () {
-      stopCalibration(T('Calibration cancelled.'));
+      stopCalibration(T('Calibration cancelled.'), T('Cancelled.'));
     });
     mo.appendChild(calMotionCancelBtn);
     syncCalUi();
@@ -5313,7 +5445,7 @@
     }
     if (e.key === 'Escape') {
       e.preventDefault();
-      stopCalibration(T('Calibration cancelled.'));
+      stopCalibration(T('Calibration cancelled.'), T('Cancelled.'));
       return;
     }
     if (e.key === ' ' || e.key === 'Spacebar' || e.key === 'Enter') {
