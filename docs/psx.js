@@ -3372,6 +3372,7 @@
     // head bone. Blended in by how close the hand is, so nothing changes for an
     // arm that is not doing anything with the head.
     var anchorW = 0;
+    var near = null;
     var headB = cfg.headAnchor > 0 ? boneNode(vrm, 'head') : null;
     if (headB && vis(lm[LM_NOSE])) {
       var nose = lm[LM_NOSE];
@@ -3380,7 +3381,27 @@
       var mH = vlen(vsub(mHead, vmid(worldPos(c.ru), worldPos(c.lu))));
       var toFace = vsub(wr, nose);
       if (uH > 1e-4 && mH > 1e-4) {
-        var near = vlen(toFace) / uH;
+        // How near the hand is to the head, measured across the image and not
+        // through it.
+        //
+        // A hand behind the head is the one place the depth estimate has
+        // nothing to work from, and it is exactly the pose this test decides.
+        // With both hands up, one wrist read 1.74 head-heights from the nose
+        // while the other read 0.95 in the same symmetric pose - and 1.74 is
+        // past HEAD_FAR, so that arm lost the anchor entirely and struck out on
+        // its own while its twin stayed on the head. The lateral and vertical
+        // components are measured, not guessed, and they are enough to say
+        // whether a hand is at the head: nothing else in the body can be a head
+        // -height away across the frame and not be near it.
+        //
+        // The offset below keeps all three axes. Being wrong about how far
+        // through the head a hand sits only misplaces it slightly; being wrong
+        // about whether it is there at all swaps the whole behaviour.
+        var flatFace = vsub(toFace, vmul(ub.z, vdot(toFace, ub.z)));
+        var flatH = vsub(nose, vmid(lm[ARM_LM.Right.shoulder], lm[ARM_LM.Left.shoulder]));
+        flatH = vsub(flatH, vmul(ub.z, vdot(flatH, ub.z)));
+        var flatLen = vlen(flatH);
+        near = flatLen > 1e-4 ? vlen(flatFace) / flatLen : vlen(toFace) / uH;
         anchorW = clamp((HEAD_FAR - near) / (HEAD_FAR - HEAD_ON), 0, 1) * cfg.headAnchor;
         if (anchorW > 0) {
           // the head bone sits at the base of the skull and the nose on the
@@ -3531,6 +3552,7 @@
       extend: +(want / (a + b)).toFixed(3),
       clamped: want >= a + b - 1e-4,
       anchor: +anchorW.toFixed(2),
+      near: isNum(near) ? +near.toFixed(2) : null,
       reach: +sideReach(side).toFixed(2),
       straighten: bend == null ? null
         : Math.round(REACH_STRAIGHTEN * Math.pow((1 - bend) / 2, 4) * 180 / Math.PI)
