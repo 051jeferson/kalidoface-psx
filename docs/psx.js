@@ -3254,6 +3254,7 @@
       straighten: d.bend == null ? null
         : deg(REACH_STRAIGHTEN * Math.pow((1 - d.bend) / 2, 4)),
       hand: d.hand, twistDeg: deg(d.twist), twistCapped: d.twistCapped,
+      palmDot: r2(d.palmDot),
       rollHeld: d.rollHeld, handRest: d.handRest
     };
   }
@@ -3353,6 +3354,7 @@
     d.anchor = 0; d.near = null; d.wristSeen = 0; d.upper = 0; d.fore = 0;
     d.gap = null; d.reach = 1; d.hand = false; d.twist = null;
     d.twistCapped = false; d.rollHeld = false; d.handRest = false;
+    d.palmDot = null;
     return d;
   }
 
@@ -3752,6 +3754,30 @@
       dbg.hand = !!(hw && hChild);
       dbg.twist = ang;
       dbg.twistCapped = ang != null && Math.abs(ang) > 2.6;
+
+      // Which way the palm ends up facing, against the way the head lies.
+      //
+      // A forearm has perhaps 150 degrees of pronation in total, and a hand put
+      // behind the head has spent most of it getting there - so a palm facing
+      // away from the skull in that pose is not a mistracked palm, it is a pose
+      // no arm can make. A limit like that can be imposed without measuring
+      // anything better, which is a different kind of fix from the ones tried
+      // so far and probably the right one.
+      //
+      // Reported rather than enforced, because enforcing it needs to know which
+      // face of the hand is the palm, and that sign is opposite on the two
+      // hands. Getting it wrong inverts every palm - this file records having
+      // done exactly that twice. The sign is cheap to settle by watching one
+      // number against one pose, and impossible to settle by reasoning about a
+      // bind pose that varies per model.
+      //
+      // +1 means this face of the hand looks at the head, -1 away from it.
+      var pAcross = haveAcross;
+      if (pAcross && headB) {
+        var pNorm = vnorm(vcross(loDir, pAcross));
+        var toHead = vnorm(vsub(worldPos(headB), worldPos(hand)));
+        if (pNorm && toHead) dbg.palmDot = vdot(pNorm, toHead);
+      }
       if (ang != null) {
         // a forearm does not rotate past about 150 degrees, and a landmark that
         // says it did is a landmark that has flipped the hand over
