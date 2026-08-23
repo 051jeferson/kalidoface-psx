@@ -164,6 +164,14 @@
     {
       "find": "const Tl=J(\"2D\")",
       "replace": "const Tl=J(\"Color\")"
+    },
+    {
+      "find": "let at=(!l[5]||l[6])&&(!l[2]&&l[8].w<600||l[8].w>600)&&es(l);",
+      "replace": "let at=(!l[2]&&l[8].w<600||l[8].w>600)&&es(l);"
+    },
+    {
+      "find": "Qe.$set(bn),(!U[5]||U[6])&&(!U[2]&&U[8].w<600",
+      "replace": "Qe.$set(bn),(!U[2]&&U[8].w<600"
     }
   ],
   "vendorPatches": [
