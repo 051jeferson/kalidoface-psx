@@ -2842,9 +2842,80 @@
   // `image` is the second argument the call site has always passed and this
   // layer has always dropped: the same landmarks in normalised video space,
   // which is the one space the face mesh also reports in.
+  // How often the hand model handed back a hand belonging to the other arm.
+  // Kept for `PSX.armInfo()`: a swap that is corrected leaves no trace in the
+  // pose, and "it looks wrong with both hands up" is not a thing anyone can
+  // measure from the outside.
+  var handSwaps = 0;
+
+  // Distance in the video frame. The hand model and the pose both report there,
+  // and only there do the two have a common space - the depth axis is estimated
+  // separately by each and cannot be compared.
+  function imgDist(a, b) {
+    var dx = num(a.x) - num(b.x), dy = num(a.y) - num(b.y);
+    return dx * dx + dy * dy;
+  }
+
+  // Which arm's wrist this hand is actually sitting on.
+  //
+  // Holistic reports the two hands as separate results and, with both of them
+  // up beside the head, regularly reports them the wrong way round - close
+  // together, similar shapes, and nothing in the result says which arm each one
+  // belongs to. One hand up cannot show the fault, because there is nothing for
+  // it to be swapped with, which is exactly how it stayed hidden.
+  //
+  // Nothing here trusts the labels: it asks where each hand is. A hand nearer
+  // the other arm's wrist than its own is the other arm's hand, whatever it was
+  // filed under.
+  function handSide(side, p) {
+    var img = poseImg;
+    if (!img || !p || p.length <= HAND_LM.wrist) return side;
+    var other = side === 'Left' ? 'Right' : 'Left';
+    var mine = img[ARM_LM[side].wrist], theirs = img[ARM_LM[other].wrist];
+    if (!mine || !theirs || !vis(mine) || !vis(theirs)) return side;
+    var w = p[HAND_LM.wrist];
+    if (!w) return side;
+    var dm = imgDist(w, mine), dt = imgDist(w, theirs);
+    // A clear margin, not a tie-break. With the wrists crossed or touching the
+    // two distances are nearly equal, and a swap decided on noise would flicker
+    // the palms every frame - which is worse than the fault it is fixing.
+    return dt * 1.44 < dm ? other : side;
+  }
+
+  function placeHands(hands) {
+    if (!hands) return null;
+    var want = { Right: null, Left: null };
+    var moved = false;
+    for (var side in ARM_LM) {
+      var p = hands[side];
+      if (!p) continue;
+      var to = handSide(side, p);
+      if (to !== side) moved = true;
+      // Two hands that both claim the same arm are two readings of one hand, or
+      // one reading of neither. Keep the one already filed there and drop the
+      // other rather than choosing between them.
+      if (!want[to]) want[to] = p;
+    }
+    if (moved) handSwaps++;
+    return want;
+  }
+
+  // Called before the app solves its fingers, so the correction reaches the
+  // finger rig too - a swapped pair puts every finger on the wrong hand, and
+  // fixing only this layer's copy would leave that half standing.
+  //
+  // Takes the image-space pose directly: `pose()` has not run yet this frame,
+  // so there is no `poseImg` to read.
+  function hands(h, image) {
+    poseImg = (image && image.length > LM_NOSE) ? image : poseImg;
+    return placeHands(h) || h;
+  }
+
   function pose(world, image, hands) {
     poseImg = (image && image.length > LM_NOSE) ? image : null;
-    poseHand = hands || null;
+    // Already corrected when the bundle carries the hook; placing again is a
+    // no-op, and it is what keeps this working on a bundle that does not.
+    poseHand = placeHands(hands);
     if (!world || world.length <= ARM_LM.Left.hip) { poseLm = null; return; }
     poseLm = world;
     poseLmAt = now();
@@ -3144,6 +3215,7 @@
       sides: [cfg.reachR, cfg.reachL],
       headAnchor: cfg.headAnchor,
       twist: cfg.twist, handIK: cfg.handIK,
+      handSwaps: handSwaps,
       right: armDbg.Right || null,
       left: armDbg.Left || null
     };
@@ -4090,7 +4162,7 @@
     face: 1, headGain: 1, bodyGain: 1, leanGain: 1, armGain: 1,
     smooth: 7, frame: 1, nextTrack: 1,
     mpOptions: 2, shadows: 1, shadowSize: 4, overlay: 3, overlayOpen: 1, gaze: 1,
-    pose: 1, arm: 1, guide: 1, bg: 1, bgDrop: 1
+    pose: 1, hands: 1, arm: 1, guide: 1, bg: 1, bgDrop: 1
   };
 
   function verify() {
@@ -5593,6 +5665,7 @@
     smooth: smooth,
 
     pose: pose,
+    hands: hands,
     arm: arm,
     armInfo: armInfo,
     bg: bg,

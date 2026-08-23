@@ -172,6 +172,10 @@
     {
       "find": "Qe.$set(bn),(!U[5]||U[6])&&(!U[2]&&U[8].w<600",
       "replace": "Qe.$set(bn),(!U[2]&&U[8].w<600"
+    },
+    {
+      "find": "const i={Right:l.leftHandLandmarks||null,Left:l.rightHandLandmarks||null};",
+      "replace": "const i=window.PSX.hands({Right:l.leftHandLandmarks||null,Left:l.rightHandLandmarks||null},t);"
     }
   ],
   "vendorPatches": [
