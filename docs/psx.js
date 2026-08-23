@@ -3231,16 +3231,43 @@
   // different bug from a retarget that ran and got it wrong. With it live,
   // `userBend` against `modelBend` says whether the elbow survived the trip,
   // and `clamped` says the solve ran out of arm.
+  function deg(r) { return r == null ? null : Math.round(r * 180 / Math.PI); }
+  function r2(v) { return isNum(v) ? Math.round(v * 100) / 100 : null; }
+
+  function armSide(d) {
+    if (!d.live) return { live: false, reason: d.reason };
+    var span = d.a + d.b;
+    return {
+      live: true,
+      // the elbow the person made, and the one the model was given once reach,
+      // the anchor and the filter had each had their turn
+      userBend: deg(d.bend == null ? null : Math.acos(d.bend)),
+      modelBend: deg(Math.acos(clamp((d.a * d.a + d.b * d.b - d.want * d.want) /
+        (2 * d.a * d.b), -1, 1))),
+      // 1 = the hand is as far out as the arm reaches. Pinned there means the
+      // solve is clamped, which is a straight arm in every pose.
+      extend: r2(d.want / span),
+      clamped: d.want >= span - 1e-4,
+      anchor: r2(d.anchor), near: r2(d.near), wristSeen: r2(d.wristSeen),
+      upper: r2(d.upper), fore: r2(d.fore), gap: r2(d.gap),
+      reach: r2(d.reach),
+      straighten: d.bend == null ? null
+        : deg(REACH_STRAIGHTEN * Math.pow((1 - d.bend) / 2, 4)),
+      hand: d.hand, twistDeg: deg(d.twist), twistCapped: d.twistCapped,
+      rollHeld: d.rollHeld, handRest: d.handRest
+    };
+  }
+
   function armInfo() {
     return {
       armIK: cfg.armIK,
-      reach: cfg.armReach, up: cfg.reachUp, depth: cfg.armDepth,
-      sides: [cfg.reachR, cfg.reachL],
+      reach: r2(cfg.armReach), up: r2(cfg.reachUp), depth: r2(cfg.armDepth),
+      sides: [r2(cfg.reachR), r2(cfg.reachL)],
       headAnchor: cfg.headAnchor,
       twist: cfg.twist, handIK: cfg.handIK,
       handSwaps: handSwaps,
-      right: armDbg.Right || null,
-      left: armDbg.Left || null
+      right: armSide(armDbg.Right),
+      left: armSide(armDbg.Left)
     };
   }
 
@@ -3271,7 +3298,8 @@
   // all - the tfjs pose-only path - the stock rig is the right answer from the
   // first frame, not something to be eased into.
   function coast(c, side, upper, lower, hand) {
-    armDbg[side] = { live: false, reason: armWhy };
+    armDbg[side].live = false;
+    armDbg[side].reason = armWhy;
     if (!c.goodAt[side]) return false;
     var hold = cfg.armHold;
     if (hold <= 0) { giveUpArm(c, side); return false; }
@@ -3309,11 +3337,28 @@
 
   // Why the retarget bailed, if it did. Set at each gate rather than worked out
   // afterwards - by the time the caller sees `false` the reason is gone.
-  var armDbg = {};
+  //
+  // Two objects, made once and written over. This runs twice a frame for the
+  // life of the session, so it holds raw numbers and allocates nothing: the
+  // rounding and the derived figures are `armInfo`'s job, and `armInfo` is
+  // called by a person, at human speed.
+  var armDbg = { Right: {}, Left: {} };
   var armWhy = '';
+
+  // Every field, cleared: the object outlives the frame, and a flag left over
+  // from a frame that set it would read as this frame's answer.
+  function dbgOpen(side) {
+    var d = armDbg[side];
+    d.live = false; d.reason = ''; d.bend = null; d.want = 0; d.span = 0;
+    d.anchor = 0; d.near = null; d.wristSeen = 0; d.upper = 0; d.fore = 0;
+    d.gap = null; d.reach = 1; d.hand = false; d.twist = null;
+    d.twistCapped = false; d.rollHeld = false; d.handRest = false;
+    return d;
+  }
 
   function retarget(vrm, rig, side, idx, mirrored, instant, upper, lower, hand) {
     var c = armCache(vrm);
+    var dbg = dbgOpen(side);
     armWhy = 'no arm bones';
     if (!c.ok) return false;
 
@@ -3596,39 +3641,26 @@
     // What this arm is really doing, for `PSX.armInfo()`. Written where every
     // term already exists rather than recomputed: a diagnostic that measures a
     // second version of the solve tells you about the second version.
-    armDbg[side] = {
-      live: true,
-      // the elbow the person is making, and the one the model was given after
-      // reach, the anchor and the filter have all had their turn
-      userBend: bend == null ? null : Math.round(Math.acos(bend) * 180 / Math.PI),
-      modelBend: Math.round(Math.acos(clamp((a * a + b * b - want * want) /
-        (2 * a * b), -1, 1)) * 180 / Math.PI),
-      // 1 = the hand sits as far out as the arm can reach. Pinned at 1 means
-      // the solve is clamped, which is a straight arm in every pose.
-      extend: +(want / (a + b)).toFixed(3),
-      clamped: want >= a + b - 1e-4,
-      anchor: +anchorW.toFixed(2),
-      near: isNum(near) ? +near.toFixed(2) : null,
-      wristSeen: +conf(wr).toFixed(2),
-      // The two arms have the same bones. Any difference between these is the
-      // tracker's error and nothing else, which makes them the one measurement
-      // here that needs no reference to be read.
-      upper: +dist3(sh, el).toFixed(3),
-      fore: +dist3(el, wr).toFixed(3),
-      // How far apart the two wrists are, in the person's own head-heights.
-      // The report is that the pose degrades as the hands converge, so this is
-      // the number the rest has to be read against.
-      gap: (function () {
-        var a = lm[ARM_LM.Right.wrist], b = lm[ARM_LM.Left.wrist];
-        var nose2 = lm[LM_NOSE];
-        if (!a || !b || !nose2) return null;
-        var h = vlen(vsub(nose2, vmid(lm[ARM_LM.Right.shoulder], lm[ARM_LM.Left.shoulder])));
-        return h > 1e-4 ? +(dist3(a, b) / h).toFixed(2) : null;
-      })(),
-      reach: +sideReach(side).toFixed(2),
-      straighten: bend == null ? null
-        : Math.round(REACH_STRAIGHTEN * Math.pow((1 - bend) / 2, 4) * 180 / Math.PI)
-    };
+    dbg.live = true;
+    // the elbow the person is making, as a cosine; `armInfo` turns the pair
+    // into the two angles worth comparing
+    dbg.bend = bend;
+    dbg.want = want;
+    dbg.a = a;
+    dbg.b = b;
+    dbg.anchor = anchorW;
+    dbg.near = near;
+    dbg.wristSeen = conf(wr);
+    // The two arms have the same bones, so a difference between these is the
+    // tracker's error and nothing else - the one reading here that needs no
+    // reference to interpret.
+    dbg.upper = dist3(sh, el);
+    dbg.fore = dist3(el, wr);
+    // How far apart the two wrists are, against the person's own head. The
+    // report is that the pose degrades as the hands converge, so it is the
+    // number the rest has to be read against.
+    dbg.gap = uH > 1e-4 ? dist3(lm[ARM_LM.Right.wrist], lm[ARM_LM.Left.wrist]) / uH : null;
+    dbg.reach = sideReach(side);
 
     var d = clamp(want, Math.abs(a - b) + 1e-4, a + b - 1e-4);
     target = vadd(S, vmul(dir, d));
@@ -3683,7 +3715,7 @@
         var rk = instant ? 1 : clamp(smooth(0.04 + dt * 6), 0.002, 1);
         hand.quaternion.copy(rk >= 1 ? restH
           : c.keep.copy(hand.quaternion).slerp(restH, rk));
-        if (armDbg[side]) armDbg[side].handRest = true;
+        dbg.handRest = true;
       }
       if (h) {
         var g = armGain();
@@ -3717,11 +3749,9 @@
       var ang = (wantAcross && haveAcross)
         ? twistAngle(haveAcross, wantAcross, loDir) : null;
       // what the landmarks asked for, before the limit and the filter get to it
-      if (armDbg[side]) {
-        armDbg[side].hand = !!(hw && hChild);
-        armDbg[side].twistDeg = ang == null ? null : Math.round(ang * 180 / Math.PI);
-        armDbg[side].twistCapped = ang != null && Math.abs(ang) > 2.6;
-      }
+      dbg.hand = !!(hw && hChild);
+      dbg.twist = ang;
+      dbg.twistCapped = ang != null && Math.abs(ang) > 2.6;
       if (ang != null) {
         // a forearm does not rotate past about 150 degrees, and a landmark that
         // says it did is a landmark that has flipped the hand over
@@ -3747,7 +3777,7 @@
         // for an arm that goes out of view. A palm held from a moment ago is
         // right until the wrist turns; a palm at bind is wrong immediately.
         rollBone(c, lower, loDir, c.roll[side]);
-        if (armDbg[side]) armDbg[side].rollHeld = true;
+        dbg.rollHeld = true;
         if (hw && hChild) aimBone(c, hand, hChild, c.aim[side]);
       }
     }
