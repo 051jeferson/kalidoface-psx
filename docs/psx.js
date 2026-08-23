@@ -2999,6 +2999,22 @@
       c1 * c2 * s3 + s1 * s2 * c3, c1 * c2 * c3 - s1 * s2 * s3);
   }
 
+  // Read this while holding the pose that comes out wrong. `live: false` means
+  // the retarget never ran and the stock Euler rig drew that arm, which is a
+  // different bug from a retarget that ran and got it wrong. With it live,
+  // `userBend` against `modelBend` says whether the elbow survived the trip,
+  // and `clamped` says the solve ran out of arm.
+  function armInfo() {
+    return {
+      armIK: cfg.armIK,
+      reach: cfg.armReach, up: cfg.reachUp, depth: cfg.armDepth,
+      sides: [cfg.reachR, cfg.reachL],
+      headAnchor: cfg.headAnchor,
+      right: armDbg.Right || null,
+      left: armDbg.Left || null
+    };
+  }
+
   // Called at the top of the arm rig. Returning true means the retarget has
   // written the three bones and the stock Euler rig must not run.
   function arm(vrm, rig, side, mirrored, instant, upper, lower, hand) {
@@ -3026,6 +3042,7 @@
   // all - the tfjs pose-only path - the stock rig is the right answer from the
   // first frame, not something to be eased into.
   function coast(c, side, upper, lower, hand) {
+    armDbg[side] = { live: false, reason: armWhy };
     if (!c.goodAt[side]) return false;
     var hold = cfg.armHold;
     if (hold <= 0) { giveUpArm(c, side); return false; }
@@ -3061,8 +3078,14 @@
     if (k > 0) bone.quaternion.slerp(restQuat(bone), clamp(k, 0, 1));
   }
 
+  // Why the retarget bailed, if it did. Set at each gate rather than worked out
+  // afterwards - by the time the caller sees `false` the reason is gone.
+  var armDbg = {};
+  var armWhy = '';
+
   function retarget(vrm, rig, side, idx, mirrored, instant, upper, lower, hand) {
     var c = armCache(vrm);
+    armWhy = 'no arm bones';
     if (!c.ok) return false;
 
     var lm = poseLm;
@@ -3073,7 +3096,9 @@
       live = vis(sh) && vis(el) && vis(wr);
     }
     // the two trackers disagree about where this person even is
-    if (live && cfg.sanity && !poseTrusted) live = false;
+    armWhy = (lm && now() - poseLmAt > POSE_STALE_MS) ? 'landmarks are stale'
+      : (!lm ? 'no pose landmarks' : 'this arm is not visible');
+    if (live && cfg.sanity && !poseTrusted) { live = false; armWhy = 'sanity rejected the pose'; }
     if (!live) return coast(c, side, upper, lower, hand);
 
     // both arms of a frame read the same landmarks, and the landmarks only
@@ -3095,6 +3120,7 @@
 
     var userLen = dist3(sh, el) + dist3(el, wr);
     if (userLen < 1e-4) return coast(c, side, upper, lower, hand);
+    armWhy = 'arm length looked wrong';
     if (!armLenOk(side, userLen)) return coast(c, side, upper, lower, hand);
 
     // A bone-to-bone distance is the length of a fixed local offset, so it does
@@ -3272,6 +3298,24 @@
     // elbow is the one joint still chasing raw landmark noise
     if (!instant && isNum(c.elb[side])) want = c.elb[side] + (want - c.elb[side]) * k;
     c.elb[side] = want;
+
+    // What this arm is really doing, for `PSX.armInfo()`. Written where every
+    // term already exists rather than recomputed: a diagnostic that measures a
+    // second version of the solve tells you about the second version.
+    armDbg[side] = {
+      live: true,
+      // the elbow the person is making, and the one the model was given after
+      // reach, the anchor and the filter have all had their turn
+      userBend: bend == null ? null : Math.round(Math.acos(bend) * 180 / Math.PI),
+      modelBend: Math.round(Math.acos(clamp((a * a + b * b - want * want) /
+        (2 * a * b), -1, 1)) * 180 / Math.PI),
+      // 1 = the hand sits as far out as the arm can reach. Pinned at 1 means
+      // the solve is clamped, which is a straight arm in every pose.
+      extend: +(want / (a + b)).toFixed(3),
+      clamped: want >= a + b - 1e-4,
+      anchor: +anchorW.toFixed(2),
+      reach: +sideReach(side).toFixed(2)
+    };
 
     var d = clamp(want, Math.abs(a - b) + 1e-4, a + b - 1e-4);
     target = vadd(S, vmul(dir, d));
@@ -5386,6 +5430,7 @@
 
     pose: pose,
     arm: arm,
+    armInfo: armInfo,
     bg: bg,
     bgDrop: bgDrop,
     guide: guide,
