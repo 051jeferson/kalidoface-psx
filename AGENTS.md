@@ -55,6 +55,8 @@ Settings: `localStorage` key `kf3d.psx`. New keys need `DEFAULTS`, `SPEC` (if th
 4. Expose it on the real `window.PSX` object at the bottom of `psx.js`.
 5. Run `node tools/patch.mjs --check`.
 
+A `replace` that is a prefix or substring of its own `find` is read as already applied and silently skipped, while `--check` reports the hook present - so anchor such a pair on adjacent text until the replacement cannot be mistaken for the original. An expression evaluated on both the create and the update path needs a pair for each; applying to one of them looks clean and half works.
+
 A patch may match text an earlier patch produced. `leanGain` is declared inside the `bodyGain` replacement rather than as its own pair: a separate pair keyed off the patched text would leave the original with a `find` that no longer exists on a clean bundle. Patches apply in array order, so a later one may rely on an earlier one's output - but never on breaking an earlier one's `replace` string.
 
 Never edit `docs/assets/index.*.js` by hand. After a Glitch/Vite rebuild that changes the content hash, re-derive any failed patches — do not guess.
