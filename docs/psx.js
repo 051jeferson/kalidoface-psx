@@ -3625,7 +3625,27 @@
       aimBone(c, hand, hChild, hf);
     } else {
       c.aim[side] = null;
-      var h = rig[side + 'Hand'];
+      // Kalidokit's wrist is only re-solved on a frame that had hand landmarks:
+      //
+      //   ["Right","Left"].forEach(o => { i[o] !== null && (tracking[o+"Hand"] = ...) })
+      //
+      // so with the hands lost it holds the flexion from whenever they were
+      // last seen - which, for hands going up behind the head, is the pose with
+      // the arms hanging down. That angle is relative to a forearm that has
+      // since swung up, and replaying it puts the palms out sideways like wings.
+      //
+      // An angle from one pose on a forearm from another is worse than no angle
+      // at all. With nothing watching the hand, the honest answer is the hand
+      // in line with the forearm - which is a plausible hand in every pose,
+      // where the stale one is a wrong hand in this one.
+      var h = (poseHand && poseHand[side]) ? rig[side + 'Hand'] : null;
+      if (!h) {
+        var restH = restQuat(hand);
+        var rk = instant ? 1 : clamp(smooth(0.04 + dt * 6), 0.002, 1);
+        hand.quaternion.copy(rk >= 1 ? restH
+          : c.keep.copy(hand.quaternion).slerp(restH, rk));
+        if (armDbg[side]) armDbg[side].handRest = true;
+      }
       if (h) {
         var g = armGain();
         var wantQ = quatFromEuler(c.qA, num(h.x) * g, num(h.y) * sx * g, num(h.z) * sx * g);
