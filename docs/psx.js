@@ -3143,6 +3143,7 @@
       reach: cfg.armReach, up: cfg.reachUp, depth: cfg.armDepth,
       sides: [cfg.reachR, cfg.reachL],
       headAnchor: cfg.headAnchor,
+      twist: cfg.twist, handIK: cfg.handIK,
       right: armDbg.Right || null,
       left: armDbg.Left || null
     };
@@ -3529,6 +3530,12 @@
       var haveAcross = palmAcross(vrm, side, mirrored);
       var ang = (wantAcross && haveAcross)
         ? twistAngle(haveAcross, wantAcross, loDir) : null;
+      // what the landmarks asked for, before the limit and the filter get to it
+      if (armDbg[side]) {
+        armDbg[side].hand = !!(hw && hChild);
+        armDbg[side].twistDeg = ang == null ? null : Math.round(ang * 180 / Math.PI);
+        armDbg[side].twistCapped = ang != null && Math.abs(ang) > 2.6;
+      }
       if (ang != null) {
         // a forearm does not rotate past about 150 degrees, and a landmark that
         // says it did is a landmark that has flipped the hand over
