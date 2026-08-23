@@ -3617,6 +3617,24 @@
         rollBone(c, lower, loDir, ang);
         // the roll turned the forearm, and the hand rode along with it
         if (hw && hChild) aimBone(c, hand, hChild, c.aim[side]);
+      } else if (haveAcross && isNum(c.roll[side])) {
+        // Nothing could read the palm this frame. Both hands up beside the head
+        // is the case that does it: they hide each other and the skull, the
+        // hand model drops both, and the pose's own knuckles go with them.
+        //
+        // Doing nothing is not neutral here. The solve rewrites the forearm
+        // from its rest pose every frame, which is what lets the roll be read
+        // as an absolute angle rather than a correction stacking on the last
+        // one - so a frame that skips the roll does not leave the palm where it
+        // was, it snaps it back to the bind pose. That is the flip: not a wrong
+        // angle, an erased one.
+        //
+        // So hold the last angle that was read, the same answer `coast` gives
+        // for an arm that goes out of view. A palm held from a moment ago is
+        // right until the wrist turns; a palm at bind is wrong immediately.
+        rollBone(c, lower, loDir, c.roll[side]);
+        if (armDbg[side]) armDbg[side].rollHeld = true;
+        if (hw && hChild) aimBone(c, hand, hChild, c.aim[side]);
       }
     }
 
