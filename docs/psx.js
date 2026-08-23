@@ -2379,7 +2379,19 @@
         var seg = dist3(sh, el) + dist3(el, wr);
         var d = vsub(wr, sh);
         var span = vlen(d);
-        // elbow locked, and the arm lying across the image rather than down it
+        // Elbow straight, and the arm lying across the image rather than down it.
+        //
+        // The span this step reads is measured against the span the model would
+        // have at full stretch, so every degree of elbow the person did not
+        // straighten is read as reach the model is missing - and Reach only
+        // ever multiplies, so that shortfall ratchets it to the ceiling over a
+        // couple of runs and the straightening cap then irons every pose flat.
+        // 0.85 admits an elbow bent 60 degrees, which asks for 18% more reach
+        // on its own. Gate on the two segments being in line instead: it is the
+        // same invariant the sweep uses, and unlike a distance it survives the
+        // depth compression untouched.
+        var uSeg = vnorm(vsub(el, sh)), lSeg = vnorm(vsub(wr, el));
+        if (!uSeg || !lSeg || vdot(uSeg, lSeg) < 0.99) return;
         if (span < seg * 0.85 || Math.abs(vdot(d, ub.x)) < span * 0.8) return;
         sum += seg;
         n++;
@@ -3280,11 +3292,22 @@
       if (sideReach(side) > 1) {
         // Reach may straighten the elbow, never iron it flat. It exists to get
         // a short-armed model to its own head; a bend that survives that is
-        // still the person's bend. The cap is in angle rather than in length,
-        // so an almost straight arm gets the whole stretch while a folded one
-        // keeps most of its fold - which is what "hands on my head" needs and
-        // what welded every other pose straight before.
-        var phi = Math.min(Math.acos(bend) + REACH_STRAIGHTEN, Math.PI);
+        // still the person's bend.
+        //
+        // This used to add the whole of REACH_STRAIGHTEN to every pose, flat.
+        // The comment claimed it was proportional and it was not: a measured
+        // elbow of 132 degrees came out at 177, straight, over exactly the 45
+        // the constant is worth - and it did that to every pose, which is the
+        // welding it was written to prevent.
+        //
+        // Weight it by how extended the arm already is. `bend` is the cosine of
+        // the elbow angle, so (1 - bend) / 2 runs 0 when folded shut to 1 when
+        // straight, and the fourth power puts the stretch where the intent
+        // always was: a nearly straight arm at 170 degrees keeps 97% of it, a
+        // right angle keeps 6% - about three degrees, which is nothing.
+        var ext = (1 - bend) / 2;
+        ext *= ext; ext *= ext;
+        var phi = Math.min(Math.acos(bend) + REACH_STRAIGHTEN * ext, Math.PI);
         var capped = Math.sqrt(Math.max(a * a + b * b - 2 * a * b * Math.cos(phi), 0));
         want = Math.min(want * sideReach(side), capped);
       }
@@ -3314,7 +3337,9 @@
       extend: +(want / (a + b)).toFixed(3),
       clamped: want >= a + b - 1e-4,
       anchor: +anchorW.toFixed(2),
-      reach: +sideReach(side).toFixed(2)
+      reach: +sideReach(side).toFixed(2),
+      straighten: bend == null ? null
+        : Math.round(REACH_STRAIGHTEN * Math.pow((1 - bend) / 2, 4) * 180 / Math.PI)
     };
 
     var d = clamp(want, Math.abs(a - b) + 1e-4, a + b - 1e-4);
