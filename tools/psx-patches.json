@@ -158,6 +158,14 @@
       "replace": "b=[\"Color\"];let y;for(y=0;y<1;y+=1){"
     },
     {
+      "find": "n=L(\"div\");for(let k=0;k<3;k+=1)w[k].c()",
+      "replace": "n=L(\"div\");for(let k=0;k<1;k+=1)w[k].c()"
+    },
+    {
+      "find": "d(e,t),d(t,n);for(let g=0;g<3;g+=1)w[g].m(n,null)",
+      "replace": "d(e,t),d(t,n);for(let g=0;g<1;g+=1)w[g].m(n,null)"
+    },
+    {
       "find": "for(;y<3;y+=1)w[y].d(1)",
       "replace": "for(;y<1;y+=1)w[y].d(1)"
     },
