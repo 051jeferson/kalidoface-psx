@@ -203,6 +203,15 @@
     // they disagree on. Off = believe whatever arrives, which is upstream.
     sanity: true,
 
+    // --- backgrounds ----------------------------------------------------
+    // Saved background colours, as hex strings. The app keeps its own
+    // background list in a plain in-memory store that nothing ever writes to
+    // storage, so a colour saved into it is gone on the next reload - and an
+    // export could only ever have carried whatever the running session happened
+    // to hold. Keeping them here is what makes them survive a reload and ride
+    // along in an exported profile.
+    colours: [],
+
     // --- performance --------------------------------------------------
     // Enable the caps below. Off = the app's own behaviour.
     perf: false,
@@ -275,6 +284,22 @@
 
   var CAL_FIELDS = ['browRest', 'browDown', 'browUp', 'smileRest', 'smileMax'];
 
+  // A saved colour is whatever the app's own picker wrote, which is six digits,
+  // plus the eight-digit form the transparent preset uses. Three-digit CSS hex
+  // is neither, and `isAlphaHex` reads length alone - so a '#0f0' let through
+  // here would come back out of an imported file as an opaque colour that the
+  // swatch draws as a checkerboard.
+  var HEX_RE = /^#([0-9a-fA-F]{6}|[0-9a-fA-F]{8})$/;
+  // An imported file is not necessarily one this app wrote. Colours cost a
+  // localStorage write each, so the list is capped rather than trusted.
+  var MAX_COLOURS = 64;
+
+  function okHex(v) {
+    if (typeof v !== 'string') return null;
+    var t = v.trim();
+    return HEX_RE.test(t) ? t.toLowerCase() : null;
+  }
+
   var VOWELS = ['a', 'i', 'u', 'e', 'o'];
   // The features a vowel is recognised by: how wide the mouth is, how open it
   // is, and Kalidokit's own five shape weights. The shape weights all rise
@@ -302,6 +327,15 @@
       // recorded before the grin step existed, and still usable without it
       if (v.smile && !okVec(v.smile)) delete v.smile;
       return v;
+    }
+    if (key === 'colours') {
+      if (!Array.isArray(v)) return [];
+      var out = [];
+      for (var c = 0; c < v.length && out.length < MAX_COLOURS; c++) {
+        var hex = okHex(v[c]);
+        if (hex && out.indexOf(hex) === -1) out.push(hex);
+      }
+      return out;
     }
     if (key === 'cal') {
       if (!v || typeof v !== 'object') return null;
@@ -343,7 +377,9 @@
     resetCalibration();
     applyCanvasFilter();
     refreshModels();
+    mirrorColours();
     syncControls();
+    injectBgColours();
     askReload();
     console.log('[psx] settings reset to defaults');
   }
@@ -428,8 +464,11 @@
     resetCalibration();
     applyCanvasFilter();
     refreshModels();
+    // rebuildPanels drops every injected card and re-runs the injection pass,
+    // which redraws the swatches on its own; the syncControls path does not.
+    mirrorColours();
     if (langChanged) rebuildPanels();
-    else syncControls();
+    else { syncControls(); injectBgColours(); }
     if (needsReload) askReload();
     return importReport(body, bad);
   }
@@ -452,6 +491,11 @@
     }
     lines.push(T('motion calibration') + ': ' +
       (motion ? T('imported') : T('not in the file')));
+    // A file written before colours were carried has no key at all, which is
+    // not the same as one that carried an empty list, and only the first means
+    // the colours already loaded were left alone.
+    lines.push(T('saved colours') + ': ' + ('colours' in body
+      ? (cfg.colours || []).length : T('not in the file')));
     return lines.join(NL);
   }
 
@@ -4203,6 +4247,7 @@
     'thumb only': 'só o polegar',
     'none': 'nenhum',
     'Wrist from hand model': 'Pulso pelo modelo de mão',
+    'saved colours': 'cores salvas',
     'Save colour': 'Salvar cor',
     'Update colour': 'Atualizar cor',
     'Delete colour': 'Apagar cor',
@@ -5354,7 +5399,7 @@
   var bgCard = null;
 
   // called when the Backgrounds panel mounts, with the app's own stores
-  function bg(stores) { bgStores = stores; }
+  function bg(stores) { bgStores = stores; mirrorColours(); }
 
   // Svelte stores only hand their value to a subscriber. Subscribing runs the
   // callback once, synchronously, before returning the unsubscriber.
@@ -5384,47 +5429,62 @@
     return out;
   }
 
+  // The stored list is the source of truth. Reading the app's store instead
+  // would answer with an empty list every time the Backgrounds panel has not
+  // been opened yet this session, which is exactly when an export is most
+  // likely to be taken.
   function savedColours() {
-    var list = bgStores && readStore(bgStores.list);
-    if (!list || !list.length) return [];
+    var list = cfg.colours || [];
     var out = [];
-    for (var i = 0; i < list.length; i++) {
-      if (list[i] && list[i].type === 'color' && list[i].uploaded) out.push(list[i]);
-    }
+    for (var i = 0; i < list.length; i++) out.push({ url: list[i], name: list[i] });
     return out;
+  }
+
+  // Keep the app's own background list in step with the stored colours. It is
+  // what its list view renders and what `bgDrop` edits, and it is in-memory
+  // only - so this is a mirror rather than a second copy to keep in sync by
+  // hand. Uploads live in the same list and are not ours to touch.
+  function mirrorColours() {
+    if (!bgStores || !bgStores.list) return;
+    var list = readStore(bgStores.list) || [];
+    var keep = [];
+    for (var i = 0; i < list.length; i++) {
+      if (list[i] && list[i].type !== 'color') keep.push(list[i]);
+    }
+    var cols = cfg.colours || [];
+    var mine = [];
+    for (var c = 0; c < cols.length; c++) {
+      mine.push({ type: 'color', name: cols[c], url: cols[c], pano: false, uploaded: now() });
+    }
+    bgStores.list.set(mine.concat(keep));
   }
 
   function saveColour() {
     if (!bgStores) return;
-    var hex = readStore(bgStores.saved);
-    if (typeof hex !== 'string' || !hex) return;
-    var list = (readStore(bgStores.list) || []).slice();
-    var at = -1;
-    if (bgEditUrl) {
-      for (var i = 0; i < list.length; i++) {
-        if (list[i] && list[i].type === 'color' && list[i].url === bgEditUrl) { at = i; break; }
-      }
-    }
-    // `uploaded` is what earns the entry its delete button, and `pano` false is
-    // what files it under the 2D tab. Both are the app's own conventions.
-    var item = { type: 'color', name: hex, url: hex, pano: false, uploaded: now() };
-    if (at >= 0) list[at] = item;
-    else list.unshift(item);
-    bgStores.list.set(list);
+    var hex = okHex(readStore(bgStores.saved));
+    if (!hex) return;
+    var list = (cfg.colours || []).slice();
+    var at = bgEditUrl ? list.indexOf(bgEditUrl) : -1;
+    // Editing replaces the swatch in place, so nudging a colour does not leave
+    // the near-identical one it started from sitting beside it.
+    if (at >= 0) list[at] = hex;
+    else if (list.indexOf(hex) === -1) list.unshift(hex);
+    cfg.colours = sanitize('colours', list);
+    save();
+    mirrorColours();
     bgStores.current.set({ type: 'color', url: hex });
     bgEditUrl = hex;
     injectBgColours();
   }
 
   function dropColour(url) {
-    if (!bgStores) return;
-    var list = readStore(bgStores.list) || [];
-    var out = [];
-    for (var i = 0; i < list.length; i++) {
-      if (list[i] && list[i].type === 'color' && list[i].url === url) continue;
-      out.push(list[i]);
-    }
-    bgStores.list.set(out);
+    var list = (cfg.colours || []).slice();
+    var at = list.indexOf(url);
+    if (at === -1) return;
+    list.splice(at, 1);
+    cfg.colours = list;
+    save();
+    mirrorColours();
     if (bgEditUrl === url) bgEditUrl = null;
     injectBgColours();
   }
