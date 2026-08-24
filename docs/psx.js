@@ -4247,6 +4247,8 @@
     'thumb only': 'só o polegar',
     'none': 'nenhum',
     'Wrist from hand model': 'Pulso pelo modelo de mão',
+    'Presets': 'Predefinidas',
+    'Saved': 'Salvas',
     'saved colours': 'cores salvas',
     'Save colour': 'Salvar cor',
     'Update colour': 'Atualizar cor',
@@ -4254,7 +4256,7 @@
     'Chroma green': 'Verde chroma key',
     'Transparent': 'Transparente',
     'No colours saved yet': 'Nenhuma cor salva ainda',
-    'note.bgColour': 'Cores salvas ficam na lista de fundos 2D, junto com as imagens enviadas - clique lá para aplicar. Aqui: clique num quadrinho para carregá-lo no seletor e editar, × apaga.',
+    'note.bgColour': 'O seletor guarda uma cor só, e não havia como manter uma segunda nem descartar uma que você não usa mais. Clique num quadrinho para aplicar a cor e carregá-la no seletor para editar; × apaga. O app nunca gravava a lista de fundos, então as cores salvas ficam junto com o resto dos ajustes - sobrevivem ao reload, e um perfil exportado leva elas junto.',
     'Export settings': 'Exportar ajustes',
     'Import settings': 'Importar ajustes',
     'Settings imported': 'Ajustes importados',
@@ -4344,10 +4346,11 @@
       'noisiest number. Nothing upstream drives the shoulder at all, so shoulder ' +
       'follow lets it turn a little and keeps a raised arm out of the neck.',
     'note.bgColour': 'The picker keeps one colour, and there was no way to keep a '
-      + 'second one or drop one you are done with. A saved colour goes into the 2D '
-      + 'background list beside your uploaded images, where clicking it applies it. '
-      + 'Here, clicking a swatch loads it back into the picker to edit, and × '
-      + 'deletes it.',
+      + 'second one or drop one you are done with. Click a swatch to apply it and '
+      + 'load it back into the picker to edit; × deletes it. The app never wrote '
+      + 'its background list to storage, so saved colours are kept with the rest of '
+      + 'the settings instead - they survive a reload, and an exported profile '
+      + 'brings them with it.',
     'note.mouth': 'Upstream reports five vowel weights that all rise together with '
       + 'the jaw, so one of them wins whatever you say and the mouth ends up with a '
       + 'single open shape. This records what your own face reads while you say each '
@@ -5521,13 +5524,19 @@
     'linear-gradient(45deg,#bbb 25%,transparent 25%,transparent 75%,#bbb 75%);' +
     'background-size:12px 12px;background-position:0 0,6px 6px;';
 
+  // The app marks the background it is showing with a light-blue ring that
+  // grows out from behind the tile (`div.bg.selected:before`), and its own
+  // radius for a background tile is 8px. Both are borrowed here so a swatch
+  // reads as the same kind of thing as the tiles it stands in for, rather than
+  // as a control this fork bolted on.
   function bgSwatch(item, fixed) {
     var box = el('div', '', '');
     var on = bgEditUrl === item.url;
-    box.style.cssText = 'position:relative;width:32px;height:32px;border-radius:6px;' +
-      'cursor:pointer;' +
+    box.style.cssText = 'position:relative;width:40px;height:40px;border-radius:8px;' +
+      'cursor:pointer;flex:0 0 auto;transition:box-shadow .2s ease;' +
       (isAlphaHex(item.url) ? CHECKER : 'background:' + item.url + ';') +
-      'box-shadow:0 0 0 ' + (on ? '2px #fff' : '1px rgba(0,0,0,.45)');
+      'box-shadow:0 0 0 1px rgba(0,0,0,.45)' +
+      (on ? ',0 0 0 3px var(--lightBlue)' : '');
     box.title = fixed ? T(item.name) : item.url;
     box.addEventListener('click', function () { editColour(item.url); });
     // A preset is not a saved colour. Nothing to delete, and deleting it would
@@ -5535,9 +5544,10 @@
     if (fixed) return box;
 
     var x = el('button', '', '×');
-    x.style.cssText = 'position:absolute;top:-6px;right:-6px;width:16px;height:16px;' +
-      'line-height:14px;padding:0;border:0;border-radius:8px;font-size:13px;' +
-      'background:#2b2a35;color:#fff;cursor:pointer';
+    x.style.cssText = 'position:absolute;top:-6px;right:-6px;width:18px;height:18px;' +
+      'line-height:16px;padding:0;border:0;border-radius:9px;font-size:14px;' +
+      'font-weight:600;background:var(--lightRed);color:#fff;cursor:pointer;' +
+      'box-shadow:0 1px 3px rgba(0,0,0,.4)';
     x.setAttribute('aria-label', T('Delete colour'));
     x.addEventListener('click', function (e) {
       e.stopPropagation();
@@ -5547,34 +5557,55 @@
     return box;
   }
 
+  function bgLabel(text) {
+    var h = el('div', '', text);
+    h.style.cssText = 'color:#fff;font-size:11px;font-weight:600;letter-spacing:.04em;' +
+      'text-transform:uppercase;opacity:.75;margin:0 0 8px';
+    return h;
+  }
+
+  // The panels this card sits in set no colour of their own, so text here
+  // inherits whatever the page hands down - which on the Backgrounds panel is
+  // dark, on a dark slate. Every string below states its own colour. `opacity`
+  // is what the other cards use for a secondary line, but it dims the
+  // inherited colour rather than white, which is what made these two
+  // illegible here; the app's own secondary is #ffffff80, and a note that has
+  // to be read rather than glanced at sits a step above it.
   function buildBgColours() {
     var wrap = el('div', 'psx-injected', '');
-    wrap.style.cssText = 'width:100%;margin-top:14px;text-align:left';
+    wrap.style.cssText = 'width:100%;margin-top:16px;text-align:left;color:#fff;' +
+      'background:#ffffff10;border-radius:12px;padding:16px;box-sizing:border-box';
 
     var note = el('div', '', T('note.bgColour'));
-    note.style.cssText = 'opacity:.5;font-size:12px;margin:0 0 8px;line-height:1.4';
+    note.style.cssText = 'color:#ffffffb3;font-size:12px;margin:0 0 14px;line-height:1.5';
     wrap.appendChild(note);
 
+    wrap.appendChild(bgLabel(T('Presets')));
     var fixed = el('div', '', '');
-    fixed.style.cssText = 'display:flex;flex-wrap:wrap;gap:8px;margin-bottom:10px';
+    fixed.style.cssText = 'display:flex;flex-wrap:wrap;gap:10px;margin:0 0 16px';
     for (var f = 0; f < BG_PRESETS.length; f++) {
       fixed.appendChild(bgSwatch(BG_PRESETS[f], true));
     }
     wrap.appendChild(fixed);
 
+    wrap.appendChild(bgLabel(T('Saved')));
     var row = el('div', '', '');
-    row.style.cssText = 'display:flex;flex-wrap:wrap;gap:8px;margin-bottom:10px';
+    row.style.cssText = 'display:flex;flex-wrap:wrap;gap:10px;margin:0 0 16px';
     var cols = savedColours();
     for (var i = 0; i < cols.length; i++) row.appendChild(bgSwatch(cols[i]));
     if (!cols.length) {
       var none = el('div', '', T('No colours saved yet'));
-      none.style.cssText = 'opacity:.5;font-size:12px';
+      none.style.cssText = 'color:#ffffff80;font-size:12px;line-height:40px';
       row.appendChild(none);
     }
     wrap.appendChild(row);
 
+    // `.trigger` is the app's own button, but its 24px padding and 32px radius
+    // are sized for the full-width Settings panel and swamp a card this
+    // narrow, so both come down to the scale of the tab pills beside it.
     var save = el('button', 'trigger ' + STG, bgEditUrl ? T('Update colour') : T('Save colour'));
-    save.style.width = '100%';
+    save.style.cssText = 'width:100%;margin:0;padding:12px;border-radius:20px;' +
+      'font-size:14px;font-weight:600;box-sizing:border-box';
     save.addEventListener('click', saveColour);
     wrap.appendChild(save);
     return wrap;
