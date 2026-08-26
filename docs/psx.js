@@ -1117,6 +1117,7 @@
   function resetCalibration() {
     browTrack = tracker();
     smileTrack = tracker();
+    browPose = poseLadder();
     log('auto calibration reset');
   }
 
@@ -1987,6 +1988,7 @@
 
     cfg.cal = c;
     cfg.signal = 'calibrated';
+    resetCalibration();
     save();
     syncControls();
 
@@ -2201,16 +2203,140 @@
     return 0;
   }
 
-  function calibratedBrow(raw, rig) {
-    var c = cfg.cal;
-    var dev = raw - poseBrowRest(c, rig);
-    var span = dev < 0 ? Math.abs(c.browDown - c.browRest) : Math.abs(c.browUp - c.browRest);
-    return calNorm(dev, span);
+  function browSpan(c, dev) {
+    return dev < 0 ? Math.abs(c.browDown - c.browRest) : Math.abs(c.browUp - c.browRest);
   }
 
   function calibratedSmile(raw) {
     var c = cfg.cal;
     return calNorm(raw - c.smileRest, c.smileMax - c.smileRest);
+  }
+
+  // ------------------------------------------------ learned pose brow rest
+  //
+  // The four recorded poses are ground truth, but they are four points on two
+  // axes, taken at whatever angle the person turned that day - and they only
+  // exist once the wizard has been run. The default signal mode is `auto`,
+  // where nothing corrects the pose at all, which is where "looking aside
+  // reads as angry" comes from. The drift is real at every angle between the
+  // recordings too, on the roll axis nothing records, and past the angle that
+  // was recorded.
+  //
+  // So the rest value is also learned while tracking: a ladder of cells along
+  // each head axis, each creeping toward the brow seen at that angle while the
+  // brow is not doing anything. That is the same bet `normalize` already makes
+  // about a resting value, made per pose instead of once. It rides on top of
+  // the recordings rather than replacing them - with a good `browAt` there is
+  // little left for it to learn, and it converges on nothing.
+  //
+  // The centre cell is never learned: it is the baseline the others are
+  // measured against, and letting both move leaves them chasing each other.
+  var POSE_AXES = ['y', 'x', 'z'];
+  var POSE_CELLS = 9;                 // cells per axis
+  var POSE_CELL = 0.18;               // ~10 degrees of head rotation each
+  var POSE_MID = (POSE_CELLS - 1) / 2;
+  var POSE_WARM = 20;                 // frames before a cell is believed in full
+  var POSE_CREEP = 0.01;              // per-frame pull once it is warm
+  // A cell only learns while the other two axes are near centre, so a turn
+  // that is also a tilt does not teach both ladders the same drift twice.
+  var POSE_CENTRE = 0.12;
+
+  function poseLadder() {
+    var l = {};
+    for (var i = 0; i < POSE_AXES.length; i++) {
+      var off = [], n = [];
+      for (var j = 0; j < POSE_CELLS; j++) { off.push(0); n.push(0); }
+      l[POSE_AXES[i]] = { off: off, n: n };
+    }
+    return l;
+  }
+
+  var browPose = poseLadder();
+
+  function poseCell(v) {
+    return clamp(v / POSE_CELL + POSE_MID, 0, POSE_CELLS - 1);
+  }
+
+  // A cold cell contributes nothing and warms in, so the first frame at a new
+  // angle cannot step the zero out from under the face.
+  function cellShift(a, i) {
+    return a.off[i] * Math.min(1, a.n[i] / POSE_WARM);
+  }
+
+  function ladderAt(a, f) {
+    var i = Math.floor(f), t = f - i;
+    if (i >= POSE_CELLS - 1) return cellShift(a, POSE_CELLS - 1);
+    return cellShift(a, i) * (1 - t) + cellShift(a, i + 1) * t;
+  }
+
+  function learnedBrowShift(rig) {
+    var h = rig && rig.head;
+    if (!h) return 0;
+    return ladderAt(browPose.y, poseCell(num(h.y)))
+      + ladderAt(browPose.x, poseCell(num(h.x)))
+      + ladderAt(browPose.z, poseCell(num(h.z)));
+  }
+
+  // `target` is the whole drift this pose shows - raw minus the rest the
+  // recordings alone would give.
+  //
+  // A cell learns the *median* of that - a step toward each sample rather than
+  // an average of them - and nothing gates which frames it may read. A "only
+  // while the brow is quiet" gate is what `normalize` uses for the one global
+  // baseline, and it cannot work per pose: until a cell has learned anything,
+  // the drift is exactly what makes the frame look un-quiet, so the cell that
+  // most needs the sample is the one that refuses it, and a cell that ever
+  // learned a wrong value would go on refusing every frame that could correct
+  // it. The median needs no gate - the drift is on every frame at that pose
+  // and an expression is only on some of them, so the middle is the drift.
+  var POSE_MAX = 0.5;                 // the scalar swings in hundredths; this
+                                      // is only here so nothing can run away
+  function learnBrowPose(rig, target, span) {
+    var h = rig && rig.head;
+    if (!h || faceOcc || !isNum(target)) return;
+    var v = { y: num(h.y), x: num(h.x), z: num(h.z) };
+    for (var i = 0; i < POSE_AXES.length; i++) {
+      var k = POSE_AXES[i], alone = true;
+      for (var j = 0; j < POSE_AXES.length; j++) {
+        if (j !== i && Math.abs(v[POSE_AXES[j]]) >= POSE_CENTRE) { alone = false; break; }
+      }
+      if (!alone) continue;
+      var c = Math.round(poseCell(v[k]));
+      if (c === POSE_MID) continue;
+      var a = browPose[k];
+      a.n[c]++;
+      // a big step while the cell is new, so it arrives within a second of
+      // looking that way, and a small one once it has an opinion worth keeping
+      var step = Math.max(span, BROW_SPAN_MIN) * Math.max(POSE_CREEP, 1 / a.n[c]);
+      a.off[c] = clamp(a.off[c] + (target > a.off[c] ? step : -step), -POSE_MAX, POSE_MAX);
+    }
+  }
+
+  // The auto tracker's own baseline is the centre-pose rest, so that is what
+  // the ladder measures against there. Returns it for the readout.
+  function learnAutoBrow(rig, adj, learned) {
+    if (browTrack.base === null) return null;
+    learnBrowPose(rig, adj + learned - browTrack.base, browTrack.span);
+    return browTrack.base;
+  }
+
+  // What each ladder has learned, in raw brow units per cell, centre cell
+  // first neighbour out. Reasoning about this from the code is guesswork -
+  // watch the numbers while turning the head instead.
+  function browRestInfo() {
+    var out = {};
+    for (var i = 0; i < POSE_AXES.length; i++) {
+      var k = POSE_AXES[i], a = browPose[k], cells = [];
+      for (var j = 0; j < POSE_CELLS; j++) {
+        cells.push({
+          at: +(((j - POSE_MID) * POSE_CELL).toFixed(2)),
+          shift: +(cellShift(a, j).toFixed(4)),
+          n: a.n[j]
+        });
+      }
+      out[k] = cells;
+    }
+    return out;
   }
 
   function hasBlinkCal(c) {
@@ -2243,17 +2369,28 @@
     var brow, smile;
     // Pose rest is subtracted before either mapping, so a yaw that the
     // tracker reports as a brow does not spend the span or trip angry/sorrow.
-    // Raw mode is the unmapped scalar on purpose.
-    var adjBrow = poseAdjustedBrow(rawBrow, rig);
+    // The recordings correct the poses they were taken at; the ladder corrects
+    // whatever is left, at every other angle and on the axis nothing records.
+    // Raw mode is the unmapped scalar on purpose, and teaches the ladder
+    // nothing - there is no rest to measure a drift against.
+    var learned = mode === 'raw' ? 0 : learnedBrowShift(rig);
+    var adjBrow = poseAdjustedBrow(rawBrow, rig) - learned;
+    var restNow = null;
     if (mode === 'calibrated' && browCalUsable(cfg.cal)) {
-      brow = clamp(calibratedBrow(rawBrow, rig) * cfg.browGain, -1, 1);
+      restNow = poseBrowRest(cfg.cal, rig);
+      var dev = rawBrow - learned - restNow;
+      var span = browSpan(cfg.cal, dev);
+      learnBrowPose(rig, rawBrow - restNow, span);
+      brow = clamp(calNorm(dev, span) * cfg.browGain, -1, 1);
       smile = clamp(calibratedSmile(rawSmile) * cfg.browGain, 0, 1);
     } else if (mode === 'calibrated') {
       // Old saves used Kalidokit's 0..1 brow, so furrow sat on rest. Use auto
       // for the brow until they recapture; smile still uses the recording.
+      restNow = learnAutoBrow(rig, adjBrow, learned);
       brow = clamp(normalize(browTrack, adjBrow, 0.01) * cfg.browGain, -1, 1);
       smile = clamp(calibratedSmile(rawSmile) * cfg.browGain, 0, 1);
     } else if (mode === 'auto') {
+      restNow = learnAutoBrow(rig, adjBrow, learned);
       brow = clamp(normalize(browTrack, adjBrow, 0.01) * cfg.browGain, -1, 1);
       // a smile only ever opens the mouth wider than rest, so the closing half
       // of the range is not a smile
@@ -2317,8 +2454,7 @@
     lastFace = {
       brow: brow, smile: smile, out: out,
       raw: { brow: rawBrow, smile: rawSmile },
-      poseRest: (mode !== 'raw' && cfg.cal && usableBrowAt(cfg.cal.browAt))
-        ? poseBrowRest(cfg.cal, rig) : null
+      poseRest: restNow === null ? null : restNow + learned
     };
     paintReadout();
 
@@ -6378,6 +6514,7 @@
     calibrateMotion: startMotionCalibration,
     calibrateMouth: startMouthCalibration,
     resetCalibration: resetCalibration,
+    browRest: browRestInfo,
     resetSettings: resetSettings,
     exportSettings: exportSettings,
     importSettings: applyImported,
