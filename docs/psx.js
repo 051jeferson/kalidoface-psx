@@ -1098,7 +1098,8 @@
         if (lastFace.out[k] > 0 && (!top || lastFace.out[k] > lastFace.out[top])) top = k;
       }
       parts.push('brow ' + lastFace.brow.toFixed(2) +
-        ' [' + lastFace.raw.brow.toFixed(3) + ']');
+        ' [' + lastFace.raw.brow.toFixed(3) +
+        (lastFace.poseRest != null ? '~' + lastFace.poseRest.toFixed(3) : '') + ']');
       parts.push('smile ' + lastFace.smile.toFixed(2) +
         ' [' + lastFace.raw.smile.toFixed(3) + ']');
       parts.push(top ? top + ' ' + lastFace.out[top].toFixed(2) : 'neutral');
@@ -1185,23 +1186,27 @@
       hint: 'Surprised - lift them as high as you can' },
     { key: 'smile',       title: 'Smile wide',
       hint: 'Big smile, and hold it' },
-    // Head pose fools the eye solver: looking down or 40° off-camera reads as
-    // a half-blink. Open poses set the floor, closed poses set the peak, so a
-    // real blink still clears the cell in those poses and a turned head does not.
+    // Head pose fools the eye solver AND the brow scalar: looking down or 40°
+    // off-camera reads as a half-blink and as a non-neutral brow, even when
+    // the lids and brows have not moved. Open poses set the blink floor and
+    // the pose-dependent brow rest; closed poses set the blink peak. A real
+    // blink still clears the cell in those poses, a turned head does not, and
+    // relaxed brows while turned stay at rest. Do not add extra steps for the
+    // brow - these four already are that recording.
     { key: 'blink',       title: 'Close your eyes',
       hint: 'Still facing the camera, and hold them shut', eyes: 'closed' },
     { key: 'leftOpen',    title: 'Turn ~40° left, eyes open',
-      hint: 'Head turned, looking past the camera', eyes: 'open' },
+      hint: 'Head turned, looking past the camera, brows relaxed', eyes: 'open' },
     { key: 'leftClosed',  title: 'Hold that left turn, close your eyes',
       hint: 'Same angle, eyes shut', eyes: 'closed' },
     { key: 'rightOpen',   title: 'Turn ~40° right, eyes open',
-      hint: 'Head turned the other way, eyes open', eyes: 'open' },
+      hint: 'Head turned the other way, brows relaxed', eyes: 'open' },
     { key: 'rightClosed', title: 'Hold that right turn, close your eyes',
       hint: 'Same angle, eyes shut', eyes: 'closed' },
     { key: 'gazeUp',      title: 'Look up, eyes open',
-      hint: 'Tilt your head back, do not squint', eyes: 'open' },
+      hint: 'Tilt your head back, brows relaxed, do not squint', eyes: 'open' },
     { key: 'gazeDown',    title: 'Look down, eyes open',
-      hint: 'Chin down, eyes still open', eyes: 'open' }
+      hint: 'Chin down, eyes open, brows relaxed', eyes: 'open' }
   ];
   // The face wizard waits for the person to say they are in the pose rather
   // than counting them down: their hands are free, and a countdown only races
@@ -1633,6 +1638,13 @@
       calRun.out.smileMax = pct(a.smile, 0.9);
     }
 
+    // Relaxed face at a known head pose. The closed-eye steps can pull the
+    // brows, and furrow/raise/smile are not rest, so only `eyes: 'open'`.
+    if (st.eyes === 'open' && a.y.length >= CAL_MIN_SAMPLES && a.x.length >= CAL_MIN_SAMPLES) {
+      if (!calRun.browAt) calRun.browAt = {};
+      calRun.browAt[st.key] = { brow: median(a.brow), y: median(a.y), x: median(a.x) };
+    }
+
     if (st.eyes) {
       var cl = closednessOf(a);
       if (cl.length < CAL_MIN_SAMPLES) { retryStep(cl.length); return; }
@@ -1931,6 +1943,8 @@
       weak.push('blink');
     }
 
+    if (usableBrowAt(calRun.browAt)) c.browAt = calRun.browAt;
+
     cfg.cal = c;
     cfg.signal = 'calibrated';
     save();
@@ -1938,6 +1952,7 @@
 
     var blinkSpan = (isNum(c.blinkOpen) && isNum(c.blinkClosed))
       ? (c.blinkClosed - c.blinkOpen) : 0;
+    var poseDrift = browPoseDrift(c);
     var msg = shakeNote(Math.max(down, up, blinkSpan)) + T('Calibrated') +
       ' - ' + T('furrow') + ' ' + down.toFixed(3) +
       ', ' + T('raise') + ' ' + up.toFixed(3) +
@@ -1945,6 +1960,7 @@
     if (isNum(c.blinkOpen) && isNum(c.blinkClosed)) {
       msg += ', ' + T('blink') + ' ' + (c.blinkClosed - c.blinkOpen).toFixed(3);
     }
+    if (poseDrift > 0) msg += ', ' + T('brow drift') + ' ' + poseDrift.toFixed(3);
     msg += '.';
     if (weak.length) {
       msg += ' ' + T('These barely moved:') + ' ' + weak.join(', ') + '. ' +
@@ -2011,6 +2027,11 @@
     }
     a.brow.push(rawBrow);
     a.smile.push(rawSmile);
+    var h = rig && rig.head;
+    if (h) {
+      a.y.push(num(h.y));
+      a.x.push(num(h.x));
+    }
     var eye = rig && rig.eye;
     if (eye && isNum(eye.l) && isNum(eye.r)) {
       a.eyeL.push(eye.l);
@@ -2027,9 +2048,104 @@
       c.browDown < c.browRest - 0.002 && c.browUp > c.browRest + 0.002);
   }
 
-  function calibratedBrow(raw) {
+  function browPoint(p) {
+    return p && isNum(p.brow) && isNum(p.y) && isNum(p.x) ? p : null;
+  }
+
+  // ~7° of Kalidokit's head.y / head.x. Below that the "turn" was not a turn
+  // and a slope fitted through it is noise pretending to be drift.
+  var BROW_POSE_MIN = 0.12;
+
+  function usableBrowAt(at) {
+    var rest = browPoint(at && at.rest);
+    if (!at) return false;
+    var keys = ['leftOpen', 'rightOpen', 'gazeUp', 'gazeDown'];
+    var oy = rest ? rest.y : 0;
+    var ox = rest ? rest.x : 0;
+    for (var i = 0; i < keys.length; i++) {
+      var p = browPoint(at[keys[i]]);
+      if (!p) continue;
+      if (Math.abs(p.y - oy) >= BROW_POSE_MIN || Math.abs(p.x - ox) >= BROW_POSE_MIN) return true;
+    }
+    return false;
+  }
+
+  function browPoseDrift(c) {
+    if (!c || !usableBrowAt(c.browAt) || !isNum(c.browRest)) return 0;
+    var keys = ['leftOpen', 'rightOpen', 'gazeUp', 'gazeDown'];
+    var d = 0;
+    for (var i = 0; i < keys.length; i++) {
+      var p = browPoint(c.browAt[keys[i]]);
+      if (p) d = Math.max(d, Math.abs(p.brow - c.browRest));
+    }
+    return d;
+  }
+
+  function sidePoint(p, axis) {
+    p = browPoint(p);
+    return p ? { v: p[axis], brow: p.brow } : null;
+  }
+
+  // Piecewise linear along one head axis, from the rest pose out to the
+  // recorded side. Left and right often drift the same way (foreshortening),
+  // so a signed slope through both would cancel; picking lo/hi by the actual
+  // value is what lets each side speak for itself.
+  function axisShift(v, originV, originB, a, b) {
+    var lo = null, hi = null;
+    function consider(p) {
+      if (!p) return;
+      if (p.v <= originV - BROW_POSE_MIN) {
+        if (!lo || p.v < lo.v) lo = p;
+      } else if (p.v >= originV + BROW_POSE_MIN) {
+        if (!hi || p.v > hi.v) hi = p;
+      }
+    }
+    consider(a);
+    consider(b);
+    var t, span;
+    if (v >= originV) {
+      if (!hi) return 0;
+      span = hi.v - originV;
+      if (span < BROW_POSE_MIN) return 0;
+      t = (v - originV) / span;
+      if (t > 1.25) t = 1.25;
+      return (hi.brow - originB) * t;
+    }
+    if (!lo) return 0;
+    span = originV - lo.v;
+    if (span < BROW_POSE_MIN) return 0;
+    t = (originV - v) / span;
+    if (t > 1.25) t = 1.25;
+    return (lo.brow - originB) * t;
+  }
+
+  function poseBrowRest(c, rig) {
+    if (!c || !isNum(c.browRest)) return 0;
+    var rest = c.browRest;
+    if (!usableBrowAt(c.browAt)) return rest;
+    var h = rig && rig.head;
+    if (!h) return rest;
+    var o = browPoint(c.browAt.rest) || { y: 0, x: 0, brow: rest };
+    var shifted = rest
+      + axisShift(num(h.y), o.y, o.brow,
+        sidePoint(c.browAt.leftOpen, 'y'), sidePoint(c.browAt.rightOpen, 'y'))
+      + axisShift(num(h.x), o.x, o.brow,
+        sidePoint(c.browAt.gazeDown, 'x'), sidePoint(c.browAt.gazeUp, 'x'));
+    // Bounded by the recordings already (axisShift will not go past 1.25 of
+    // a recorded pose). Do not also cap against the furrow/raise span: a yaw
+    // that eats most of a small raise is the bug, and that cap would leave it.
+    return isNum(shifted) ? shifted : rest;
+  }
+
+  function poseAdjustedBrow(raw, rig) {
     var c = cfg.cal;
-    var dev = raw - c.browRest;
+    if (!c || !usableBrowAt(c.browAt)) return raw;
+    return raw - (poseBrowRest(c, rig) - c.browRest);
+  }
+
+  function calibratedBrow(raw, rig) {
+    var c = cfg.cal;
+    var dev = raw - poseBrowRest(c, rig);
     var span = dev < 0 ? Math.abs(c.browDown - c.browRest) : Math.abs(c.browUp - c.browRest);
     return dev / Math.max(span, 0.004);
   }
@@ -2060,16 +2176,20 @@
     if (mode === 'calibrated' && !cfg.cal) mode = 'auto';
 
     var brow, smile;
+    // Pose rest is subtracted before either mapping, so a yaw that the
+    // tracker reports as a brow does not spend the span or trip angry/sorrow.
+    // Raw mode is the unmapped scalar on purpose.
+    var adjBrow = poseAdjustedBrow(rawBrow, rig);
     if (mode === 'calibrated' && browCalUsable(cfg.cal)) {
-      brow = clamp(calibratedBrow(rawBrow) * cfg.browGain, -1, 1);
+      brow = clamp(calibratedBrow(rawBrow, rig) * cfg.browGain, -1, 1);
       smile = clamp(calibratedSmile(rawSmile) * cfg.browGain, 0, 1);
     } else if (mode === 'calibrated') {
       // Old saves used Kalidokit's 0..1 brow, so furrow sat on rest. Use auto
       // for the brow until they recapture; smile still uses the recording.
-      brow = clamp(normalize(browTrack, rawBrow, 0.01) * cfg.browGain, -1, 1);
+      brow = clamp(normalize(browTrack, adjBrow, 0.01) * cfg.browGain, -1, 1);
       smile = clamp(calibratedSmile(rawSmile) * cfg.browGain, 0, 1);
     } else if (mode === 'auto') {
-      brow = clamp(normalize(browTrack, rawBrow, 0.01) * cfg.browGain, -1, 1);
+      brow = clamp(normalize(browTrack, adjBrow, 0.01) * cfg.browGain, -1, 1);
       // a smile only ever opens the mouth wider than rest, so the closing half
       // of the range is not a smile
       smile = clamp(normalize(smileTrack, rawSmile, 0.02) * cfg.browGain, 0, 1);
@@ -2129,7 +2249,12 @@
       }
     }
 
-    lastFace = { brow: brow, smile: smile, out: out, raw: { brow: rawBrow, smile: rawSmile } };
+    lastFace = {
+      brow: brow, smile: smile, out: out,
+      raw: { brow: rawBrow, smile: rawSmile },
+      poseRest: (mode !== 'raw' && cfg.cal && usableBrowAt(cfg.cal.browAt))
+        ? poseBrowRest(cfg.cal, rig) : null
+    };
     paintReadout();
 
     // Write all four, including the ones we resolved to 0. The app writes Joy
@@ -4120,6 +4245,7 @@
     'raise': 'levantar',
     'smile': 'sorriso',
     'blink': 'piscada',
+    'brow drift': 'deriva da sobrancelha',
     'turn': 'giro',
     'tilt': 'inclinacao',
     'neutral': 'neutro',
@@ -4138,21 +4264,22 @@
     'Still facing the camera, and hold them shut':
       'Ainda de frente para a câmera, e segure fechados',
     'Turn ~40° left, eyes open': 'Vire uns 40° à esquerda, olhos abertos',
-    'Head turned, looking past the camera':
-      'Cabeça virada, olhando além da câmera',
+    'Head turned, looking past the camera, brows relaxed':
+      'Cabeça virada, olhando além da câmera, sobrancelhas relaxadas',
     'Hold that left turn, close your eyes':
       'Mantenha a virada à esquerda, feche os olhos',
     'Same angle, eyes shut': 'O mesmo ângulo, olhos fechados',
     'Turn ~40° right, eyes open': 'Vire uns 40° à direita, olhos abertos',
-    'Head turned the other way, eyes open':
-      'Cabeça virada para o outro lado, olhos abertos',
+    'Head turned the other way, brows relaxed':
+      'Cabeça virada para o outro lado, sobrancelhas relaxadas',
     'Hold that right turn, close your eyes':
       'Mantenha a virada à direita, feche os olhos',
     'Look up, eyes open': 'Olhe para cima, olhos abertos',
-    'Tilt your head back, do not squint':
-      'Incline a cabeça para trás, sem apertar os olhos',
+    'Tilt your head back, brows relaxed, do not squint':
+      'Incline a cabeça para trás, sobrancelhas relaxadas, sem apertar os olhos',
     'Look down, eyes open': 'Olhe para baixo, olhos abertos',
-    'Chin down, eyes still open': 'Queixo para baixo, olhos ainda abertos',
+    'Chin down, eyes open, brows relaxed':
+      'Queixo para baixo, olhos abertos, sobrancelhas relaxadas',
     'get ready': 'prepare-se',
     'hold': 'segure',
     'Calibration cancelled.': 'Calibração cancelada.',
@@ -4698,7 +4825,12 @@
       }
       if (lastFace) {
         console.log('last solved face - brow ' + lastFace.brow.toFixed(3) +
-          ', smile ' + lastFace.smile.toFixed(3) + ' ->', lastFace.out);
+          ', smile ' + lastFace.smile.toFixed(3) +
+          (lastFace.poseRest != null
+            ? ' (pose rest ' + lastFace.poseRest.toFixed(3) +
+              ', raw ' + lastFace.raw.brow.toFixed(3) + ')'
+            : '') +
+          ' ->', lastFace.out);
       } else if (cfg.emotions) {
         console.warn('emotion detection is on but no face has been solved yet - ' +
           'is face tracking running?');

@@ -165,6 +165,15 @@ half-closed lid. Open samples become the floor (looking down must not fire
 `blink`); closed samples become the peak (a blink while turned must still
 reach it).
 
+The same open-eye turns also record a **pose-dependent brow rest**. Kalidokit's
+brow scalar is a 2D ratio, so yawing or pitching the head changes it even when
+the brows have not moved, and that used to fire angry/sorrow on a neutral face.
+The facing-camera rest is still the zero for a straight-on expression; at a
+turn the zero follows what those relaxed-face samples read, so looking aside
+does not spend the furrow/raise span. Older calibrations keep working without
+this until the wizard is run again — the steps are the same ones already there
+for blink, not a longer pass.
+
 The reading is deliberately not a maximum. Extremes were taken as an absolute
 min/max, so one glitched frame — a dropped track, a blink, a head jerk — defined
 the whole span: a single `-9.0` outlier during a `0.5` head turn produced a gain
