@@ -97,6 +97,10 @@
     // recorded by the mouth wizard: one feature vector per vowel plus a rest
     // pose. null until it has been run, and the vowels fall back to a formula.
     mouth: null,
+    // Read the brow off the mesh in three dimensions instead of taking
+    // Kalidokit's flattened ratio. Off = upstream's number, which moves when
+    // the head turns whether or not the brows do.
+    brow3d: true,
     // multiplier applied after normalisation
     browGain: 1,
     // how far the brow has to travel before it reads as that emotion
@@ -2007,6 +2011,7 @@
     }
 
     if (usableBrowAt(calRun.browAt)) c.browAt = calRun.browAt;
+    c.brow3d = !!cfg.brow3d;
 
     cfg.cal = c;
     cfg.signal = 'calibrated';
@@ -2110,9 +2115,15 @@
   // for the poses separately. Stock Kalidokit remaps brow to 0..1 and clamps
   // the floor, so a furrow and rest both land on 0; we feed the unclamped
   // scalar instead, and this maps it around the recorded rest.
+  // A recording belongs to the scalar it was taken against. The two do not
+  // share a rest - the flat ratio and the 3D one disagree by however much this
+  // face wraps around - so a recording read against the other one puts the zero
+  // in the wrong place permanently, which is the fault it was meant to fix.
+  // Older saves carry no stamp, so they belong to the flat one.
   function browCalUsable(c) {
     return !!(c && isNum(c.browRest) && isNum(c.browDown) && isNum(c.browUp) &&
-      c.browDown < c.browRest - 0.002 && c.browUp > c.browRest + 0.002);
+      c.browDown < c.browRest - 0.002 && c.browUp > c.browRest + 0.002 &&
+      !c.brow3d === !cfg.brow3d);
   }
 
   function browPoint(p) {
@@ -2232,6 +2243,78 @@
   function calibratedSmile(raw) {
     var c = cfg.cal;
     return calNorm(raw - c.smileRest, c.smileMax - c.smileRest);
+  }
+
+  // ------------------------------------------------------ the brow scalar
+  //
+  // Kalidokit's brow is the mean of three brow-to-lid distances over one span
+  // across the eye, per side:
+  //
+  //   (d(63,229) + d(105,230) + d(66,231)) / 3 / d(35,244) / 1.15 - 1
+  //
+  // and every one of those distances is taken in the *image*, with z thrown
+  // away. The three on top run down the face and the one underneath runs
+  // across it, so they do not foreshorten together: turn the head and the span
+  // underneath shortens while the three on top barely move, dip the chin and
+  // the opposite happens. The ratio moves without a muscle having done
+  // anything.
+  //
+  // That is the whole of "looking aside reads as angry", and it is not a
+  // threshold that wants tuning or a rest that wants relearning - it is a
+  // length divided by another length that is being measured at a different
+  // angle. Correcting it afterwards, however well, is correcting for a
+  // projection that did not have to happen.
+  //
+  // The mesh reports z too, on roughly the same scale as x, and a distance
+  // taken in three dimensions does not care which way the head is pointing.
+  // Same landmarks, same formula, same constant - just not flattened onto the
+  // camera plane first. The pose ladder below stays: iris noise, lighting and
+  // whatever z gets wrong are still drift, and it is now the only thing left
+  // for it to learn.
+  var BROW_SIDES = [
+    { ref: [35, 244], pairs: [[63, 229], [105, 230], [66, 231]] },
+    { ref: [265, 464], pairs: [[293, 449], [334, 450], [296, 451]] }
+  ];
+  // Kalidokit's own neutral ratio, kept so the scalar lands in the range every
+  // threshold, gain and recording in this file already expects.
+  var BROW_NEUTRAL = 1.15;
+
+  // what the two ways of reading it last said, for comparing them live
+  var browRead = { mesh: null, flat: null };
+
+  function lmDist(a, b) {
+    if (!a || !b) return 0;
+    var dx = num(a.x) - num(b.x), dy = num(a.y) - num(b.y), dz = num(a.z) - num(b.z);
+    return Math.sqrt(dx * dx + dy * dy + dz * dz);
+  }
+
+  function browSideRatio(lm, side) {
+    var ref = lmDist(lm[side.ref[0]], lm[side.ref[1]]);
+    if (!(ref > 1e-6)) return null;
+    var sum = 0;
+    for (var i = 0; i < side.pairs.length; i++) {
+      var d = lmDist(lm[side.pairs[i][0]], lm[side.pairs[i][1]]);
+      if (!(d > 0)) return null;
+      sum += d;
+    }
+    return (sum / side.pairs.length) / ref / BROW_NEUTRAL - 1;
+  }
+
+  // Called from inside the bundle's own face handler, not from our hook, so
+  // nothing here may throw: a face result is not something the app checks.
+  function browScalar(lm, fallback) {
+    browRead.flat = isNum(fallback) ? fallback : null;
+    browRead.mesh = null;
+    if (!cfg.brow3d || !lm || lm.length < 468) return fallback;
+    try {
+      var a = browSideRatio(lm, BROW_SIDES[0]);
+      var b = browSideRatio(lm, BROW_SIDES[1]);
+      if (a === null || b === null) return fallback;
+      var v = (a + b) / 2;
+      if (!isNum(v)) return fallback;
+      browRead.mesh = v;
+      return v;
+    } catch (e) { return fallback; }
   }
 
   // ------------------------------------------------ learned pose brow rest
@@ -2433,7 +2516,14 @@
   // first neighbour out. Reasoning about this from the code is guesswork -
   // watch the numbers while turning the head instead.
   function browRestInfo() {
-    var out = { conf: r2(poseConf) };
+    var out = {
+      conf: r2(poseConf),
+      brow3d: cfg.brow3d,
+      // what each way of reading the mesh last said. Turn the head with a
+      // relaxed face: mesh should sit still, flat is the one that walks.
+      mesh: browRead.mesh == null ? null : +browRead.mesh.toFixed(4),
+      flat: browRead.flat == null ? null : +browRead.flat.toFixed(4)
+    };
     for (var i = 0; i < POSE_AXES.length; i++) {
       var k = POSE_AXES[i], a = browPose[k], cells = [];
       for (var j = 0; j < POSE_CELLS; j++) {
@@ -4802,6 +4892,7 @@
     // --- emotions ---
     'Emotion Detection': 'Detecção de emoções',
     'Detect emotions': 'Detectar emoções',
+    'Angle-free brow': 'Sobrancelha sem ângulo',
     'Signal range': 'Faixa do sinal',
     'calibrated': 'calibrado',
     'auto': 'auto',
@@ -5040,7 +5131,8 @@
     'note.reloadRender': 'A escala de render e aplicada ao recarregar.',
     'note.reloadPerf': 'As opções do modelo Mediapipe são aplicadas ao recarregar. Os limites de taxa valem na hora.',
     'note.emotions': 'O app so rastreia piscadas, as cinco vogais e um sorriso. Bravo, triste e fun nunca são escritos - isto os deriva da sobrancelha e da boca para que essas células possam disparar. Faça cada careta e observe a leitura para ajustar os limiares. ' +
-      'A espera da emoção é quanto tempo a sobrancelha tem que ficar passada do limiar antes de virar expressão: um pico enquanto a cabeça gira dura um ou dois frames, uma careta é segurada. Só a subida espera.',
+      'A espera da emoção é quanto tempo a sobrancelha tem que ficar passada do limiar antes de virar expressão: um pico enquanto a cabeça gira dura um ou dois frames, uma careta é segurada. Só a subida espera. ' +
+      'Sobrancelha sem ângulo lê a sobrancelha da malha em três dimensões em vez da razão achatada do upstream, cujo numerador desce pelo rosto e cujo denominador atravessa ele - por isso aquela mexe quando a cabeça gira mesmo com as sobrancelhas paradas. Recalibre depois de trocar: a gravação pertence ao sinal que estava ligado.',
     'note.motion': 'Os ganhos de pescoço e torso são fixos no app, entao um movimento real pequeno vira um movimento grande no avatar. Baixe o ganho para mexer menos, aumente o amortecimento para mexer mais devagar. Isolar inclinação da cabeça tira do torso a parte que o rastreador copiou da cabeça - orelha no ombro deixa de deitar o peito.',
     'note.armIK': 'Mira o braço na mão que a câmera viu, em vez de repetir os ângulos do Kalidokit - é o que faz a mão chegar de fato na cabeça. Precisa de rastreio corporal (holistic). Alcance corrige a proporção de um modelo de braço curto; ganho de profundidade controla o quanto o eixo em direção à câmera conta, que é o número mais ruidoso do Mediapipe. O ombro não é animado por nada no app, então acompanhamento do ombro solta ele um pouco e o braço erguido para de cortar o pescoço.',
     'note.mouth': 'O app reporta cinco pesos de vogal que sobem todos juntos com a mandíbula, então um deles ganha diga o que disser e a boca acaba com um formato aberto só. Isto grava o que o teu rosto marca enquanto você fala cada vogal em voz alta, e escolhe a gravação mais próxima do frame atual - silêncio incluído, que é o que libera a célula da boca para o sorriso. Segurar vogal é o quanto outra vogal precisa estar mais perto para a boca trocar de célula.',
@@ -5105,7 +5197,11 @@
       'mouth so those cells can fire. Pull each face and watch the readout to set the ' +
       'thresholds. Emotion hold is how long the brow has to stay past one before it ' +
       'is written: a drift spike while the head turns lasts a frame or two, a face ' +
-      'making an expression holds it. Only the rise waits.',
+      'making an expression holds it. Only the rise waits. Angle-free brow reads the ' +
+      'brow off the mesh in three dimensions instead of the flattened ratio upstream uses, ' +
+      'whose numerator runs down the face and whose denominator runs across it - so ' +
+      'that one moves when the head turns whether or not the brows do. Recalibrate ' +
+      'after switching it: the recording belongs to whichever scalar was on.',
     'note.motion': 'The neck and torso gains are hardcoded upstream, so a small real ' +
       'movement lands as a large avatar movement. Lower the gain to move less, raise ' +
       'the damping to move slower. Head-tilt isolation strips the part of a torso ' +
@@ -5172,7 +5268,7 @@
 
   var EXPECTED_HOOKS = {
     setupRenderer: 1, aa: 1, smaa: 1, fingers: 1, onModel: 1, tick: 1,
-    face: 1, headGain: 1, bodyGain: 1, leanGain: 1, spineLean: 1, armGain: 1,
+    face: 1, brow: 1, headGain: 1, bodyGain: 1, leanGain: 1, spineLean: 1, armGain: 1,
     smooth: 7, frame: 1, nextTrack: 1,
     mpOptions: 2, shadows: 1, shadowSize: 4, overlay: 3, overlayOpen: 1, gaze: 1,
     pose: 1, hands: 1, arm: 1, guide: 1, bg: 1, bgDrop: 1
@@ -5729,6 +5825,9 @@
   var NEEDS_RELOAD = {
     pixelRatio: 1, perf: 1, poseLite: 1
   };
+  // A different scalar has a different rest, so everything that had learned
+  // one is now holding the wrong number.
+  var RESETS_CAL = { brow3d: 1 };
   // Snap-mode UV only writes on a cell change, so these have to drop the latch
   // or a new threshold would sit there until the expression itself changed.
   // Nothing else needs that - and doing it on every slider tick is what made
@@ -5765,6 +5864,7 @@
     }
     applyCanvasFilter();
     syncShaderUniforms();
+    if (RESETS_CAL[key]) resetCalibration();
     if (REBUILDS[key]) rebuildPanels();
     if (LATCH_KEYS[key]) refreshModels();
   }
@@ -6012,6 +6112,7 @@
     emNote.style.cssText = 'width:100%;opacity:.5;font-size:12px;margin:0 0 4px;text-align:left';
     em.appendChild(emNote);
     addToggle(em, 'emotions', T('Detect emotions'), STG);
+    addToggle(em, 'brow3d', T('Angle-free brow'), STG);
     addSelect(em, 'signal', T('Signal range'), ['calibrated', 'auto', 'raw'],
       [T('calibrated'), T('auto'), T('raw')], STG);
     addToggle(em, 'exclusive', T('One emotion at a time'), STG);
@@ -6830,6 +6931,7 @@
       return ['Thumb'];
     },
     onModel: registerModel,
+    brow: browScalar,
     tick: function (vrm) {
       if (!vrm) return;
       applyHeld(vrm);

@@ -141,6 +141,53 @@ its smile — drives **fun** and/or **joy**. Each has its own threshold, and
 between two cells — these are whole-face swaps, so blending two lands on a patch
 of atlas that is not an expression at all.
 
+#### Angle-free brow
+
+Looking to the side used to read as an expression, and the reason was in the
+number itself rather than anywhere downstream of it. Upstream's brow, per side,
+is
+
+    (d(63,229) + d(105,230) + d(66,231)) / 3  /  d(35,244)  / 1.15 - 1
+
+and every one of those distances is taken **in the image**, with the mesh's own
+z thrown away. The three on top run down the face; the one underneath runs
+across it. They do not foreshorten together — so turn your head and the span
+underneath shortens while the three on top barely move, dip your chin and the
+opposite happens.
+
+Measured on a rigid face turned in front of the lens, with nothing moving but
+the head:
+
+| Head | Upstream's brow moves by | In three dimensions |
+| --- | --- | --- |
+| yaw 17° | +0.037 | 0 |
+| yaw 29° | +0.118 | 0 |
+| yaw 40° | +0.295 | 0 |
+| pitch 29° (chin down) | −0.062 | 0 |
+| pitch 23° (chin up) | −0.064 | 0 |
+| yaw 23° + pitch 20° | +0.026 | 0 |
+
+A furrow is worth about 0.05 on that same face. Forty degrees of yaw is **six
+times the whole expression**, spent on having turned. Yaw drives it positive, so
+it reads as a raise; pitch drives it negative, so it reads as a furrow — which
+is why a glance to the side with the chin a little down was the reliable way to
+look angry at nobody.
+
+**Angle-free brow** takes the same landmarks and the same constant in three
+dimensions, where a distance does not care which way the head is pointing. The
+mesh reports z on roughly the same scale as x, so this costs nothing but the
+square root it was already taking.
+
+`PSX.browRest()` reports `mesh` and `flat` side by side — turn your head with a
+relaxed face and watch which one holds still. It also reports what the pose
+ladder below has learned, which is now only the residue: iris noise, lighting,
+and whatever the mesh gets wrong about z.
+
+A recorded calibration belongs to whichever scalar was on when it was taken —
+the two do not share a rest — so it is stamped, and a mismatch falls back to
+`auto` for the brow rather than reading the recording against the wrong number.
+**Recalibrate after switching this.**
+
 **Signal range** is what makes this usable at all. Kalidokit's brow scalar only
 swings a few hundredths for most faces, so a raw threshold of `0.35` is
 unreachable and the emotion simply never fires. Three modes:

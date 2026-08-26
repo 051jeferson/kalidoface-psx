@@ -95,7 +95,7 @@
     },
     {
       "find": "n.head.z=i.head.z,an.user.face.set({eye:i.eye",
-      "replace": "n.head.z=i.head.z,n.brow=i.brow,n.eye=i.eye,an.user.face.set({eye:i.eye"
+      "replace": "n.head.z=i.head.z,i.brow=window.PSX.brow(l,i.brow),n.brow=i.brow,n.eye=i.eye,an.user.face.set({eye:i.eye"
     },
     {
       "find": "e.head.x>=-.4&&e.head.x<=.4&&e.head.y>=-.6&&e.head.y<=.6&&(t.eye=hs.stabilizeBlink(e.eye,e.head.y,{enableWink:E(de).face.enableWink,maxRot:.5}))",
