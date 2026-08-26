@@ -487,6 +487,25 @@ every animation frame, with **two lights casting 2048×2048 shadow maps**. On a
 PSX avatar all three are overkill — and the era's own cadence was 20–30fps, so
 capping the rate is authentic rather than a compromise.
 
+**Auto throttle** is on by default and is the one to leave alone. It watches how
+fast the machine is actually handing out animation frames, learns the best it has
+seen rather than assuming a display rate, and sheds **tracking rate only** while
+frames are being dropped — then takes it back as the headroom returns. Tracking is
+shed because that is where the CPU goes and because it degrades gracefully: a face
+solved twenty times a second still looks alive, where a render at twenty does not,
+and dropping the render resolution mid-session would reframe the shot being
+captured.
+
+It also knows when to stop. If a cut does not buy a frame back, the load is not
+this app's — an export, a game, a capture encoding — and it holds where it is
+instead of starving the avatar for nothing. `PSX.perf()` in the console reports
+what it is doing: `autoFps` is the ceiling in force, `trackHz` what the tracker is
+managing, `frameMs` the best frame interval it has learned, `throttling` whether
+it is currently holding anything back.
+
+The fixed caps below still apply on top of it, for anyone who would rather pick a
+number than have one picked:
+
 | Knob | What it costs upstream |
 | --- | --- |
 | **Tracking rate** | One Holistic/FaceMesh inference per animation frame. This is where nearly all the CPU goes; 24–30fps is plenty for face tracking |
@@ -510,7 +529,16 @@ draws a quarter of the pixels, which is the single biggest GPU win and the
 reason PSX mode looks right in the first place.
 
 The Mediapipe options are read once at startup, so those apply on reload; the
-rate caps take effect immediately.
+rate caps and the auto throttle take effect immediately.
+
+**Capturing this alongside OBS.** Everything above is paced off
+`requestAnimationFrame`, and a browser stops handing those out when it decides
+nobody is looking — a minimised window, or one Chrome has marked occluded because
+OBS is full-screen over it. The avatar then freezes in the capture while the page
+looks fine the moment you click back to it. Capture it as a **Browser source**,
+which renders offscreen and is never occluded, or launch the browser with
+`--disable-backgrounding-occluded-windows --disable-renderer-backgrounding` and
+keep the window unminimised.
 
 ## Keeping the hooks alive
 

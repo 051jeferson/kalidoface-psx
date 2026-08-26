@@ -219,6 +219,12 @@
     // --- performance --------------------------------------------------
     // Enable the caps below. Off = the app's own behaviour.
     perf: false,
+    // Shed tracking rate on its own while the machine cannot keep up, and take
+    // it back when it can. Independent of the fixed caps, and on by default:
+    // it costs nothing while there is headroom and it is the difference
+    // between a stutter and a slightly slower face while something else on the
+    // machine is busy.
+    perfAuto: true,
     // Mediapipe inferences per second. 0 = one per animation frame (stock),
     // which is where nearly all the CPU goes.
     trackFps: 0,
@@ -1092,9 +1098,19 @@
     if (node.__psxText.nodeValue !== text) node.__psxText.nodeValue = text;
   }
 
+  // Rebuilt on every solved face, which is a string, six `toFixed` calls and a
+  // join per frame - for a line nobody can read faster than this anyway. The
+  // numbers are for watching a calibration move, and ten a second is already
+  // more than the eye takes off them.
+  var READOUT_EVERY = 100;
+  var readoutAt = 0;
+
   function paintReadout() {
     if (!readoutEl || !readoutEl.isConnected) return;
     if (!lastFace && lastBlink == null) return;
+    var rt = now();
+    if (rt - readoutAt < READOUT_EVERY) return;
+    readoutAt = rt;
     var parts = [];
     if (lastFace) {
       var top = null;
@@ -2291,10 +2307,15 @@
   // and an expression is only on some of them, so the middle is the drift.
   var POSE_MAX = 0.5;                 // the scalar swings in hundredths; this
                                       // is only here so nothing can run away
+  // Made once and written over: this runs on every solved face for the life of
+  // the session, the same reason `armDbg` holds raw numbers.
+  var poseAt = { y: 0, x: 0, z: 0 };
+
   function learnBrowPose(rig, target, span) {
     var h = rig && rig.head;
     if (!h || faceOcc || !isNum(target)) return;
-    var v = { y: num(h.y), x: num(h.x), z: num(h.z) };
+    var v = poseAt;
+    v.y = num(h.y); v.x = num(h.x); v.z = num(h.z);
     for (var i = 0; i < POSE_AXES.length; i++) {
       var k = POSE_AXES[i], alone = true;
       for (var j = 0; j < POSE_AXES.length; j++) {
@@ -3203,7 +3224,49 @@
     return vis(p) && imgDist(p, nose) < lim2;
   }
 
+  // The image landmarks are written once per inference; these three answers
+  // depend on nothing else, and the retarget asks for two of them once per arm
+  // per *rendered* frame on top of that. At 144Hz against a 20Hz inference
+  // that is the same square root taken seven times for one reading.
+  //
+  // `poseSeq` cannot key this. That one is bumped after the world landmarks
+  // are accepted, and the image set is written even on a frame whose world set
+  // is rejected - and `hands()` writes it before `pose()` runs at all.
+  var imgSeq = 0;
+  var imgMemo = {
+    seq: -1, lim2: 0, lim2Done: false,
+    hit: { Right: false, Left: false }, hitDone: { Right: false, Left: false },
+    near: { Right: null, Left: null }, nearDone: { Right: false, Left: false }
+  };
+
+  function imgFrame() {
+    if (imgMemo.seq === imgSeq) return imgMemo;
+    imgMemo.seq = imgSeq;
+    imgMemo.lim2Done = false;
+    imgMemo.hitDone.Right = false; imgMemo.hitDone.Left = false;
+    imgMemo.nearDone.Right = false; imgMemo.nearDone.Left = false;
+    return imgMemo;
+  }
+
   function faceLim2() {
+    var m = imgFrame();
+    if (!m.lim2Done) { m.lim2Done = true; m.lim2 = calcFaceLim2(); }
+    return m.lim2;
+  }
+
+  function sideHitsFace(side) {
+    var m = imgFrame();
+    if (!m.hitDone[side]) { m.hitDone[side] = true; m.hit[side] = calcSideHitsFace(side); }
+    return m.hit[side];
+  }
+
+  function imgHeadNear(side) {
+    var m = imgFrame();
+    if (!m.nearDone[side]) { m.nearDone[side] = true; m.near[side] = calcImgHeadNear(side); }
+    return m.near[side];
+  }
+
+  function calcFaceLim2() {
     var img = poseImg;
     var nose = img && img[LM_NOSE];
     if (!vis(nose)) return 0;
@@ -3212,7 +3275,7 @@
     return rad * rad;
   }
 
-  function sideHitsFace(side) {
+  function calcSideHitsFace(side) {
     var img = poseImg;
     var nose = img && img[LM_NOSE];
     var lim2 = faceLim2();
@@ -3231,7 +3294,7 @@
 
   // How near this hand is to the head in the video, in ear-spans. Null when
   // there is no image pose to read. A covering palm is well under 1.
-  function imgHeadNear(side) {
+  function calcImgHeadNear(side) {
     var img = poseImg;
     var nose = img && img[LM_NOSE];
     if (!vis(nose)) return null;
@@ -3430,6 +3493,7 @@
   // so there is no `poseImg` to read.
   function hands(h, image) {
     poseImg = (image && image.length > LM_NOSE) ? image : poseImg;
+    imgSeq++;
     return placeHands(h) || h;
   }
 
@@ -3438,6 +3502,7 @@
     // Already corrected when the bundle carries the hook; placing again is a
     // no-op, and it is what keeps this working on a bundle that does not.
     poseHand = placeHands(hands);
+    imgSeq++;
     noteFaceOcc();
     if (!world || world.length <= ARM_LM.Left.hip) { poseLm = null; return; }
     poseLm = world;
@@ -3564,6 +3629,8 @@
     if (ru && lu && hips) {
       c = {
         ok: true, ru: ru, lu: lu, hips: hips, at: {}, off: {},
+        // model-space measurements, re-read a few times a second - see armSeg
+        seg: {}, headB: undefined, headAt: 0, headH: 0,
         // per-side dead-reckoning state: the raw target of the last inference,
         // when it was taken, and the velocity between the last two
         raw: {}, rawAt: {}, rawSeq: {}, vel: {}, elb: {}, aim: {},
@@ -3879,6 +3946,49 @@
     return d;
   }
 
+  // A bone-to-bone distance is the length of a fixed local offset, so it is
+  // the same number on every frame the model is on screen - but it was being
+  // measured twice per rendered frame, and every `worldPos` walks that bone's
+  // whole parent chain re-multiplying matrices to get it. Re-read a few times a
+  // second instead: a model that is swapped or rescaled still corrects itself
+  // inside a blink, and the frames in between stop paying for an answer that
+  // did not change.
+  //
+  // Only measurements go through this. Anything that moves with the pose -
+  // `mb`, the head bone's own position - is still read live every frame.
+  var MEASURE_EVERY = 250;
+
+  function armSeg(c, side, upper, lower, hand) {
+    var s = c.seg[side];
+    var t = now();
+    if (s && t - s.at < MEASURE_EVERY) return s.ok ? s : null;
+    if (!s) s = c.seg[side] = { at: 0, a: 0, b: 0, ok: false };
+    var El = worldPos(lower);
+    s.a = dist3(worldPos(upper), El);
+    s.b = dist3(El, worldPos(hand));
+    s.at = t;
+    s.ok = s.a >= 1e-5 && s.b >= 1e-5;
+    return s.ok ? s : null;
+  }
+
+  // Same again for the model's head height. The neck moves it a little; this is
+  // only ever used as "head-sized", which is all the two scales it relates need
+  // them to be.
+  function headHeight(c, headB) {
+    var t = now();
+    if (c.headAt && t - c.headAt < MEASURE_EVERY) return c.headH;
+    c.headAt = t;
+    c.headH = vlen(vsub(worldPos(headB), vmid(worldPos(c.ru), worldPos(c.lu))));
+    return c.headH;
+  }
+
+  // `getBoneNode` is a map lookup with a string fallback behind it, and the
+  // head bone is asked for on every frame that has an anchor to place.
+  function headBone(c, vrm) {
+    if (c.headB === undefined) c.headB = boneNode(vrm, 'head') || null;
+    return c.headB;
+  }
+
   function retarget(vrm, rig, side, idx, mirrored, instant, upper, lower, hand) {
     var c = armCache(vrm);
     var dbg = dbgOpen(side);
@@ -3924,10 +4034,9 @@
     // not depend on how either bone is currently turned. The model's arm can be
     // measured where it stands - no need to straighten it out first, which
     // would mean writing the bones before knowing whether the solve works.
-    var El = worldPos(lower);
-    var a = dist3(worldPos(upper), El);
-    var b = dist3(El, worldPos(hand));
-    if (a < 1e-5 || b < 1e-5) return coast(c, side, upper, lower, hand);
+    var seg = armSeg(c, side, upper, lower, hand);
+    if (!seg) return coast(c, side, upper, lower, hand);
+    var a = seg.a, b = seg.b;
 
     var sx = mirrored ? -1 : 1;
     var depth = { x: 1, y: 1, z: cfg.armDepth };
@@ -3964,7 +4073,7 @@
     // arm that is not doing anything with the head.
     var anchorW = 0;
     var near = null;
-    var headB = cfg.headAnchor > 0 ? boneNode(vrm, 'head') : null;
+    var headB = cfg.headAnchor > 0 ? headBone(c, vrm) : null;
     if (headB && vis(lm[LM_NOSE])) {
       // The nose is on the *front* of the face and the hands go on the back and
       // sides of the skull, so measuring from it calls a hand resting on the
@@ -3981,7 +4090,7 @@
       var nose = headRef(lm);
       var uH = vlen(vsub(nose, vmid(lm[ARM_LM.Right.shoulder], lm[ARM_LM.Left.shoulder])));
       var mHead = worldPos(headB);
-      var mH = vlen(vsub(mHead, vmid(worldPos(c.ru), worldPos(c.lu))));
+      var mH = headHeight(c, headB);
       var toFace = vsub(wr, nose);
       if (uH > 1e-4 && mH > 1e-4) {
         // How near the hand is to the head, measured across the image and not
@@ -4780,6 +4889,7 @@
     // --- performance ---
     'Performance': 'Desempenho',
     'Performance caps': 'Limites de desempenho',
+    'Auto throttle': 'Ajuste automático',
     'Tracking rate': 'Taxa de rastreio',
     'Render rate': 'Taxa de render',
     'Iris / lip refinement': 'Refino de iris / labios',
@@ -4827,7 +4937,9 @@
     'note.mouth': 'O app reporta cinco pesos de vogal que sobem todos juntos com a mandíbula, então um deles ganha diga o que disser e a boca acaba com um formato aberto só. Isto grava o que o teu rosto marca enquanto você fala cada vogal em voz alta, e escolhe a gravação mais próxima do frame atual - silêncio incluído, que é o que libera a célula da boca para o sorriso. Segurar vogal é o quanto outra vogal precisa estar mais perto para a boca trocar de célula.',
     'note.sanity': 'A malha do rosto e a pose do corpo dizem as duas onde o teu rosto está, no mesmo quadro normalizado. A distância entre elas é uma propriedade do teu rosto e fica parada enquanto as duas te rastreiam - então quando ela salta, uma das duas te perdeu. Visibilidade nunca pega isso: um rastreio travado na coisa errada reporta confiança total. Frames reprovados são segurados em vez de seguidos. O comprimento do braço é checado do mesmo jeito, por lado. Os dois limiares são aprendidos da tua câmera, não ajustados aqui. Uma mão no rosto é outro caso: a malha vê a palma e dispara piscada/boca, mas a pose ainda te tem - a expressão segura o último quadro bom e o braço continua indo à boca.',
     'note.adaptive': 'Um amortecimento fixo tem que escolher: o suficiente para assentar uma pose parada vira borracha num movimento rápido, e o suficiente para o movimento rápido deixa o tremor. O adaptativo filtra forte quando você está parado e quase nada quando você se mexe. Firmeza é o quanto uma pose parada é filtrada - o passo de ficar parado na calibragem mede isso na sua própria câmera. Resposta é a rapidez com que ele solta quando você se mexe.',
-    'note.perf': 'O app roda uma inferencia do Mediapipe a cada frame e renderiza a cada frame. A taxa de rastreio é onde vai quase toda a CPU.',
+    'note.perf': 'O app roda uma inferencia do Mediapipe a cada frame e renderiza a cada frame. A taxa de rastreio é onde vai quase toda a CPU. ' +
+      'O ajuste automático larga taxa de rastreio sozinho enquanto a máquina não dá conta - OBS gravando, um render rodando - e devolve quando sobra folga. ' +
+      'Os limites fixos abaixo continuam valendo por cima dele.',
 
     // --- the app's own menu, drawn from data-text attributes ---
     'Start Face Tracking': 'Iniciar rastreio facial',
@@ -4924,7 +5036,9 @@
       'quickly that lets go once you move.',
     'note.perf': 'Upstream runs a Mediapipe inference on every animation frame, renders ' +
       'on every animation frame. The ' +
-      'tracking rate is where nearly all the CPU goes.'
+      'tracking rate is where nearly all the CPU goes. Auto throttle sheds that rate on ' +
+      'its own while the machine cannot keep up - OBS recording, an export running - and ' +
+      'takes it back when the headroom returns. The fixed caps below still apply on top.'
   };
 
   function T(en) {
@@ -5111,14 +5225,116 @@
     return opts;
   }
 
+  // ---------------------------------------------------------- auto throttle
+  //
+  // This runs beside OBS, and beside whatever else is on the machine. That
+  // load is not something a fixed cap can be chosen for in advance: a rate
+  // that is comfortable with nothing else running drops frames the moment an
+  // editor starts an export. The caps above are still there for anyone who
+  // wants to pick a number; this watches instead.
+  //
+  // Only the tracking rate is shed. That is where nearly all the CPU goes, and
+  // it is the one that degrades gracefully - a face solved twenty times a
+  // second still looks alive, where a render at twenty does not, and dropping
+  // the render resolution mid-session reframes the shot that is being captured.
+  //
+  // Nothing here assumes a display rate. The fastest frame interval this
+  // machine has actually delivered is the target, learned the way the sanity
+  // gate learns its gap: a hard-coded 16.7 would be a cap tuned to one monitor,
+  // and this fork already has one screen's worth of that lesson.
+  var AUTO_MIN = 12;        // never shed past this - below it the face reads as
+                            //   broken rather than economical
+  var AUTO_MAX = 60;        // at the ceiling this does nothing at all
+  var AUTO_SLACK = 1.5;     // an interval this far over the learned best is a
+                            //   dropped frame rather than jitter
+  var AUTO_EASY = 1.15;     // and this far under it is headroom to take back
+  var AUTO_DOWN = 6;        // shed fast, take back slowly, so a spike is
+  var AUTO_UP = 2;          //   absorbed instead of chased
+  var AUTO_EVERY = 700;     // ms between decisions
+  var AUTO_WARM = 20;       // frames behind a decision before it is acted on
+
+  var autoFps = AUTO_MAX;
+  var autoBest = 0;
+  var autoAcc = 0, autoN = 0, autoAt = 0, autoSeen = 0;
+  // what the tracking loop is actually managing, inference included
+  var trackMs = 0, trackSeen = 0;
+  // the frame interval that was standing when the rate was last shed, so the
+  // next decision can ask whether shedding bought anything
+  var autoShed = 0;
+  var AUTO_WORTH = 0.97;    // an interval has to come down by this much for the
+                            //   cut that preceded it to count as having worked
+
+  function autoNote(dt) {
+    // A frame the tab was not rendering at all - the machine did not fail to
+    // deliver it, nobody asked for it - and the first frame after, which
+    // carries that whole gap.
+    if (dt > 500) { autoAcc = 0; autoN = 0; autoAt = now(); return; }
+    autoAcc += dt;
+    autoN++;
+    var t = now();
+    if (t - autoAt < AUTO_EVERY || autoN < AUTO_WARM) return;
+    var avg = autoAcc / autoN;
+    autoAcc = 0; autoN = 0; autoAt = t;
+    // The best decays back up slowly, so a machine that genuinely got slower -
+    // a laptop dropped to battery, a window moved to a 60Hz second monitor -
+    // is followed instead of being measured forever against a number it can no
+    // longer reach.
+    if (!autoBest || avg < autoBest) autoBest = avg;
+    else autoBest += (avg - autoBest) * 0.02;
+    if (avg > autoBest * AUTO_SLACK) {
+      // Shedding only helps while this app is the thing taking the time. When
+      // a cut buys nothing, the load is somebody else's - an export, a game,
+      // a capture encoding - and cutting further costs the face without
+      // buying a frame back. Hold at whatever the last cut that worked left,
+      // and let it climb again when the machine frees up.
+      if (autoShed && avg > autoShed * AUTO_WORTH) { autoShed = avg; return; }
+      // The ceiling is 60 and holistic never reaches it, so shedding from the
+      // ceiling spends several decisions cutting a rate nothing was using -
+      // the machine keeps stuttering while the number comes down through
+      // figures the tracker was already under. Start from what it is really
+      // achieving, so the first decision is the first one that bites.
+      var got = trackMs > 1 ? 1000 / trackMs : autoFps;
+      autoFps = Math.max(AUTO_MIN, Math.min(autoFps, got) - AUTO_DOWN);
+      autoShed = avg;
+    } else if (avg < autoBest * AUTO_EASY) {
+      autoFps = Math.min(AUTO_MAX, autoFps + AUTO_UP);
+      autoShed = 0;
+    }
+  }
+
+  // What it is doing, for anyone wondering why the face slowed down.
+  function perfInfo() {
+    return {
+      auto: cfg.perfAuto, caps: cfg.perf,
+      trackFps: cfg.trackFps, renderFps: cfg.renderFps, poseLite: cfg.poseLite,
+      autoFps: r2(autoFps),
+      frameMs: r2(autoBest),
+      trackHz: trackMs > 1 ? r2(1000 / trackMs) : null,
+      throttling: cfg.perfAuto && autoFps < AUTO_MAX
+    };
+  }
+
   // The tracking loop awaits its inference, so the gap between iterations is
   // inference time plus whatever we wait here. Measure from the start of the
   // last cycle so the rate holds steady instead of drifting slower.
   var trackAt = 0;
 
   function nextTrack(fn) {
+    // One call per completed cycle, so the gap between two of them is what the
+    // tracker is managing end to end. A gap long enough to be a tab that was
+    // not running is not a rate.
+    var tn = now();
+    if (trackSeen && tn - trackSeen < 2000) {
+      var gap = tn - trackSeen;
+      trackMs = trackMs ? trackMs + (gap - trackMs) * 0.2 : gap;
+    }
+    trackSeen = tn;
+
     var fps = cfg.perf ? cfg.trackFps : 0;
-    if (!fps) return requestAnimationFrame(fn);
+    if (cfg.perfAuto) fps = fps ? Math.min(fps, autoFps) : autoFps;
+    // At the ceiling there is nothing to wait for: hand it straight back to the
+    // animation frame, which is what upstream does.
+    if (!fps || fps >= AUTO_MAX) return requestAnimationFrame(fn);
     var t = now();
     var wait = Math.max(0, trackAt + (1000 / fps) - t);
     trackAt = t + wait;
@@ -5128,6 +5344,13 @@
   var frameAt = 0;
 
   function frame() {
+    // Measured before the render cap, and whether or not one is set: this is
+    // how fast the machine is handing out animation frames, which is the
+    // question, and a capped render answers a different one.
+    var seen = now();
+    if (autoSeen) autoNote(seen - autoSeen);
+    autoSeen = seen;
+
     var fps = cfg.perf ? cfg.renderFps : 0;
     if (fps) {
       var t = now();
@@ -5225,8 +5448,7 @@
       var all = expressionKeys();
       for (var k = 0; k < all.length; k++) vrm.blendShapeProxy.setValue(all[k], 0);
     }
-    var hk = Object.keys(held);
-    for (var j = 0; j < hk.length; j++) vrm.blendShapeProxy.setValue(hk[j], held[hk[j]]);
+    for (var hk in held) vrm.blendShapeProxy.setValue(hk, held[hk]);
   }
 
   // ------------------------------------------------------------- diagnostics
@@ -5828,6 +6050,8 @@
     var pfNote = el('div', STG, T('note.perf'));
     pfNote.style.cssText = 'width:100%;opacity:.5;font-size:12px;margin:0 0 4px;text-align:left';
     pf.appendChild(pfNote);
+    addToggle(pf, 'perfAuto', T('Auto throttle'), STG);
+    addRule(pf);
     addToggle(pf, 'perf', T('Performance caps'), STG);
     addRule(pf);
     addRange(pf, 'trackFps', T('Tracking rate'), 0, 60, 1, fpsLabel, STG);
@@ -6323,10 +6547,18 @@
   // Runs on the raw mutation records rather than the throttled pass: a re-render
   // that reset a label back to English would otherwise show for a quarter of a
   // second, which reads as a flicker.
+  // The target itself is translated, not its whole subtree: a re-render that
+  // put a label back in English replaced a text node, and that record's target
+  // is the element holding it. Anything deeper arrived as an added node and is
+  // walked as one. `translateTree` runs two `querySelectorAll` calls, and this
+  // list arrives with every mutation the app makes - so the difference is a
+  // document scan per panel write versus a tag check.
   function translateMutations(list) {
     for (var i = 0; i < list.length; i++) {
-      translateTree(list[i].target);
-      var added = list[i].addedNodes || [];
+      var m = list[i];
+      translateNode(m.target);
+      translateAttr(m.target);
+      var added = m.addedNodes || [];
       for (var j = 0; j < added.length; j++) translateTree(added[j]);
     }
   }
@@ -6531,6 +6763,7 @@
     hands: hands,
     arm: arm,
     armInfo: armInfo,
+    perf: perfInfo,
     bg: bg,
     bgDrop: bgDrop,
     guide: guide,
