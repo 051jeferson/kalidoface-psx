@@ -1216,36 +1216,103 @@
     { key: 'u', title: 'Say "oooo" and hold it', hint: 'As in b-oo-t. Lips pushed forward' }
   ];
 
+  // Head pose fools the eye solver AND the brow scalar: looking down or 40°
+  // off-camera reads as a half-blink and as a non-neutral brow with nothing on
+  // the face having moved. Open poses set the blink floor, closed poses set
+  // the blink peak.
+  //
+  // For the brow, a relaxed reading at each pose was tried first and is not
+  // enough. It gives the zero, and the zero is only half of it: turning the
+  // head changes how far the same furrow *travels* as well as where rest sits,
+  // so a span borrowed from the facing-camera recording is a gain that is
+  // wrong by however much the two disagree. Both halves were then modelled -
+  // a learned per-pose ladder, then reading the scalar in three dimensions
+  // instead of flattened onto the camera - and both helped without settling
+  // it, because both are a model of a face standing in for a measurement of
+  // one.
+  //
+  // So measure it. Furrow and raise at each pose as well as relax, which is
+  // the whole local mapping at that angle instead of a correction carried
+  // over from a distant one. It is a longer wizard and it is run once.
+  //
+  // Grouped by pose, not by expression: the three readings at one angle have
+  // to share that angle, and a wizard that sends someone back and forth
+  // between "turned left" and "facing the camera" files three different
+  // angles under one pose. `at` is which pose a step belongs to, `expr` is
+  // which of the three faces it is.
   var CAL_STEPS = [
-    { key: 'rest',        title: 'Relax your face',
-      hint: 'Neutral, looking at the camera, eyes open', eyes: 'open' },
-    { key: 'down',        title: 'Furrow your brows',
+    { key: 'rest',         at: 'rest', expr: 'rest', eyes: 'open',
+      title: 'Relax your face',
+      hint: 'Neutral, looking at the camera, eyes open' },
+    { key: 'down',         at: 'rest', expr: 'down',
+      title: 'Furrow your brows',
       hint: 'Angry - pull them down and together' },
-    { key: 'up',          title: 'Raise your brows',
+    { key: 'up',           at: 'rest', expr: 'up',
+      title: 'Raise your brows',
       hint: 'Surprised - lift them as high as you can' },
-    { key: 'smile',       title: 'Smile wide',
+    { key: 'smile',        title: 'Smile wide',
       hint: 'Big smile, and hold it' },
-    // Head pose fools the eye solver AND the brow scalar: looking down or 40°
-    // off-camera reads as a half-blink and as a non-neutral brow, even when
-    // the lids and brows have not moved. Open poses set the blink floor and
-    // the pose-dependent brow rest; closed poses set the blink peak. A real
-    // blink still clears the cell in those poses, a turned head does not, and
-    // relaxed brows while turned stay at rest. Do not add extra steps for the
-    // brow - these four already are that recording.
-    { key: 'blink',       title: 'Close your eyes',
-      hint: 'Still facing the camera, and hold them shut', eyes: 'closed' },
-    { key: 'leftOpen',    title: 'Turn ~40° left, eyes open',
-      hint: 'Head turned, looking past the camera, brows relaxed', eyes: 'open' },
-    { key: 'leftClosed',  title: 'Hold that left turn, close your eyes',
-      hint: 'Same angle, eyes shut', eyes: 'closed' },
-    { key: 'rightOpen',   title: 'Turn ~40° right, eyes open',
-      hint: 'Head turned the other way, brows relaxed', eyes: 'open' },
-    { key: 'rightClosed', title: 'Hold that right turn, close your eyes',
-      hint: 'Same angle, eyes shut', eyes: 'closed' },
-    { key: 'gazeUp',      title: 'Look up, eyes open',
-      hint: 'Tilt your head back, brows relaxed, do not squint', eyes: 'open' },
-    { key: 'gazeDown',    title: 'Look down, eyes open',
-      hint: 'Chin down, eyes open, brows relaxed', eyes: 'open' }
+    { key: 'blink',        eyes: 'closed',
+      title: 'Close your eyes',
+      hint: 'Still facing the camera, and hold them shut' },
+
+    { key: 'leftNear', at: 'leftNear', expr: 'rest', eyes: 'open',
+      title: 'Turn a little left, relax your face',
+      hint: 'About half a turn - the angle you use glancing at a second screen' },
+    { key: 'leftOpen',     at: 'leftOpen', expr: 'rest', eyes: 'open',
+      title: 'Turn ~40° left, relax your face',
+      hint: 'Head turned, looking past the camera, brows relaxed' },
+    { key: 'leftDown',     at: 'leftOpen', expr: 'down',
+      title: 'Still turned left - furrow your brows',
+      hint: 'Same angle. Do not turn back toward the camera' },
+    { key: 'leftUp',       at: 'leftOpen', expr: 'up',
+      title: 'Still turned left - raise them',
+      hint: 'Same angle, as high as you can' },
+    { key: 'leftClosed',   eyes: 'closed',
+      title: 'Hold that left turn, close your eyes',
+      hint: 'Same angle, eyes shut' },
+
+    { key: 'rightNear', at: 'rightNear', expr: 'rest', eyes: 'open',
+      title: 'Turn a little right, relax your face',
+      hint: 'About half a turn, the other way' },
+    { key: 'rightOpen',    at: 'rightOpen', expr: 'rest', eyes: 'open',
+      title: 'Turn ~40° right, relax your face',
+      hint: 'Head turned the other way, brows relaxed' },
+    { key: 'rightDown',    at: 'rightOpen', expr: 'down',
+      title: 'Still turned right - furrow your brows',
+      hint: 'Same angle. Do not turn back toward the camera' },
+    { key: 'rightUp',      at: 'rightOpen', expr: 'up',
+      title: 'Still turned right - raise them',
+      hint: 'Same angle, as high as you can' },
+    { key: 'rightClosed',  eyes: 'closed',
+      title: 'Hold that right turn, close your eyes',
+      hint: 'Same angle, eyes shut' },
+
+    { key: 'gazeUpNear', at: 'gazeUpNear', expr: 'rest', eyes: 'open',
+      title: 'Tilt your head back a little, relax your face',
+      hint: 'About half of the full tilt' },
+    { key: 'gazeUp',       at: 'gazeUp', expr: 'rest', eyes: 'open',
+      title: 'Look up, relax your face',
+      hint: 'Tilt your head back, brows relaxed, do not squint' },
+    { key: 'gazeUpDown',   at: 'gazeUp', expr: 'down',
+      title: 'Still looking up - furrow your brows',
+      hint: 'Chin still up' },
+    { key: 'gazeUpUp',     at: 'gazeUp', expr: 'up',
+      title: 'Still looking up - raise them',
+      hint: 'Chin still up, as high as you can' },
+
+    { key: 'gazeDownNear', at: 'gazeDownNear', expr: 'rest', eyes: 'open',
+      title: 'Dip your chin a little, relax your face',
+      hint: 'About half of the full dip, eyes open' },
+    { key: 'gazeDown',     at: 'gazeDown', expr: 'rest', eyes: 'open',
+      title: 'Look down, relax your face',
+      hint: 'Chin down, eyes open, brows relaxed' },
+    { key: 'gazeDownDown', at: 'gazeDown', expr: 'down',
+      title: 'Still looking down - furrow your brows',
+      hint: 'Chin still down' },
+    { key: 'gazeDownUp',   at: 'gazeDown', expr: 'up',
+      title: 'Still looking down - raise them',
+      hint: 'Chin still down, as high as you can' }
   ];
   // The face wizard waits for the person to say they are in the pose rather
   // than counting them down: their hands are free, and a countdown only races
@@ -1678,24 +1745,31 @@
       return;
     }
 
-    if (st.key === 'rest') {
-      calRun.out.browRest = median(a.brow);
-      calRun.out.smileRest = median(a.smile);
-    } else if (st.key === 'down') {
-      calRun.out.browDown = pct(a.brow, 0.1);
-      calRun.shake = Math.max(calRun.shake || 0, spread(a.brow));
-    } else if (st.key === 'up') {
-      calRun.out.browUp = pct(a.brow, 0.9);
-      calRun.shake = Math.max(calRun.shake || 0, spread(a.brow));
-    } else if (st.key === 'smile') {
-      calRun.out.smileMax = pct(a.smile, 0.9);
-    }
+    if (st.key === 'rest') calRun.out.smileRest = median(a.smile);
+    else if (st.key === 'smile') calRun.out.smileMax = pct(a.smile, 0.9);
 
-    // Relaxed face at a known head pose. The closed-eye steps can pull the
-    // brows, and furrow/raise/smile are not rest, so only `eyes: 'open'`.
-    if (st.eyes === 'open' && a.y.length >= CAL_MIN_SAMPLES && a.x.length >= CAL_MIN_SAMPLES) {
+    // The three faces at one head pose, filed under that pose. A percentile
+    // rather than the furthest frame for the two expressions, the same as
+    // before: the extreme of a held furrow is as often a tracker excursion as
+    // it is the furrow.
+    if (st.at) {
       if (!calRun.browAt) calRun.browAt = {};
-      calRun.browAt[st.key] = { brow: median(a.brow), y: median(a.y), x: median(a.x) };
+      var p = calRun.browAt[st.at] || (calRun.browAt[st.at] = {});
+      if (st.expr === 'rest') {
+        if (a.y.length < CAL_MIN_SAMPLES || a.x.length < CAL_MIN_SAMPLES) {
+          retryStep(Math.min(a.y.length, a.x.length));
+          return;
+        }
+        p.brow = median(a.brow);
+        // The angle belongs to the relaxed reading. The furrow and the raise
+        // are held at that same angle by instruction, and a face that is
+        // straining is a worse place to measure where the head is pointing.
+        p.y = median(a.y);
+        p.x = median(a.x);
+      } else {
+        p[st.expr] = st.expr === 'down' ? pct(a.brow, 0.1) : pct(a.brow, 0.9);
+        calRun.shake = Math.max(calRun.shake || 0, spread(a.brow));
+      }
     }
 
     if (st.eyes) {
@@ -1982,6 +2056,13 @@
 
   function finishCalibration() {
     var c = calRun.out;
+    // browRest / browDown / browUp are the facing-camera pose under their old
+    // names - every threshold, readout and older code path reads them, and
+    // browAt.rest is those same three numbers.
+    var front = (calRun.browAt && calRun.browAt.rest) || {};
+    if (isNum(front.brow)) c.browRest = front.brow;
+    if (isNum(front.down)) c.browDown = front.down;
+    if (isNum(front.up)) c.browUp = front.up;
     var down = Math.abs(c.browDown - c.browRest);
     var up = Math.abs(c.browUp - c.browRest);
     var sm = c.smileMax - c.smileRest;
@@ -2010,6 +2091,23 @@
       weak.push('blink');
     }
 
+    // Every pose that recorded all three faces is one the mapping can use
+    // outright; one whose furrow or raise barely moved would give that angle a
+    // span narrow enough to trip on tracker noise, so it is named rather than
+    // quietly kept.
+    var spans = 0;
+    var at = calRun.browAt || {};
+    for (var pk in at) {
+      var pp = at[pk];
+      if (!pp || !isNum(pp.brow)) continue;
+      var pd = isNum(pp.down) ? Math.abs(pp.down - pp.brow) : null;
+      var pu = isNum(pp.up) ? Math.abs(pp.up - pp.brow) : null;
+      if (pd === null && pu === null) continue;
+      spans++;
+      if (pd !== null && pd < BROW_SPAN_MIN) weak.push(pk + ' ' + T('furrow'));
+      if (pu !== null && pu < BROW_SPAN_MIN) weak.push(pk + ' ' + T('raise'));
+    }
+
     if (usableBrowAt(calRun.browAt)) c.browAt = calRun.browAt;
     c.brow3d = !!cfg.brow3d;
 
@@ -2030,6 +2128,7 @@
       msg += ', ' + T('blink') + ' ' + (c.blinkClosed - c.blinkOpen).toFixed(3);
     }
     if (poseDrift > 0) msg += ', ' + T('brow drift') + ' ' + poseDrift.toFixed(3);
+    if (spans) msg += ', ' + spans + ' ' + T('poses with their own span');
     msg += '.';
     if (weak.length) {
       msg += ' ' + T('These barely moved:') + ' ' + weak.join(', ') + '. ' +
@@ -2137,7 +2236,7 @@
   function usableBrowAt(at) {
     var rest = browPoint(at && at.rest);
     if (!at) return false;
-    var keys = ['leftOpen', 'rightOpen', 'gazeUp', 'gazeDown'];
+    var keys = POSE_Y.concat(POSE_X);
     var oy = rest ? rest.y : 0;
     var ox = rest ? rest.x : 0;
     for (var i = 0; i < keys.length; i++) {
@@ -2150,7 +2249,7 @@
 
   function browPoseDrift(c) {
     if (!c || !usableBrowAt(c.browAt) || !isNum(c.browRest)) return 0;
-    var keys = ['leftOpen', 'rightOpen', 'gazeUp', 'gazeDown'];
+    var keys = POSE_Y.concat(POSE_X);
     var d = 0;
     for (var i = 0; i < keys.length; i++) {
       var p = browPoint(c.browAt[keys[i]]);
@@ -2159,60 +2258,129 @@
     return d;
   }
 
-  function sidePoint(p, axis) {
+  function sidePoint(p, axis, field) {
     p = browPoint(p);
-    return p ? { v: p[axis], brow: p.brow } : null;
+    if (!p) return null;
+    var v = p[field || 'brow'];
+    return isNum(v) ? { v: p[axis], brow: v } : null;
+  }
+  // Piecewise linear through every pose recorded on this axis, the rest pose
+  // among them, in order of angle.
+  //
+  // This used to take one recording per side and draw a straight line from
+  // rest out to it. A straight line through a curve is right at both ends and
+  // wrong everywhere between them, and drift with head angle is a curve - so
+  // a full turn was corrected, facing the camera was correct by construction,
+  // and halfway between the two was off by the whole sag. That is what "it is
+  // fine looking straight, wrong looking aside, and only sometimes" was: it
+  // depended on where between the two knots the head happened to be.
+  //
+  // Nothing here knows how many recordings there are. More poses are more
+  // knots, and the shape of the curve stops being anybody's guess.
+  //
+  // Left and right often drift the same way (foreshortening does not care
+  // which way the head turned), so a signed slope fitted through both would
+  // cancel; each side speaks for itself because each is its own segment.
+  var axisKnots = [];
+
+  function knotsFor(originV, originB, pts) {
+    var k = axisKnots;
+    k.length = 0;
+    k.push({ v: originV, brow: originB });
+    for (var i = 0; i < pts.length; i++) {
+      var p = pts[i];
+      if (!p || Math.abs(p.v - originV) < BROW_POSE_MIN) continue;
+      k.push(p);
+    }
+    k.sort(function (a, b) { return a.v - b.v; });
+    return k;
   }
 
-  // Piecewise linear along one head axis, from the rest pose out to the
-  // recorded side. Left and right often drift the same way (foreshortening),
-  // so a signed slope through both would cancel; picking lo/hi by the actual
-  // value is what lets each side speak for itself.
-  function axisShift(v, originV, originB, a, b) {
-    var lo = null, hi = null;
-    function consider(p) {
-      if (!p) return;
-      if (p.v <= originV - BROW_POSE_MIN) {
-        if (!lo || p.v < lo.v) lo = p;
-      } else if (p.v >= originV + BROW_POSE_MIN) {
-        if (!hi || p.v > hi.v) hi = p;
-      }
+  function axisShift(v, originV, originB, pts) {
+    var k = knotsFor(originV, originB, pts);
+    if (k.length < 2) return 0;
+    var lastI = k.length - 1;
+    // A quarter past the furthest recording and no further. Beyond that the
+    // curve is a guess and the recordings said nothing about it.
+    if (v < originV) v = Math.max(v, originV - (originV - k[0].v) * 1.25);
+    else v = Math.min(v, originV + (k[lastI].v - originV) * 1.25);
+    var a, b, i;
+    if (v <= k[0].v) { a = k[0]; b = k[1]; }
+    else if (v >= k[lastI].v) { a = k[lastI - 1]; b = k[lastI]; }
+    else {
+      for (i = 1; i <= lastI && k[i].v < v; i++) {}
+      a = k[i - 1]; b = k[i];
     }
-    consider(a);
-    consider(b);
-    var t, span;
-    if (v >= originV) {
-      if (!hi) return 0;
-      span = hi.v - originV;
-      if (span < BROW_POSE_MIN) return 0;
-      t = (v - originV) / span;
-      if (t > 1.25) t = 1.25;
-      return (hi.brow - originB) * t;
+    var span = b.v - a.v;
+    if (span < 1e-6) return b.brow - originB;
+    return a.brow + (b.brow - a.brow) * ((v - a.v) / span) - originB;
+  }
+
+  // Which recorded poses sit on each axis. Two arrays made once: this runs on
+  // every solved face, three times over, for the life of the session.
+  var POSE_Y = ['leftNear', 'leftOpen', 'rightNear', 'rightOpen'];
+  var POSE_X = ['gazeUpNear', 'gazeUp', 'gazeDownNear', 'gazeDown'];
+  var axisPts = [];
+
+  function ptsOn(at, keys, axis, field) {
+    axisPts.length = 0;
+    for (var i = 0; i < keys.length; i++) {
+      var p = sidePoint(at[keys[i]], axis, field);
+      if (p) axisPts.push(p);
     }
-    if (!lo) return 0;
-    span = originV - lo.v;
-    if (span < BROW_POSE_MIN) return 0;
-    t = (originV - v) / span;
-    if (t > 1.25) t = 1.25;
-    return (lo.brow - originB) * t;
+    return axisPts;
+  }
+
+  // The same interpolation, over whichever of the three numbers each pose
+  // recorded. A pose that has not got this field drops out of it and the
+  // facing-camera reading stands - which is how a calibration recorded before
+  // the furrow and raise steps existed keeps working.
+  function poseField(c, rig, field, base) {
+    if (!isNum(base)) return base;
+    if (!usableBrowAt(c.browAt)) return base;
+    var h = rig && rig.head;
+    if (!h) return base;
+    var at = c.browAt;
+    var o = browPoint(at.rest);
+    var oy = o ? o.y : 0;
+    var ox = o ? o.x : 0;
+    var origin = (o && isNum(o[field])) ? o[field] : base;
+    // one axis at a time: `axisPts` is the one scratch array
+    var dy = axisShift(num(h.y), oy, origin, ptsOn(at, POSE_Y, 'y', field));
+    var dx = axisShift(num(h.x), ox, origin, ptsOn(at, POSE_X, 'x', field));
+    var shifted = base + dy + dx;
+    return isNum(shifted) ? shifted : base;
   }
 
   function poseBrowRest(c, rig) {
     if (!c || !isNum(c.browRest)) return 0;
-    var rest = c.browRest;
-    if (!usableBrowAt(c.browAt)) return rest;
-    var h = rig && rig.head;
-    if (!h) return rest;
-    var o = browPoint(c.browAt.rest) || { y: 0, x: 0, brow: rest };
-    var shifted = rest
-      + axisShift(num(h.y), o.y, o.brow,
-        sidePoint(c.browAt.leftOpen, 'y'), sidePoint(c.browAt.rightOpen, 'y'))
-      + axisShift(num(h.x), o.x, o.brow,
-        sidePoint(c.browAt.gazeDown, 'x'), sidePoint(c.browAt.gazeUp, 'x'));
-    // Bounded by the recordings already (axisShift will not go past 1.25 of
-    // a recorded pose). Do not also cap against the furrow/raise span: a yaw
+    // Bounded by the recordings already (axisShift will not go past 1.25 of a
+    // recorded pose). Do not also cap against the furrow/raise span: a yaw
     // that eats most of a small raise is the bug, and that cap would leave it.
-    return isNum(shifted) ? shifted : rest;
+    return poseField(c, rig, 'brow', c.browRest);
+  }
+
+  // How far this person's own furrow or raise actually travels *at this
+  // angle*. Recording the relaxed face at four poses fixed where zero sits and
+  // left the gain alone, so the same furrow read as a different fraction
+  // depending on which way the head was pointing - too much at one angle, too
+  // little at another, and both look like a threshold that cannot be set.
+  //
+  // A recording is one person holding one face once, so a step that went badly
+  // must not be able to invent a hair-trigger or a dead spot. Kept inside a
+  // band around the facing-camera span, which is the one measured with the
+  // most of the face in view.
+  var POSE_SPAN_MIN = 0.4;
+  var POSE_SPAN_MAX = 2.5;
+
+  function poseBrowSpan(c, rig, dev) {
+    var flat = browSpan(c, dev);
+    var rest = poseBrowRest(c, rig);
+    var end = dev < 0
+      ? poseField(c, rig, 'down', c.browDown)
+      : poseField(c, rig, 'up', c.browUp);
+    if (!isNum(end) || !isNum(rest)) return flat;
+    return clamp(Math.abs(end - rest), flat * POSE_SPAN_MIN, flat * POSE_SPAN_MAX);
   }
 
   function poseAdjustedBrow(raw, rig) {
@@ -2595,7 +2763,7 @@
     if (mode === 'calibrated' && browCalUsable(cfg.cal)) {
       restNow = poseBrowRest(cfg.cal, rig);
       var dev = rawBrow - learned - restNow;
-      var span = browSpan(cfg.cal, dev);
+      var span = poseBrowSpan(cfg.cal, rig, dev);
       learnBrowPose(rig, rawBrow - restNow, learned, span);
       brow = clamp(calNorm(dev, span) * cfg.browGain, -1, 1);
       smile = clamp(calibratedSmile(rawSmile) * cfg.browGain, 0, 1);
@@ -4969,6 +5137,7 @@
     'blink': 'piscada',
     'hand on face': 'mão no rosto',
     'brow drift': 'deriva da sobrancelha',
+    'poses with their own span': 'poses com amplitude propria',
     'turn': 'giro',
     'tilt': 'inclinacao',
     'neutral': 'neutro',
@@ -4986,7 +5155,51 @@
     'Close your eyes': 'Feche os olhos',
     'Still facing the camera, and hold them shut':
       'Ainda de frente para a câmera, e segure fechados',
-    'Turn ~40° left, eyes open': 'Vire uns 40° à esquerda, olhos abertos',
+    'Turn a little left, relax your face':
+      'Vire um pouco à esquerda, relaxe o rosto',
+    'About half a turn - the angle you use glancing at a second screen':
+      'Uns metade da virada - o ângulo de olhar para um segundo monitor',
+    'Turn ~40° left, relax your face':
+      'Vire uns 40° à esquerda, relaxe o rosto',
+    'Still turned left - furrow your brows':
+      'Ainda virado à esquerda - franza as sobrancelhas',
+    'Still turned left - raise them':
+      'Ainda virado à esquerda - levante elas',
+    'Same angle. Do not turn back toward the camera':
+      'O mesmo ângulo. Não volte a cabeça para a câmera',
+    'Same angle, as high as you can':
+      'O mesmo ângulo, o mais alto que conseguir',
+    'Turn a little right, relax your face':
+      'Vire um pouco à direita, relaxe o rosto',
+    'About half a turn, the other way':
+      'Uns metade da virada, para o outro lado',
+    'Turn ~40° right, relax your face':
+      'Vire uns 40° à direita, relaxe o rosto',
+    'Still turned right - furrow your brows':
+      'Ainda virado à direita - franza as sobrancelhas',
+    'Still turned right - raise them':
+      'Ainda virado à direita - levante elas',
+    'Tilt your head back a little, relax your face':
+      'Incline a cabeça um pouco para trás, relaxe o rosto',
+    'About half of the full tilt': 'Uns metade da inclinação inteira',
+    'Look up, relax your face': 'Olhe para cima, relaxe o rosto',
+    'Still looking up - furrow your brows':
+      'Ainda olhando para cima - franza as sobrancelhas',
+    'Still looking up - raise them': 'Ainda olhando para cima - levante elas',
+    'Chin still up': 'Queixo ainda levantado',
+    'Chin still up, as high as you can':
+      'Queixo ainda levantado, o mais alto que conseguir',
+    'Dip your chin a little, relax your face':
+      'Abaixe um pouco o queixo, relaxe o rosto',
+    'About half of the full dip, eyes open':
+      'Uns metade do abaixamento inteiro, olhos abertos',
+    'Look down, relax your face': 'Olhe para baixo, relaxe o rosto',
+    'Still looking down - furrow your brows':
+      'Ainda olhando para baixo - franza as sobrancelhas',
+    'Still looking down - raise them': 'Ainda olhando para baixo - levante elas',
+    'Chin still down': 'Queixo ainda abaixado',
+    'Chin still down, as high as you can':
+      'Queixo ainda abaixado, o mais alto que conseguir',
     'Head turned, looking past the camera, brows relaxed':
       'Cabeça virada, olhando além da câmera, sobrancelhas relaxadas',
     'Hold that left turn, close your eyes':

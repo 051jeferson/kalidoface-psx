@@ -188,6 +188,47 @@ the two do not share a rest — so it is stamped, and a mismatch falls back to
 `auto` for the brow rather than reading the recording against the wrong number.
 **Recalibrate after switching this.**
 
+#### Per-pose brow calibration
+
+Reading the brow in 3D removes the projection, but not everything that moves
+with the head: the mesh's own z is a fitted estimate, lighting changes across a
+turn, and the far side of the face is guessed at. So the wizard measures the
+brow at each pose instead of correcting for one.
+
+At every head pose it records **three faces, not one** — relaxed, furrowed,
+raised. The relaxed reading says where zero sits at that angle; the other two
+say how far this face's own furrow and raise actually *travel* there, which is
+not the same as facing the camera. A span borrowed from the frontal recording is
+a gain that is wrong by however much the two disagree, which reads as a
+threshold that cannot be set: too twitchy at one angle, dead at another.
+
+It also records **two angles per direction** — a glance and a full turn. Drift
+with head angle is a curve, and the previous version drew a straight line from
+rest out to a single recording per side. A straight line through a curve is
+right at both ends and wrong everywhere between them, so a full turn was
+corrected, facing the camera was correct by construction, and halfway between
+was off by the whole sag. That is what made it intermittent: it depended on
+where between the two knots your head happened to be.
+
+On a synthetic face with both a curved drift and a furrow that shrinks off-axis:
+
+| Recording | Relaxed faces read as an expression | Real expressions muted |
+| --- | --- | --- |
+| one relaxed pose per direction | 4 of 9 poses | 4 of 18 |
+| three faces, two angles per direction | **0** | **0** |
+
+Steps are grouped by pose rather than by expression — you turn once and make
+three faces, instead of being sent back and forth. That is not only faster: the
+three readings have to share one angle, and a head that goes back to the camera
+between them files three different angles under one pose.
+
+The wizard is 23 steps and takes a couple of minutes. It is run once.
+
+An older calibration still loads and still works exactly as it did — each field
+falls back to the frontal recording on its own — but it does not get any of
+this. **Re-run the wizard.** The finish message tells you how many poses ended
+up with their own span, and names any whose furrow or raise barely moved.
+
 **Signal range** is what makes this usable at all. Kalidokit's brow scalar only
 swings a few hundredths for most faces, so a raw threshold of `0.35` is
 unreachable and the emotion simply never fires. Three modes:
