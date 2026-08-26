@@ -1959,9 +1959,9 @@
     var up = Math.abs(c.browUp - c.browRest);
     var sm = c.smileMax - c.smileRest;
     var weak = [];
-    if (down < 0.004) weak.push('furrow');
-    if (up < 0.004) weak.push('raise');
-    if (sm < 0.01) weak.push('smile');
+    if (down < BROW_SPAN_MIN) weak.push('furrow');
+    if (up < BROW_SPAN_MIN) weak.push('raise');
+    if (sm < BROW_SPAN_MIN) weak.push('smile');
 
     // Floor = the most-closed an open eye still looked across every pose.
     // Peak = the weakest closed pose, so a blink while turned still reaches 1.
@@ -2186,16 +2186,31 @@
     return raw - (poseBrowRest(c, rig) - c.browRest);
   }
 
+  // Rest is a band, not a point. A recorded furrow can be a few hundredths, and
+  // mapping that whole span onto 0..1 makes tracker noise around rest look like
+  // a full angry. Then `ramp(1, angryAt)` is 1 for every threshold we offer, so
+  // the slider appears broken. Deadzone the rest band; still map the recorded
+  // extreme to 1. Floor the span so a weak recording cannot amplify noise.
+  var BROW_DEAD = 0.25;
+  var BROW_SPAN_MIN = 0.012;
+
+  function calNorm(dev, span) {
+    var x = dev / Math.max(span, BROW_SPAN_MIN);
+    if (x > BROW_DEAD) return (x - BROW_DEAD) / (1 - BROW_DEAD);
+    if (x < -BROW_DEAD) return (x + BROW_DEAD) / (1 - BROW_DEAD);
+    return 0;
+  }
+
   function calibratedBrow(raw, rig) {
     var c = cfg.cal;
     var dev = raw - poseBrowRest(c, rig);
     var span = dev < 0 ? Math.abs(c.browDown - c.browRest) : Math.abs(c.browUp - c.browRest);
-    return dev / Math.max(span, 0.004);
+    return calNorm(dev, span);
   }
 
   function calibratedSmile(raw) {
     var c = cfg.cal;
-    return (raw - c.smileRest) / Math.max(c.smileMax - c.smileRest, 0.01);
+    return calNorm(raw - c.smileRest, c.smileMax - c.smileRest);
   }
 
   function hasBlinkCal(c) {
@@ -2982,6 +2997,12 @@
   // something the head has nothing to do with, and gets none of it.
   var HEAD_ON = 0.9;
   var HEAD_FAR = 1.8;
+  // Image-space, in ear-spans. A covering palm sits well inside ON; a hand
+  // still on the chest is past FAR. Used so a hand in front of the face -
+  // where world depth is the axis the tracker compresses to nothing - still
+  // counts as at the head.
+  var IMG_HEAD_ON = 0.55;
+  var IMG_HEAD_FAR = 1.7;
   var MIN_VIS = 0.35;
 
   // ------------------------------------------------------- tracking sanity
@@ -3046,30 +3067,68 @@
     return vis(p) && imgDist(p, nose) < lim2;
   }
 
+  function faceLim2() {
+    var img = poseImg;
+    var nose = img && img[LM_NOSE];
+    if (!vis(nose)) return 0;
+    var earL = img[LM_EAR_L], earR = img[LM_EAR_R];
+    var rad = (vis(earL) && vis(earR)) ? Math.sqrt(imgDist(earL, earR)) * 0.65 : 0.14;
+    return rad * rad;
+  }
+
+  function sideHitsFace(side) {
+    var img = poseImg;
+    var nose = img && img[LM_NOSE];
+    var lim2 = faceLim2();
+    if (!vis(nose) || !lim2) return false;
+    var idx = ARM_LM[side];
+    if (nearFace(img[idx.wrist], nose, lim2)) return true;
+    if (nearFace(img[idx.index], nose, lim2)) return true;
+    if (nearFace(img[idx.pinky], nose, lim2)) return true;
+    var h = poseHand && poseHand[side];
+    if (!h) return false;
+    for (var k = 0; k < HAND_FACE_PTS.length; k++) {
+      if (nearFace(h[HAND_FACE_PTS[k]], nose, lim2)) return true;
+    }
+    return false;
+  }
+
+  // How near this hand is to the head in the video, in ear-spans. Null when
+  // there is no image pose to read. A covering palm is well under 1.
+  function imgHeadNear(side) {
+    var img = poseImg;
+    var nose = img && img[LM_NOSE];
+    if (!vis(nose)) return null;
+    var earL = img[LM_EAR_L], earR = img[LM_EAR_R];
+    var span = (vis(earL) && vis(earR)) ? Math.sqrt(imgDist(earL, earR)) : 0.15;
+    if (span < 0.02) span = 0.15;
+    var idx = ARM_LM[side];
+    var best = Infinity;
+    var h = poseHand && poseHand[side];
+    var i, d, p;
+    p = img[idx.wrist];
+    if (vis(p)) { d = Math.sqrt(imgDist(p, nose)) / span; if (d < best) best = d; }
+    p = img[idx.index];
+    if (vis(p)) { d = Math.sqrt(imgDist(p, nose)) / span; if (d < best) best = d; }
+    p = img[idx.pinky];
+    if (vis(p)) { d = Math.sqrt(imgDist(p, nose)) / span; if (d < best) best = d; }
+    if (h) {
+      for (i = 0; i < HAND_FACE_PTS.length; i++) {
+        p = h[HAND_FACE_PTS[i]];
+        if (!vis(p)) continue;
+        d = Math.sqrt(imgDist(p, nose)) / span;
+        if (d < best) best = d;
+      }
+    }
+    return best === Infinity ? null : best;
+  }
+
   // Ground truth outside the mesh: the pose still sees the head, the hand
   // model still sees the palm, and if they overlap in the video the mesh is
   // looking at a hand. Ear-span is this person's own face, not a webcam
   // constant. One hand is enough - covering a yawn is one palm.
   function handHitsFace() {
-    var img = poseImg;
-    var nose = img && img[LM_NOSE];
-    if (!vis(nose)) return false;
-    var earL = img[LM_EAR_L], earR = img[LM_EAR_R];
-    var rad = (vis(earL) && vis(earR)) ? Math.sqrt(imgDist(earL, earR)) * 0.65 : 0.14;
-    var lim2 = rad * rad;
-    var names = ['Right', 'Left'];
-    for (var i = 0; i < 2; i++) {
-      var idx = ARM_LM[names[i]];
-      if (nearFace(img[idx.wrist], nose, lim2)) return true;
-      if (nearFace(img[idx.index], nose, lim2)) return true;
-      if (nearFace(img[idx.pinky], nose, lim2)) return true;
-      var h = poseHand && poseHand[names[i]];
-      if (!h) continue;
-      for (var k = 0; k < HAND_FACE_PTS.length; k++) {
-        if (nearFace(h[HAND_FACE_PTS[k]], nose, lim2)) return true;
-      }
-    }
-    return false;
+    return sideHitsFace('Right') || sideHitsFace('Left');
   }
 
   function noteFaceOcc() {
@@ -3579,7 +3638,8 @@
         : deg(REACH_STRAIGHTEN * Math.pow((1 - d.bend) / 2, 4)),
       hand: d.hand, twistDeg: deg(d.twist), twistCapped: d.twistCapped,
       palmDot: r2(d.palmDot),
-      rollHeld: d.rollHeld, handRest: d.handRest
+      rollHeld: d.rollHeld, handRest: d.handRest,
+      imgNear: r2(d.imgNear), occ: d.occ, stand: r2(d.stand)
     };
   }
 
@@ -3679,7 +3739,7 @@
     d.anchor = 0; d.near = null; d.wristSeen = 0; d.upper = 0; d.fore = 0;
     d.gap = null; d.reach = 1; d.hand = false; d.twist = null;
     d.twistCapped = false; d.rollHeld = false; d.handRest = false;
-    d.palmDot = null;
+    d.palmDot = null; d.imgNear = null; d.occ = false; d.stand = 0;
     return d;
   }
 
@@ -3830,14 +3890,41 @@
         if (!instant && isNum(held) && anchorW < held && conf(wr) < SURE_VIS) {
           anchorW = held;
         }
+        // World depth is the axis the tracker compresses, so a hand in front
+        // of the face can sit at the skull in 3D while the video shows a palm
+        // covering the mouth. The image is the ground truth for "at the head".
+        var iNear = imgHeadNear(side);
+        dbg.imgNear = iNear;
+        if (iNear != null) {
+          var iW = clamp((IMG_HEAD_FAR - iNear) / (IMG_HEAD_FAR - IMG_HEAD_ON), 0, 1)
+            * cfg.headAnchor;
+          if (iW > anchorW) anchorW = iW;
+        }
         c.anch[side] = anchorW;
         if (anchorW > 0) {
           // the head bone sits at the base of the skull and the nose on the
           // front of the face, so the two scales are head-sized rather than
           // identical - which is all this needs them to be
-          var faceOff = vmul(mapDir(toFace, ub, mb, sx, depth), mH / uH);
-          // `depth`, not `g`: this offset is measured in head-heights off the
-          // nose, so the arm's vertical factor has no business scaling it.
+          //
+          // Never crush this offset's toward-camera axis: `armDepth` under 1
+          // is a whole-arm direction gain, and using it here is what put every
+          // covering hand off to the side of the face.
+          var faceGain = { x: 1, y: 1, z: Math.max(cfg.armDepth, 1) };
+          var faceOff = vmul(mapDir(toFace, ub, mb, sx, faceGain), mH / uH);
+          // This palm is between the lens and the face. World z will not say
+          // so - that is the compressed axis - so a covering hand's offset
+          // sits on the skull and the IK has no point in front of the mouth
+          // to reach. A palm's worth of head-heights along the chest is what
+          // that pose looks like.
+          dbg.occ = sideHitsFace(side);
+          if (dbg.occ) {
+            var stand = mH * 0.3;
+            var along = vdot(faceOff, mb.z);
+            if (along < stand) {
+              faceOff = vadd(faceOff, vmul(mb.z, stand - along));
+              dbg.stand = stand;
+            }
+          }
           off = vlerp(off, vsub(vadd(mHead, faceOff), worldPos(upper)), anchorW);
         }
       }
@@ -5137,6 +5224,11 @@
   var NEEDS_RELOAD = {
     pixelRatio: 1, perf: 1, poseLite: 1
   };
+  // Snap-mode UV only writes on a cell change, so these have to drop the latch
+  // or a new threshold would sit there until the expression itself changed.
+  // Nothing else needs that - and doing it on every slider tick is what made
+  // hold/hysteresis look broken and the face chatter while you dragged.
+  var LATCH_KEYS = { threshold: 1, hysteresis: 1, holdMs: 1, preview: 1 };
   var pendingReload = false;
 
   function el(tag, cls, text) {
@@ -5159,20 +5251,22 @@
     return h;
   }
 
-  function onChange(key) {
-    save();
+  function liveChange(key) {
     if (NEEDS_RELOAD[key]) {
       pendingReload = true;
       var notes = document.querySelectorAll('.psx-reload-note');
       Array.prototype.forEach.call(notes, function (n) { n.style.display = ''; });
-    } else {
-      applyCanvasFilter();
-      syncShaderUniforms();
-      if (REBUILDS[key]) rebuildPanels();
-      applyStrip();
-      refreshModels();
+      return;
     }
-    syncControls();
+    applyCanvasFilter();
+    syncShaderUniforms();
+    if (REBUILDS[key]) rebuildPanels();
+    if (LATCH_KEYS[key]) refreshModels();
+  }
+
+  function onChange(key) {
+    save();
+    liveChange(key);
   }
 
   var controls = [];
@@ -5196,12 +5290,20 @@
     input.addEventListener('input', function () {
       cfg[key] = parseFloat(input.value);
       paint();
-      onChange(key);
+      liveChange(key);
     });
+    input.addEventListener('change', function () { save(); });
     paint();
     parent.appendChild(h);
     parent.appendChild(input);
-    controls.push({ key: key, node: input, sync: function () { input.value = cfg[key]; paint(); } });
+    controls.push({
+      key: key, node: input,
+      sync: function () {
+        if (document.activeElement === input) return;
+        input.value = cfg[key];
+        paint();
+      }
+    });
     return input;
   }
 
@@ -5266,12 +5368,19 @@
     input.addEventListener('input', function () {
       cfg[key] = values[parseInt(input.value, 10)];
       paint();
-      onChange(key);
+      liveChange(key);
     });
+    input.addEventListener('change', function () { save(); });
     paint();
     parent.appendChild(h);
     parent.appendChild(input);
-    controls.push({ key: key, node: input, sync: paint });
+    controls.push({
+      key: key, node: input,
+      sync: function () {
+        if (document.activeElement === input) return;
+        paint();
+      }
+    });
     return input;
   }
 

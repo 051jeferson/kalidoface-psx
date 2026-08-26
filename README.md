@@ -191,6 +191,12 @@ only one span for both. A face that furrows to `-0.050` but raises only to
 `+0.012` maps both extremes to a full `1.00` once calibrated; under `auto` the
 raise would barely register.
 
+Rest is a band, not a point. Mapping the whole recorded furrow onto 0..1 used
+to make the noise around a still face look like a full **angry**, and then
+**Angry at** could not turn it off — `ramp(1, threshold)` is 1 for every value
+that slider offers. The rest band is deadzoned, and a weak recording cannot
+amplify tracker noise into a full expression.
+
 It also reports what it measured, and says which pose barely moved so you know
 which step to redo.
 
@@ -385,8 +391,13 @@ The elbow landmark is the pole, so nothing guesses which way the elbow folds.
   head. Near the face, this aims at the head instead — the hand's offset from
   your own nose, scaled by the two heads, hung off the model's head bone. It
   blends in by how close the hand is, so an arm doing something unrelated to the
-  head is untouched. Right at the face the hand's position wins and the elbow
-  bend gives; away from it the bend is the honest signal and the distance gives.
+  head is untouched. Closeness for a hand *in front of* the face is read in the
+  video, not in world depth — that is the axis the tracker compresses, so a
+  covering palm sat on the skull in 3D while the camera showed it on the mouth.
+  When that hand occludes the face, the target is held a palm out along the
+  chest so the IK has somewhere in front of the mouth to reach. Right at the
+  face the hand's position wins and the elbow bend gives; away from it the
+  bend is the honest signal and the distance gives.
 - **Shoulder follow** — nothing upstream drives the shoulder bones at all, so a
   raised arm keeps its shoulder pinned and the upper arm cuts through the neck.
   This lets the shoulder turn part of the way toward the target. The hand does
