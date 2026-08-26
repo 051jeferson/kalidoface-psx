@@ -102,6 +102,11 @@
     // how far the brow has to travel before it reads as that emotion
     angryAt: 0.35,
     sorrowAt: 0.35,
+    // How long the brow has to stay past that before the emotion is written.
+    // A drift spike while the head is turning lasts a frame or two; a face
+    // making an expression holds it. Only the rise waits - an expression that
+    // is over ends when it ends.
+    emotionHold: 100,
     // how wide the mouth corners have to go before it reads as a smile
     smileAt: 0.3,
     // Let the mouth win while it is talking. On a PSX atlas the vowels and the
@@ -263,6 +268,7 @@
     browGain: { min: 0.25, max: 4 },
     angryAt: { min: 0, max: 0.95 },
     sorrowAt: { min: 0, max: 0.95 },
+    emotionHold: { min: 0, max: 400 },
     smileAt: { min: 0, max: 0.95 },
     speechAt: { min: 0, max: 1 },
     mouthStick: { min: 0, max: 1 },
@@ -2253,9 +2259,8 @@
   var POSE_MID = (POSE_CELLS - 1) / 2;
   var POSE_WARM = 20;                 // frames before a cell is believed in full
   var POSE_CREEP = 0.01;              // per-frame pull once it is warm
-  // A cell only learns while the other two axes are near centre, so a turn
-  // that is also a tilt does not teach both ladders the same drift twice.
-  var POSE_CENTRE = 0.12;
+  var POSE_SEED = 2;                  // how far a warm cell may be extrapolated
+                                      //   outward to seed a colder one
 
   function poseLadder() {
     var l = {};
@@ -2273,24 +2278,78 @@
     return clamp(v / POSE_CELL + POSE_MID, 0, POSE_CELLS - 1);
   }
 
-  // A cold cell contributes nothing and warms in, so the first frame at a new
-  // angle cannot step the zero out from under the face.
-  function cellShift(a, i) {
-    return a.off[i] * Math.min(1, a.n[i] / POSE_WARM);
+  function cellWarm(a, i) {
+    return Math.min(1, a.n[i] / POSE_WARM);
   }
 
+  // A cold cell used to contribute a plain zero, and a zero is not "no
+  // opinion" here - it is the opinion that this angle has no drift, which is
+  // the very thing that was wrong before any of this existed. Blended in by
+  // distance alone it dragged the correction back toward nothing at exactly
+  // the angles nobody had held yet. That is the "only sometimes": move to a
+  // cell that has not warmed and the correction quietly switches off.
+  //
+  // So weight the two cells by how warm they are as well as how near, and
+  // carry the better of the two confidences out with the answer. A cell with
+  // nothing in it now defers to its neighbour instead of outvoting it.
   function ladderAt(a, f) {
     var i = Math.floor(f), t = f - i;
-    if (i >= POSE_CELLS - 1) return cellShift(a, POSE_CELLS - 1);
-    return cellShift(a, i) * (1 - t) + cellShift(a, i + 1) * t;
+    if (i >= POSE_CELLS - 1) { i = POSE_CELLS - 1; t = 0; }
+    var w0 = cellWarm(a, i), w1 = t > 0 ? cellWarm(a, i + 1) : 0;
+    var k0 = w0 * (1 - t), k1 = w1 * t;
+    var sum = k0 + k1;
+    if (sum <= 1e-6) return 0;
+    var v = (a.off[i] * k0 + (t > 0 ? a.off[i + 1] * k1 : 0)) / sum;
+    return v * Math.max(w0, w1);
   }
+
+  // How much of this pose the ladder has actually seen. An axis on its centre
+  // cell needs no correction and no confidence in one - the baseline is its
+  // answer - so it does not count against this.
+  function ladderConf(a, f) {
+    var i = Math.floor(f), t = f - i;
+    if (i >= POSE_CELLS - 1) { i = POSE_CELLS - 1; t = 0; }
+    return Math.max(cellWarm(a, i), t > 0 ? cellWarm(a, i + 1) : 0);
+  }
+
+  // Set beside the shift it belongs to: 1 where every off-centre axis is warm,
+  // 0 at a pose nothing has been learned at yet.
+  var poseConf = 1;
 
   function learnedBrowShift(rig) {
     var h = rig && rig.head;
+    poseConf = 1;
     if (!h) return 0;
-    return ladderAt(browPose.y, poseCell(num(h.y)))
-      + ladderAt(browPose.x, poseCell(num(h.x)))
-      + ladderAt(browPose.z, poseCell(num(h.z)));
+    var sum = 0;
+    for (var i = 0; i < POSE_AXES.length; i++) {
+      var k = POSE_AXES[i], a = browPose[k];
+      var f = poseCell(num(h[k]));
+      sum += ladderAt(a, f);
+      if (Math.abs(f - POSE_MID) > 0.5) poseConf = Math.min(poseConf, ladderConf(a, f));
+    }
+    return sum;
+  }
+
+  // A cell nobody has held yet starts at whatever the warm cells on its own
+  // side of centre imply for that angle, not at zero. Zero is the answer that
+  // was wrong to begin with, so starting there means every new angle shows the
+  // fault once before it learns its way out of it - and the angles people
+  // reach for least are the ones that stayed cold longest.
+  //
+  // Straight line in the angle: the same shape the recorded poses are already
+  // interpolated along.
+  function seedCell(a, c) {
+    if (a.n[c] > 0) return;
+    var d = c - POSE_MID;
+    if (!d) return;
+    var toward = d > 0 ? -1 : 1;
+    for (var w = c + toward; w >= 0 && w < POSE_CELLS; w += toward) {
+      var wd = w - POSE_MID;
+      if (!wd || a.n[w] < POSE_WARM) continue;
+      a.off[c] = clamp(a.off[w] * clamp(d / wd, -POSE_SEED, POSE_SEED),
+        -POSE_MAX, POSE_MAX);
+      return;
+    }
   }
 
   // `target` is the whole drift this pose shows - raw minus the rest the
@@ -2309,27 +2368,56 @@
                                       // is only here so nothing can run away
   // Made once and written over: this runs on every solved face for the life of
   // the session, the same reason `armDbg` holds raw numbers.
-  var poseAt = { y: 0, x: 0, z: 0 };
+  var poseShare = { y: 0, x: 0, z: 0 };
 
-  function learnBrowPose(rig, target, span) {
+  // `have` is what the ladder is already saying at this pose. The step is the
+  // whole ladder moving toward the drift the pose is showing, split between
+  // the axes that are away from centre in proportion to how far each has gone.
+  //
+  // The rule this replaced made an axis wait until the other two were near
+  // centre, so that no two ladders could learn the same drift twice. A head
+  // that turns and dips at once - which is most of the ways a head moves -
+  // taught neither of them, and the angles nobody holds squarely on one axis
+  // stayed uncorrected. That is the other half of "only sometimes". Sharing
+  // one step between them settles the double-counting without ever refusing
+  // the sample.
+  function learnBrowPose(rig, target, have, span) {
     var h = rig && rig.head;
-    if (!h || faceOcc || !isNum(target)) return;
-    var v = poseAt;
-    v.y = num(h.y); v.x = num(h.x); v.z = num(h.z);
-    for (var i = 0; i < POSE_AXES.length; i++) {
-      var k = POSE_AXES[i], alone = true;
-      for (var j = 0; j < POSE_AXES.length; j++) {
-        if (j !== i && Math.abs(v[POSE_AXES[j]]) >= POSE_CENTRE) { alone = false; break; }
-      }
-      if (!alone) continue;
-      var c = Math.round(poseCell(v[k]));
-      if (c === POSE_MID) continue;
+    if (!h || faceOcc || !isNum(target) || !isNum(have)) return;
+    var i, k, f, total = 0;
+    for (i = 0; i < POSE_AXES.length; i++) {
+      k = POSE_AXES[i];
+      // An axis on its centre cell has no offset to learn - the baseline is
+      // its answer - so it takes no share and cannot be taught somebody
+      // else's drift.
+      f = Math.abs(poseCell(num(h[k])) - POSE_MID);
+      poseShare[k] = f > 0.5 ? f : 0;
+      total += poseShare[k];
+    }
+    if (total <= 0) return;
+    var dir = target > have ? 1 : -1;
+    var reach = Math.max(span, BROW_SPAN_MIN);
+    // A frame far from what this pose already reads as rest is more likely an
+    // expression than a correction, so it is worth less - but it is never
+    // worth nothing. A hard "only while the brow is quiet" gate deadlocks: a
+    // cell that has learned a wrong value would refuse every frame that could
+    // put it right, and a cold cell refuses the very drift it exists to learn.
+    // Slowing those frames down keeps the median honest at a pose somebody
+    // spends holding a face, without ever closing the door on one.
+    var quiet = clamp(1.2 - Math.abs(target - have) / reach, 0.05, 1);
+    reach *= quiet;
+    for (i = 0; i < POSE_AXES.length; i++) {
+      k = POSE_AXES[i];
+      if (!poseShare[k]) continue;
       var a = browPose[k];
+      var c = Math.round(poseCell(num(h[k])));
+      if (c === POSE_MID) continue;
+      seedCell(a, c);
       a.n[c]++;
       // a big step while the cell is new, so it arrives within a second of
       // looking that way, and a small one once it has an opinion worth keeping
-      var step = Math.max(span, BROW_SPAN_MIN) * Math.max(POSE_CREEP, 1 / a.n[c]);
-      a.off[c] = clamp(a.off[c] + (target > a.off[c] ? step : -step), -POSE_MAX, POSE_MAX);
+      var step = reach * Math.max(POSE_CREEP, 1 / a.n[c]) * (poseShare[k] / total);
+      a.off[c] = clamp(a.off[c] + dir * step, -POSE_MAX, POSE_MAX);
     }
   }
 
@@ -2337,7 +2425,7 @@
   // the ladder measures against there. Returns it for the readout.
   function learnAutoBrow(rig, adj, learned) {
     if (browTrack.base === null) return null;
-    learnBrowPose(rig, adj + learned - browTrack.base, browTrack.span);
+    learnBrowPose(rig, adj + learned - browTrack.base, learned, browTrack.span);
     return browTrack.base;
   }
 
@@ -2345,13 +2433,14 @@
   // first neighbour out. Reasoning about this from the code is guesswork -
   // watch the numbers while turning the head instead.
   function browRestInfo() {
-    var out = {};
+    var out = { conf: r2(poseConf) };
     for (var i = 0; i < POSE_AXES.length; i++) {
       var k = POSE_AXES[i], a = browPose[k], cells = [];
       for (var j = 0; j < POSE_CELLS; j++) {
         cells.push({
           at: +(((j - POSE_MID) * POSE_CELL).toFixed(2)),
-          shift: +(cellShift(a, j).toFixed(4)),
+          shift: +(a.off[j].toFixed(4)),
+          warm: +(cellWarm(a, j).toFixed(2)),
           n: a.n[j]
         });
       }
@@ -2368,6 +2457,22 @@
   function calibratedBlink(closedness) {
     var c = cfg.cal;
     return (closedness - c.blinkOpen) / (c.blinkClosed - c.blinkOpen);
+  }
+
+  // How much further the brow has to travel before angry or sorrow is claimed
+  // at a pose the ladder has not learned yet. The zero under the brow is a
+  // guess there, and a guess is not something to call an expression from -
+  // but a real furrow still gets there, it just has to be a real one.
+  var BLIND_LIFT = 0.3;
+
+  var emoSince = { angry: 0, sorrow: 0 };
+
+  // Only the rise is held. On an atlas the cell snaps, so a single bad frame
+  // is a visible change of face - the same reason the UV latch has `holdMs`.
+  function heldEmotion(key, v, t) {
+    if (v <= 0) { emoSince[key] = 0; return 0; }
+    if (!emoSince[key]) emoSince[key] = t;
+    return (t - emoSince[key]) >= cfg.emotionHold ? v : 0;
   }
 
   function driveEmotions(vrm, rig, rawBrow, rawSmile) {
@@ -2401,7 +2506,7 @@
       restNow = poseBrowRest(cfg.cal, rig);
       var dev = rawBrow - learned - restNow;
       var span = browSpan(cfg.cal, dev);
-      learnBrowPose(rig, rawBrow - restNow, span);
+      learnBrowPose(rig, rawBrow - restNow, learned, span);
       brow = clamp(calNorm(dev, span) * cfg.browGain, -1, 1);
       smile = clamp(calibratedSmile(rawSmile) * cfg.browGain, 0, 1);
     } else if (mode === 'calibrated') {
@@ -2422,9 +2527,11 @@
       smile = clamp((rawSmile - 0.4) / 0.5, 0, 1);
     }
 
+    var lift = mode === 'raw' ? 0 : (1 - poseConf) * BLIND_LIFT;
+    var emoAt = now();
     var out = {
-      angry: ramp(-brow, cfg.angryAt),
-      sorrow: ramp(brow, cfg.sorrowAt),
+      angry: heldEmotion('angry', ramp(-brow, Math.min(0.95, cfg.angryAt + lift)), emoAt),
+      sorrow: heldEmotion('sorrow', ramp(brow, Math.min(0.95, cfg.sorrowAt + lift)), emoAt),
       fun: 0,
       joy: 0
     };
@@ -4706,6 +4813,7 @@
     'Angry at': 'Bravo a partir de',
     'Sorrow at': 'Triste a partir de',
     'Smile at': 'Sorriso a partir de',
+    'Emotion hold': 'Espera da emoção',
     'Smile drives': 'Sorriso aciona',
     'fun + joy': 'fun + joy',
     'waiting for a tracked face...': 'aguardando um rosto rastreado...',
@@ -4931,7 +5039,8 @@
     // --- notes ---
     'note.reloadRender': 'A escala de render e aplicada ao recarregar.',
     'note.reloadPerf': 'As opções do modelo Mediapipe são aplicadas ao recarregar. Os limites de taxa valem na hora.',
-    'note.emotions': 'O app so rastreia piscadas, as cinco vogais e um sorriso. Bravo, triste e fun nunca são escritos - isto os deriva da sobrancelha e da boca para que essas células possam disparar. Faça cada careta e observe a leitura para ajustar os limiares.',
+    'note.emotions': 'O app so rastreia piscadas, as cinco vogais e um sorriso. Bravo, triste e fun nunca são escritos - isto os deriva da sobrancelha e da boca para que essas células possam disparar. Faça cada careta e observe a leitura para ajustar os limiares. ' +
+      'A espera da emoção é quanto tempo a sobrancelha tem que ficar passada do limiar antes de virar expressão: um pico enquanto a cabeça gira dura um ou dois frames, uma careta é segurada. Só a subida espera.',
     'note.motion': 'Os ganhos de pescoço e torso são fixos no app, entao um movimento real pequeno vira um movimento grande no avatar. Baixe o ganho para mexer menos, aumente o amortecimento para mexer mais devagar. Isolar inclinação da cabeça tira do torso a parte que o rastreador copiou da cabeça - orelha no ombro deixa de deitar o peito.',
     'note.armIK': 'Mira o braço na mão que a câmera viu, em vez de repetir os ângulos do Kalidokit - é o que faz a mão chegar de fato na cabeça. Precisa de rastreio corporal (holistic). Alcance corrige a proporção de um modelo de braço curto; ganho de profundidade controla o quanto o eixo em direção à câmera conta, que é o número mais ruidoso do Mediapipe. O ombro não é animado por nada no app, então acompanhamento do ombro solta ele um pouco e o braço erguido para de cortar o pescoço.',
     'note.mouth': 'O app reporta cinco pesos de vogal que sobem todos juntos com a mandíbula, então um deles ganha diga o que disser e a boca acaba com um formato aberto só. Isto grava o que o teu rosto marca enquanto você fala cada vogal em voz alta, e escolhe a gravação mais próxima do frame atual - silêncio incluído, que é o que libera a célula da boca para o sorriso. Segurar vogal é o quanto outra vogal precisa estar mais perto para a boca trocar de célula.',
@@ -4994,7 +5103,9 @@
     'note.emotions': 'The app only tracks blinks, the five vowels and a smile. Angry, ' +
       'sorrow and fun are never written at all - this derives them from the brow and ' +
       'mouth so those cells can fire. Pull each face and watch the readout to set the ' +
-      'thresholds.',
+      'thresholds. Emotion hold is how long the brow has to stay past one before it ' +
+      'is written: a drift spike while the head turns lasts a frame or two, a face ' +
+      'making an expression holds it. Only the rise waits.',
     'note.motion': 'The neck and torso gains are hardcoded upstream, so a small real ' +
       'movement lands as a large avatar movement. Lower the gain to move less, raise ' +
       'the damping to move slower. Head-tilt isolation strips the part of a torso ' +
@@ -5912,6 +6023,7 @@
     addRange(em, 'angryAt', T('Angry at'), 0, 0.95, 0.01, function (v) { return v.toFixed(2); }, STG);
     addRange(em, 'sorrowAt', T('Sorrow at'), 0, 0.95, 0.01, function (v) { return v.toFixed(2); }, STG);
     addRange(em, 'smileAt', T('Smile at'), 0, 0.95, 0.01, function (v) { return v.toFixed(2); }, STG);
+    addRange(em, 'emotionHold', T('Emotion hold'), 0, 400, 10, function (v) { return v + ' ms'; }, STG);
     addRule(em);
 
     readoutEl = el('div', STG, T('waiting for a tracked face...'));
