@@ -40,12 +40,26 @@
   // still be undefined then - join(undefined) silently uses a comma.
   var NL = String.fromCharCode(10);
 
+  // The browser already knows what language this person reads, and a fresh
+  // profile guessing English at someone whose whole machine is in Portuguese
+  // means the spoken prompts arrive in the wrong language too - the voice
+  // follows the panel. Only the default: a saved profile still wins, and the
+  // picker still overrides both.
+  function localeLang() {
+    try {
+      var n = window.navigator || {};
+      var l = String((n.languages && n.languages[0]) || n.language || '');
+      if (l.toLowerCase().indexOf('pt') === 0) return 'pt';
+    } catch (e) {}
+    return 'en';
+  }
+
   var DEFAULTS = {
     // render at 1 device pixel per CSS pixel and let CSS upscale with
     // image-rendering:pixelated -> hard pixel edges instead of a 2x downsample
     pixelRatio: 1,
-    // 'en' | 'pt' - the panel language, and the app's own labels with it
-    lang: 'en',
+    // 'en' | 'pt' - the panel language, the app's own labels, and the voice
+    lang: localeLang(),
     // A calibration pose is held at arm's length from the screen, where the
     // prompt cannot be read and - worse - there is no way to tell the count-in
     // from the reading. Both cues carry that across the room.
@@ -1380,6 +1394,63 @@
     finish: [[660, 0, 110, 0.18], [880, 0.11, 110, 0.18], [1320, 0.22, 240, 0.18]]
   };
 
+  // `u.lang` is a hint, and Chrome on Windows routinely ignores it: with no
+  // voice named it speaks with whatever the system default is, which reads a
+  // Portuguese prompt in an American accent and is most of the way to
+  // unintelligible. Naming a voice is the only thing that actually picks the
+  // language.
+  //
+  // `getVoices()` is empty until the list has loaded and it loads
+  // asynchronously, so the answer is cached per language and thrown away when
+  // the browser says the list changed - asking once at startup gets nothing.
+  var voiceFor = {};
+  var voiceMissing = {};
+
+  function pickVoice(want) {
+    if (want in voiceFor) return voiceFor[want];
+    var list;
+    try { list = window.speechSynthesis.getVoices(); } catch (e) { list = null; }
+    // Not loaded yet. Do not cache that - the next prompt should ask again.
+    if (!list || !list.length) return null;
+    var lang = want.toLowerCase();
+    var base = lang.split('-')[0];
+    var exact = null, same = null;
+    for (var i = 0; i < list.length; i++) {
+      var v = list[i];
+      var vl = String(v.lang || '').replace('_', '-').toLowerCase();
+      // A local voice over a network one where both fit: the network ones
+      // stall, and a prompt that arrives after the pose is over is worse than
+      // no prompt.
+      if (vl === lang) { if (!exact || (v.localService && !exact.localService)) exact = v; }
+      else if (vl.split('-')[0] === base) { if (!same || (v.localService && !same.localService)) same = v; }
+    }
+    // pt-PT before an English voice; nothing at all before a voice that is
+    // definitely the wrong language, since `u.lang` alone may still land.
+    var got = exact || same || null;
+    voiceFor[want] = got;
+    if (got) {
+      log('voice for ' + want + ':', got.name, got.lang);
+    } else if (!voiceMissing[want]) {
+      voiceMissing[want] = true;
+      // Not `log`: this is the answer to "why is it not speaking Portuguese",
+      // and nobody debugging that has verbose on yet.
+      console.warn('[psx] no ' + want + ' speech voice is installed, so the ' +
+        'spoken prompts will be read by the system default voice. Add one in ' +
+        'the operating system speech settings.');
+    }
+    return got;
+  }
+
+  try {
+    if (window.speechSynthesis && window.speechSynthesis.addEventListener) {
+      window.speechSynthesis.addEventListener('voiceschanged', function () {
+        voiceFor = {};
+      });
+    }
+    // Chrome only starts loading the list once it has been asked for.
+    if (window.speechSynthesis) window.speechSynthesis.getVoices();
+  } catch (e) { /* as with the tones */ }
+
   // Voice runs off the same translated strings the prompt shows, so it never
   // needs its own script - and never drifts from what is on screen.
   function say(text) {
@@ -1390,8 +1461,11 @@
       // The queue is not a transcript. A prompt that has been replaced is not
       // worth hearing, and a backlog would still be talking three steps later.
       synth.cancel();
+      var want = cfg.lang === 'pt' ? 'pt-BR' : 'en-US';
       var u = new SpeechSynthesisUtterance(String(text));
-      u.lang = cfg.lang === 'pt' ? 'pt-BR' : 'en-US';
+      u.lang = want;
+      var v = pickVoice(want);
+      if (v) u.voice = v;
       u.rate = 1.05;
       synth.speak(u);
     } catch (e) { /* as with the tones */ }

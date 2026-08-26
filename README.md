@@ -309,7 +309,26 @@ the loaded model actually has.
 
 ### Language
 
-The panel speaks English or Portuguese (BR), switched in the PSX Hands card.
+The panel speaks English or Portuguese (BR), switched in the PSX Hands card. A
+fresh profile picks its language from the browser's own, so a machine in
+Portuguese starts in Portuguese; a saved profile always wins over that, and the
+picker over both.
+
+**The spoken calibration prompts follow that setting**, because the voice reads
+the same translated strings the prompt shows and can never drift from what is on
+screen. Setting `lang` on the utterance is not enough to get a Portuguese voice,
+though: it is only a hint, and Chrome on Windows routinely ignores it and speaks
+with the system default — which reads a Portuguese prompt in an American accent
+and is most of the way to unintelligible. So a matching voice is named
+explicitly: exact locale first (`pt-BR`), then any voice of the same language
+(`pt-PT` before an English one), preferring local voices over network ones,
+which stall long enough for the prompt to arrive after the pose is over. The
+list loads asynchronously and is empty when first asked for, so the answer is
+cached per language and dropped again on `voiceschanged`.
+
+If no Portuguese voice is installed at all, nothing in the browser can fix it —
+the console says so once, in as many words, and the prompts are read by the
+system default until one is added in the OS speech settings.
 
 Upstream cannot do this: it ships an `en`/`ru` map for the menu buttons only,
 its language store is built as `J("en")`, and the `navigator.languages[0]`
