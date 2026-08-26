@@ -29,7 +29,7 @@ touches the app's own source tree (this repo only ships the built bundle).
 | `PSX.onModel(vrm, gltf)` | Nearest-neighbour texture filtering, no mipmaps, no anisotropy; collects `_MainTex_ST` UV binds |
 | `PSX.tick(vrm)` | Drives texture-atlas face expressions each frame |
 | `PSX.face(vrm, rig)` | Receives the solved Kalidokit face and writes the emotion presets |
-| `PSX.headGain()` / `PSX.bodyGain()` | Neck and chest/spine rotation gain |
+| `PSX.headGain()` / `PSX.bodyGain()` / `PSX.leanGain()` / `PSX.spineLean()` | Neck, torso pitch, torso lean gain, and head-roll stripped from `Spine.z` |
 | `PSX.smooth(t)` | Lerp factor for every tracked bone |
 | `PSX.pose(world)` | Receives the Mediapipe pose world landmarks |
 | `PSX.arm(...)` | Replaces the Euler arm rig with the landmark retarget |
@@ -255,15 +255,19 @@ The steps, in order:
 | Face the camera | the rest pose everything else is measured against |
 | Hold completely still | **Steadiness** — the spread of a pose that is not moving is your camera's own noise |
 | Turn left / right / look up / down | **Head / neck gain**, mapping your widest turn onto the neck's ±0.8 clamp |
+| Tilt your head to one side | **Head-tilt isolation**. Shoulders stay level, so whatever the shoulder line does is the pose solver copying a head roll onto the spine — stripped at runtime so an ear-to-shoulder no longer tips the chest |
 | Lean your torso to one side | **Torso lean gain**, against the spine's ±0.7 clamp |
 | Shrug your shoulders up | **Shoulder follow** — how far your own shoulders actually travel |
 | Arms straight out to the sides | **Reach**. Arms out sit in the image plane, where the tracker has no depth to get wrong, so this is the cleanest reach reading there is |
 | Point one arm at the camera | **Depth gain**. What is left of your arm's length after the across and up components have been accounted for has to be depth, so comparing it against the depth Mediapipe reported measures how far that estimate is compressed |
 | Put both hands on your head | raises **Reach** if the avatar's hands still cannot make it to its skull. This pose is foreshortened, so it may only raise the T-pose reading, never pull it back down |
 
-Full-body tracking has to be on for the last three. Torso *pitch* rides on the
+Full-body tracking has to be on for the head-tilt isolation and the arm steps. Torso *pitch* rides on the
 head signal, so **Torso gain** keeps its stock ratio to the head; lean and twist
-come from the pose solver instead and get their own gain.
+come from the pose solver instead and get their own gain. A head tilt (ear to
+shoulder) is not a lean, but the pose solver reports it as one; **Head-tilt
+isolation** is the fraction of that coupling to strip. It can be dragged live
+without re-running the wizard.
 
 ### Tracking sanity
 
@@ -295,6 +299,14 @@ every gesture toward the camera.
 A frame that fails either check is coasted rather than followed. The neck and torso
 have no hook that can drop a frame, so there they get an almost-zero lerp instead —
 the jump becomes a wobble, and the next believable frame pulls it back.
+
+A hand on the face is a different failure. The mesh reports a blink, a shout, a
+brow jump — it is looking at a palm — while the pose still has you. When a wrist
+or palm overlaps the head in the video (measured in this person's own ear-span,
+one hand is enough), blink / mouth / emotions hold the last good frame, and a
+jumped mesh does **not** reject the pose: covering a yawn is an arm gesture, and
+killing the retarget is what made that look like tracking had died. The neck only
+crawls if the mesh actually jumped; otherwise the head still follows.
 
 ### Adaptive smoothing
 
@@ -541,7 +553,7 @@ and scoped class names, so they look native. Controls are split by what they do:
 
 - **Face Expressions** — Trigger threshold, Release margin, Minimum hold, Mouth gain, Blink gain, Preview cell (force one expression for calibration)
 - **Emotion Detection** — Detect emotions, Signal range (`calibrated` / `auto` / `raw`), One emotion at a time, Speech first, Talking at, Signal gain, Angry at, Sorrow at, Smile at, live readout, Calibrate expressions and Reset auto range
-- **Motion Calibration** — Motion calibration, Head / neck gain, Torso gain, Arm gain, Damping, Arm retarget, Wrist from hand model, Reach, Depth gain, Shoulder follow, Forearm twist, Face anchor, Prediction, Dropout hold, Tracking sanity
+- **Motion Calibration** — Motion calibration, Head / neck gain, Torso gain, Torso lean gain, Head-tilt isolation, Arm gain, Damping, Arm retarget, Wrist from hand model, Reach, Depth gain, Shoulder follow, Forearm twist, Face anchor, Prediction, Dropout hold, Tracking sanity
 - **Performance** — Performance caps, Tracking rate, Render rate, Lite pose model
 - **PSX Hands** — Language, Driven fingers (`all fingers` / `thumb only` / `none`), Export settings, Import settings, Reset PSX settings
 

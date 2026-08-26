@@ -47,7 +47,7 @@
     },
     {
       "find": "me.Spine);let c=.05;r&&zt(r,{x:ae(e",
-      "replace": "me.Spine);let c=window.PSX.bodyGain(),ps=window.PSX.leanGain();r&&zt(r,{x:ae(e"
+      "replace": "me.Spine);let c=window.PSX.bodyGain(),ps=window.PSX.leanGain();t.Spine&&(t.Spine.z=window.PSX.spineLean(t.Spine.z,e.head.z));r&&zt(r,{x:ae(e"
     },
     {
       "find": "*2,-.3,.3)},i?1:.04+Ke*2),u&&zt(u,{x:ae(",

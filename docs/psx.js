@@ -13,7 +13,8 @@
  *   PSX.onModel(vrm, gltf)       - called once per loaded VRM
  *   PSX.tick(vrm)                - called once per frame, after vrm.update()
  *   PSX.face(vrm, rig)           - the solved Kalidokit face, before it lands
- *   PSX.headGain() / bodyGain() / armGain()  - neck, torso, and arm rotation gain
+ *   PSX.headGain() / bodyGain() / leanGain() / spineLean() / armGain()
+ *                                - neck, torso pitch, torso lean, and arm rotation gain
  *   PSX.pose(world, image, hands) - the holistic landmarks, before Kalidokit
  *   PSX.arm(...)                 - retargets one arm; true suppresses the rig
  *   PSX.smooth(t)                - lerp factor for every tracked bone
@@ -129,6 +130,9 @@
     // rather than the head. Stock shares bodyGain; the lean calibration needs
     // them apart, since one signal wants a small gain and the other a large one.
     leanGain: 0.05,
+    // How much of Spine.z is treated as a head roll the pose solver copied.
+    // 0 = stock (a head tilt leans the torso); 1 = strip a 1:1 coupling.
+    leanHead: 0,
     // arm/hand euler multiplier; 1 = stock Kalidokit. Only reaches the wrist
     // roll while the retarget below is on, since the retarget replaces the
     // upper/lower arm angles outright.
@@ -259,6 +263,7 @@
     headGain: { min: 0, max: 1.5 },
     bodyGain: { min: 0, max: 0.2 },
     leanGain: { min: 0, max: 1 },
+    leanHead: { min: 0, max: 1 },
     armGain: { min: 0.5, max: 2.5 },
     damping: { min: 0, max: 0.95 },
     minCutoff: { min: 0.2, max: 5 },
@@ -475,7 +480,7 @@
 
   // Motion calibration has no object of its own - it lands as a handful of
   // gains - so it counts as carried when the file brought any of them.
-  var MOTION_KEYS = ['headGain', 'bodyGain', 'leanGain', 'armReach', 'armDepth',
+  var MOTION_KEYS = ['headGain', 'bodyGain', 'leanGain', 'leanHead', 'armReach', 'armDepth',
     'reachUp', 'reachR', 'reachL', 'shoulder', 'minCutoff'];
 
   function importReport(body, bad) {
@@ -1105,6 +1110,7 @@
       parts.push(top ? top + ' ' + lastFace.out[top].toFixed(2) : 'neutral');
     }
     if (lastBlink != null) parts.push('blink ' + lastBlink.toFixed(2));
+    if (faceOcc) parts.push(T('hand on face'));
     setText(readoutEl, parts.join('  ·  '));
   }
 
@@ -1133,6 +1139,12 @@
     { key: 'right', title: 'Turn your head right', hint: 'As far as is comfortable, and hold' },
     { key: 'up',    title: 'Look up',              hint: 'Tilt your head back and hold' },
     { key: 'down',  title: 'Look down',            hint: 'Tilt your chin down and hold' },
+    // Head roll is not a torso lean, but the pose solver copies it onto
+    // Spine.z - a small ear-to-shoulder then leans the whole chest. This
+    // pose is the ground truth that they are different: shoulders stay
+    // level, so whatever the shoulder line does is the coupling to strip.
+    { key: 'headRoll', title: 'Tilt your head to one side',
+      hint: 'Ear toward your shoulder - keep your shoulders level' },
     { key: 'lean',  title: 'Lean your torso to one side',
       hint: 'Sway from the waist as far as is comfortable, and hold' },
     { key: 'shrug', title: 'Shrug your shoulders up',
@@ -1319,7 +1331,7 @@
       brow: [], smile: [], y: [], x: [], eyeL: [], eyeR: [],
       // motion: model-space readings from the render tick, landmark-space ones
       // from the holistic result
-      reach: [], span: [], roll: [], torso: [], depth: [], alen: [],
+      reach: [], span: [], roll: [], torso: [], depth: [], alen: [], z: [],
       // sweep: one depth ratio and one residual per locked arm per inference
       fit: newFit(),
       // mouth: one feature vector per sampled frame
@@ -1577,6 +1589,7 @@
       if (st.key === 'rest') {
         o.restY = median(a.y);
         o.restX = median(a.x);
+        if (a.z.length) o.restZ = median(a.z);
         if (a.roll.length) o.restRoll = median(a.roll);
         if (a.torso.length) o.restTorso = median(a.torso);
         if (a.reach.length >= CAL_MIN_SAMPLES) o.restReach = median(a.reach);
@@ -1585,6 +1598,19 @@
         // and it is deliberately kept out of `shake` - a still step that reads
         // still is the point, not a warning
         o.noise = Math.max(spread(a.y), spread(a.x));
+      } else if (st.key === 'headRoll') {
+        // Signed medians, not abs deviations: the coupling has a direction,
+        // and a slope through |roll|/|head.z| would treat a counter-lean as
+        // the same thing as the pose solver copying the head onto the spine.
+        if (a.roll.length >= CAL_MIN_SAMPLES && a.z.length >= CAL_MIN_SAMPLES &&
+            isNum(o.restRoll) && isNum(o.restZ)) {
+          var dZ = median(a.z) - o.restZ;
+          var dR = median(a.roll) - o.restRoll;
+          if (Math.abs(dZ) > 0.08) {
+            o.headRoll = dZ;
+            o.rollAtHead = dR;
+          }
+        }
       } else if (st.key === 'lean') {
         if (a.roll.length >= CAL_MIN_SAMPLES && isNum(o.restRoll)) {
           o.lean = pct(deviations(a.roll, o.restRoll), 0.9);
@@ -1826,6 +1852,20 @@
       notes.push(T('Torso lean gain') + ' ' + cfg.leanGain.toFixed(2) + 'x');
     }
 
+    // Shoulders that rolled as far as the head did were not held still - that
+    // is a lean, and taking it as coupling would strip every real lean that
+    // happens with a head tilt. Same-sign only: a counter-lean is the body
+    // doing the opposite of the head, not the solver copying it.
+    if (isNum(c.headRoll) && isNum(c.rollAtHead) &&
+        Math.abs(c.headRoll) > 0.08 &&
+        Math.abs(c.rollAtHead) <= Math.abs(c.headRoll) * 1.2) {
+      var couple = c.rollAtHead / c.headRoll;
+      if (couple > 0) {
+        cfg.leanHead = clamp(couple, 0, 1);
+        notes.push(T('Head-tilt isolation') + ' ' + cfg.leanHead.toFixed(2));
+      }
+    }
+
     // Someone whose shoulders really travel wants the model's to follow further
     if (isNum(c.restTorso) && isNum(c.shrugTorso) && c.restTorso > 1e-4) {
       var travel = (c.shrugTorso - c.restTorso) / c.restTorso;
@@ -2018,8 +2058,11 @@
       if (!h) return;
       a.y.push(num(h.y));
       a.x.push(num(h.x));
+      a.z.push(num(h.z));
       return;
     }
+    // a hand on the face is what the mesh is looking at, not the pose
+    if (faceOcc) return;
     if (calRun.kind === 'mouth') {
       var f = mouthFeature(rig);
       if (f) a.feat.push(f);
@@ -2169,6 +2212,13 @@
     if (!cfg.emotions) return;
     var proxy = vrm && vrm.blendShapeProxy;
     if (!proxy || !rig) return;
+    if (faceOcc && lastFace) {
+      for (var ei = 0; ei < EMOTION_KEYS.length; ei++) {
+        try { proxy.setValue(EMOTION_KEYS[ei], lastFace.out[EMOTION_KEYS[ei]]); } catch (e) {}
+      }
+      paintReadout();
+      return;
+    }
 
     // a recorded calibration is the best mapping, but fall back rather than
     // going dead if the mode is selected before it has been run
@@ -2271,6 +2321,8 @@
   // atlas cell, so take the more-closed eye. When a guided calibration exists,
   // map through the open-floor / closed-peak recorded across head poses, or
   // looking down reads as a blink and a blink while turned never clears.
+  var heldBlink = null;
+
   function driveBlink(vrm, rig) {
     var proxy = vrm && vrm.blendShapeProxy;
     var eye = rig && rig.eye;
@@ -2283,6 +2335,14 @@
     var useCal = cfg.signal === 'calibrated' && hasBlinkCal(cfg.cal);
     var l = useCal ? clamp(calibratedBlink(rawL), 0, 1) : rawL;
     var r = useCal ? clamp(calibratedBlink(rawR), 0, 1) : rawR;
+    // A palm over an eye reads as that lid shutting. Hold the last open/shut
+    // the mesh reported while it could still see the face.
+    if (faceOcc && heldBlink) {
+      l = heldBlink.l;
+      r = heldBlink.r;
+    } else {
+      heldBlink = { l: l, r: r };
+    }
     var blink = l > r ? l : r;
     lastBlink = blink;
     paintReadout();
@@ -2411,6 +2471,16 @@
     var mouth = rig && rig.mouth;
     if (!proxy || !mouth) return;
     var k;
+    if (faceOcc) {
+      if (lastViseme.key) {
+        for (k in MOUTH_KEYS) {
+          try { proxy.setValue(k, k === lastViseme.key ? lastViseme.w : 0); } catch (err) {}
+        }
+      } else {
+        clearVowels(proxy);
+      }
+      return;
+    }
 
     if (mouthCalUsable(cfg.mouth)) {
       var f = mouthFeature(rig);
@@ -2513,6 +2583,19 @@
   function bodyGain() { return cfg.motion ? cfg.bodyGain : STOCK_BODY_GAIN; }
   function leanGain() { return cfg.motion ? cfg.leanGain : STOCK_LEAN_GAIN; }
   function armGain() { return cfg.motion ? cfg.armGain : 1; }
+
+  // The pose solver reports head roll as a torso lean. Subtract only the
+  // component that agrees with the head, and never reverse past zero - a
+  // frame where the shoulders did not follow would otherwise invent a lean
+  // the other way. Off / uncalibrated is identity, which is stock.
+  function spineLean(z, headZ) {
+    z = num(z);
+    if (!cfg.motion || !(cfg.leanHead > 0)) return z;
+    var couple = cfg.leanHead * num(headZ);
+    if (couple * z <= 0) return z;
+    if (Math.abs(couple) >= Math.abs(z)) return 0;
+    return z - couple;
+  }
 
   function boneNode(vrm, name) {
     var h = vrm && vrm.humanoid;
@@ -2846,8 +2929,10 @@
     // A frame the sanity check does not believe still reaches the neck and the
     // torso - there is no hook that can drop it. Crawling toward it instead of
     // following it turns the jump into a wobble, and the next frame anyone
-    // believes pulls it back.
-    if (cfg.sanity && !poseTrusted) a = Math.min(a, 0.01);
+    // believes pulls it back. A hand on the face can jump the mesh without
+    // invalidating the pose, so that crawl is on faceTrusted, and the arms
+    // still retarget (they do not go through this lerp).
+    if (cfg.sanity && (!poseTrusted || !faceTrusted)) a = Math.min(a, 0.01);
     if (!cfg.damping) return a;
     // never return 0, or the bone would freeze instead of easing
     return Math.max(a * (1 - cfg.damping), 0.002);
@@ -2924,6 +3009,12 @@
   // Something really changed - they sat down, swapped seats, changed the light.
   // Give up and re-learn, or one genuine change locks the gate shut for good.
   var SANITY_GIVE_UP = 20;
+  // ms to keep treating the face as occluded after the hand leaves, so a pass
+  // over the eyes does not glitch the lids on the way out.
+  var FACE_OCC_HOLD = 180;
+  // Knuckles and tips. A yawn-cover parks the wrist at the chin while the
+  // fingers sit on the lips; the pose wrist alone would miss that.
+  var HAND_FACE_PTS = [0, 4, 5, 8, 9, 12, 13, 16, 17, 20];
 
   function meter() { return { n: 0, avg: 0, dev: 0, hi: 0, bad: 0 }; }
 
@@ -2946,24 +3037,87 @@
   var gapBad = 0;
   // false while the two trackers disagree about where this person is
   var poseTrusted = true;
+  // false when the face mesh jumped because a hand is what it is looking at
+  var faceTrusted = true;
+  var faceOcc = false;
+  var faceOccAt = 0;
+
+  function nearFace(p, nose, lim2) {
+    return vis(p) && imgDist(p, nose) < lim2;
+  }
+
+  // Ground truth outside the mesh: the pose still sees the head, the hand
+  // model still sees the palm, and if they overlap in the video the mesh is
+  // looking at a hand. Ear-span is this person's own face, not a webcam
+  // constant. One hand is enough - covering a yawn is one palm.
+  function handHitsFace() {
+    var img = poseImg;
+    var nose = img && img[LM_NOSE];
+    if (!vis(nose)) return false;
+    var earL = img[LM_EAR_L], earR = img[LM_EAR_R];
+    var rad = (vis(earL) && vis(earR)) ? Math.sqrt(imgDist(earL, earR)) * 0.65 : 0.14;
+    var lim2 = rad * rad;
+    var names = ['Right', 'Left'];
+    for (var i = 0; i < 2; i++) {
+      var idx = ARM_LM[names[i]];
+      if (nearFace(img[idx.wrist], nose, lim2)) return true;
+      if (nearFace(img[idx.index], nose, lim2)) return true;
+      if (nearFace(img[idx.pinky], nose, lim2)) return true;
+      var h = poseHand && poseHand[names[i]];
+      if (!h) continue;
+      for (var k = 0; k < HAND_FACE_PTS.length; k++) {
+        if (nearFace(h[HAND_FACE_PTS[k]], nose, lim2)) return true;
+      }
+    }
+    return false;
+  }
+
+  function noteFaceOcc() {
+    if (handHitsFace()) {
+      faceOcc = true;
+      faceOccAt = now();
+    } else if (faceOcc && now() - faceOccAt > FACE_OCC_HOLD) {
+      faceOcc = false;
+    }
+  }
 
   function noteFaceBox(rig) {
-    if (!cfg.sanity) { poseTrusted = true; return; }
+    noteFaceOcc();
+    if (!cfg.sanity) {
+      poseTrusted = true;
+      faceTrusted = true;
+      return;
+    }
     var h = rig && rig.head;
     var box = h && h.position;
     var nose = poseImg && poseImg[LM_NOSE];
     // nothing to cross-check against - believe what there is
-    if (!box || !vis(nose)) { poseTrusted = true; return; }
+    if (!box || !vis(nose)) {
+      poseTrusted = true;
+      faceTrusted = !faceOcc;
+      return;
+    }
     var dx = num(box.x) - num(nose.x);
     var dy = num(box.y) - num(nose.y);
     var off = Math.max(offBy(gapX, dx), offBy(gapY, dy));
     if (off > SANITY_K && gapBad < SANITY_GIVE_UP) {
       gapBad++;
-      poseTrusted = false;
+      if (faceOcc) {
+        // the mesh jumped because it is looking at a hand. The pose still
+        // has this person, and the arm covering the mouth has to keep going.
+        poseTrusted = true;
+        faceTrusted = false;
+      } else {
+        poseTrusted = false;
+        faceTrusted = false;
+      }
       return;                 // and do not learn from a frame we do not believe
     }
     gapBad = 0;
     poseTrusted = true;
+    faceTrusted = true;
+    // a hand on the cheek shifts the gap a little; that is not the new face
+    if (faceOcc) return;
     learn(gapX, dx);
     learn(gapY, dy);
   }
@@ -3089,6 +3243,7 @@
     // Already corrected when the bundle carries the hook; placing again is a
     // no-op, and it is what keeps this working on a bundle that does not.
     poseHand = placeHands(hands);
+    noteFaceOcc();
     if (!world || world.length <= ARM_LM.Left.hip) { poseLm = null; return; }
     poseLm = world;
     poseLmAt = now();
@@ -3431,6 +3586,7 @@
   function armInfo() {
     return {
       armIK: cfg.armIK,
+      faceOcc: faceOcc, faceTrusted: faceTrusted, poseTrusted: poseTrusted,
       reach: r2(cfg.armReach), up: r2(cfg.reachUp), depth: r2(cfg.armDepth),
       sides: [r2(cfg.reachR), r2(cfg.reachL)],
       headAnchor: cfg.headAnchor,
@@ -4245,6 +4401,7 @@
     'raise': 'levantar',
     'smile': 'sorriso',
     'blink': 'piscada',
+    'hand on face': 'mão no rosto',
     'brow drift': 'deriva da sobrancelha',
     'turn': 'giro',
     'tilt': 'inclinacao',
@@ -4290,6 +4447,10 @@
     'Head / neck gain': 'Ganho de cabeça / pescoço',
     'Torso gain': 'Ganho do torso',
     'Torso lean gain': 'Ganho de inclinação do torso',
+    'Head-tilt isolation': 'Isolar inclinação da cabeça',
+    'Tilt your head to one side': 'Incline a cabeça para um lado',
+    'Ear toward your shoulder - keep your shoulders level':
+      'Orelha em direção ao ombro - mantenha os ombros nivelados',
     'Adaptive smoothing': 'Suavização adaptativa',
     'Steadiness': 'Firmeza',
     'Responsiveness': 'Resposta',
@@ -4403,10 +4564,10 @@
     'note.reloadRender': 'A escala de render e aplicada ao recarregar.',
     'note.reloadPerf': 'As opções do modelo Mediapipe são aplicadas ao recarregar. Os limites de taxa valem na hora.',
     'note.emotions': 'O app so rastreia piscadas, as cinco vogais e um sorriso. Bravo, triste e fun nunca são escritos - isto os deriva da sobrancelha e da boca para que essas células possam disparar. Faça cada careta e observe a leitura para ajustar os limiares.',
-    'note.motion': 'Os ganhos de pescoço e torso são fixos no app, entao um movimento real pequeno vira um movimento grande no avatar. Baixe o ganho para mexer menos, aumente o amortecimento para mexer mais devagar.',
+    'note.motion': 'Os ganhos de pescoço e torso são fixos no app, entao um movimento real pequeno vira um movimento grande no avatar. Baixe o ganho para mexer menos, aumente o amortecimento para mexer mais devagar. Isolar inclinação da cabeça tira do torso a parte que o rastreador copiou da cabeça - orelha no ombro deixa de deitar o peito.',
     'note.armIK': 'Mira o braço na mão que a câmera viu, em vez de repetir os ângulos do Kalidokit - é o que faz a mão chegar de fato na cabeça. Precisa de rastreio corporal (holistic). Alcance corrige a proporção de um modelo de braço curto; ganho de profundidade controla o quanto o eixo em direção à câmera conta, que é o número mais ruidoso do Mediapipe. O ombro não é animado por nada no app, então acompanhamento do ombro solta ele um pouco e o braço erguido para de cortar o pescoço.',
     'note.mouth': 'O app reporta cinco pesos de vogal que sobem todos juntos com a mandíbula, então um deles ganha diga o que disser e a boca acaba com um formato aberto só. Isto grava o que o teu rosto marca enquanto você fala cada vogal em voz alta, e escolhe a gravação mais próxima do frame atual - silêncio incluído, que é o que libera a célula da boca para o sorriso. Segurar vogal é o quanto outra vogal precisa estar mais perto para a boca trocar de célula.',
-    'note.sanity': 'A malha do rosto e a pose do corpo dizem as duas onde o teu rosto está, no mesmo quadro normalizado. A distância entre elas é uma propriedade do teu rosto e fica parada enquanto as duas te rastreiam - então quando ela salta, uma das duas te perdeu. Visibilidade nunca pega isso: um rastreio travado na coisa errada reporta confiança total. Frames reprovados são segurados em vez de seguidos. O comprimento do braço é checado do mesmo jeito, por lado. Os dois limiares são aprendidos da tua câmera, não ajustados aqui.',
+    'note.sanity': 'A malha do rosto e a pose do corpo dizem as duas onde o teu rosto está, no mesmo quadro normalizado. A distância entre elas é uma propriedade do teu rosto e fica parada enquanto as duas te rastreiam - então quando ela salta, uma das duas te perdeu. Visibilidade nunca pega isso: um rastreio travado na coisa errada reporta confiança total. Frames reprovados são segurados em vez de seguidos. O comprimento do braço é checado do mesmo jeito, por lado. Os dois limiares são aprendidos da tua câmera, não ajustados aqui. Uma mão no rosto é outro caso: a malha vê a palma e dispara piscada/boca, mas a pose ainda te tem - a expressão segura o último quadro bom e o braço continua indo à boca.',
     'note.adaptive': 'Um amortecimento fixo tem que escolher: o suficiente para assentar uma pose parada vira borracha num movimento rápido, e o suficiente para o movimento rápido deixa o tremor. O adaptativo filtra forte quando você está parado e quase nada quando você se mexe. Firmeza é o quanto uma pose parada é filtrada - o passo de ficar parado na calibragem mede isso na sua própria câmera. Resposta é a rapidez com que ele solta quando você se mexe.',
     'note.perf': 'O app roda uma inferencia do Mediapipe a cada frame e renderiza a cada frame. A taxa de rastreio é onde vai quase toda a CPU.',
 
@@ -4465,7 +4626,9 @@
       'thresholds.',
     'note.motion': 'The neck and torso gains are hardcoded upstream, so a small real ' +
       'movement lands as a large avatar movement. Lower the gain to move less, raise ' +
-      'the damping to move slower.',
+      'the damping to move slower. Head-tilt isolation strips the part of a torso ' +
+      'lean the pose solver copied from a head roll, so an ear-to-shoulder no longer ' +
+      'tips the chest.',
     'note.armIK': 'Aims the arm at the hand the camera saw instead of replaying ' +
       'Kalidokit’s angles - this is what gets the hand onto the head at all. Needs ' +
       'full-body (holistic) tracking. Reach corrects for a short-armed model; depth ' +
@@ -4490,7 +4653,10 @@
       + 'lost you - which visibility never catches, because a tracker locked onto the '
       + 'wrong thing is perfectly confident. Frames that fail it are coasted rather '
       + 'than followed. Arm length is checked the same way, per side. Both thresholds '
-      + 'are learned from your own camera, not set here.',
+      + 'are learned from your own camera, not set here. A hand on the face is a '
+      + 'different case: the mesh sees a palm and fires blink/mouth, but the pose '
+      + 'still has you - the expression holds the last good frame and the arm still '
+      + 'goes to the mouth.',
     'note.adaptive': 'A flat damping factor has to choose: enough to settle a held ' +
       'pose turns a fast move to rubber, enough for the fast move leaves the tremor ' +
       'in. Adaptive filters hard while you are still and barely at all while you ' +
@@ -4522,7 +4688,7 @@
 
   var EXPECTED_HOOKS = {
     setupRenderer: 1, aa: 1, smaa: 1, fingers: 1, onModel: 1, tick: 1,
-    face: 1, headGain: 1, bodyGain: 1, leanGain: 1, armGain: 1,
+    face: 1, headGain: 1, bodyGain: 1, leanGain: 1, spineLean: 1, armGain: 1,
     smooth: 7, frame: 1, nextTrack: 1,
     mpOptions: 2, shadows: 1, shadowSize: 4, overlay: 3, overlayOpen: 1, gaze: 1,
     pose: 1, hands: 1, arm: 1, guide: 1, bg: 1, bgDrop: 1
@@ -4830,6 +4996,7 @@
             ? ' (pose rest ' + lastFace.poseRest.toFixed(3) +
               ', raw ' + lastFace.raw.brow.toFixed(3) + ')'
             : '') +
+          (faceOcc ? ' [hand on face]' : '') +
           ' ->', lastFace.out);
       } else if (cfg.emotions) {
         console.warn('emotion detection is on but no face has been solved yet - ' +
@@ -5317,6 +5484,7 @@
     addRange(mo, 'headGain', T('Head / neck gain'), 0, 1.5, 0.05, function (v) { return v.toFixed(2) + 'x'; }, STG);
     addRange(mo, 'bodyGain', T('Torso gain'), 0, 0.2, 0.005, function (v) { return v.toFixed(3) + 'x'; }, STG);
     addRange(mo, 'leanGain', T('Torso lean gain'), 0, 1, 0.02, function (v) { return v.toFixed(2) + 'x'; }, STG);
+    addRange(mo, 'leanHead', T('Head-tilt isolation'), 0, 1, 0.02, function (v) { return v.toFixed(2); }, STG);
     addRange(mo, 'armGain', T('Arm gain'), 0.5, 2.5, 0.05, function (v) { return v.toFixed(2) + 'x'; }, STG);
 
     addRule(mo);
@@ -6072,6 +6240,7 @@
     headGain: headGain,
     bodyGain: bodyGain,
     leanGain: leanGain,
+    spineLean: spineLean,
     armGain: armGain,
     smooth: smooth,
 
