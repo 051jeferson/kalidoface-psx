@@ -4286,8 +4286,15 @@
     // driving a PSX avatar, and it owns a whole subnav of its own. Anchored on
     // the menu item's own "call" class rather than on its label: the label is
     // replaced by the live chat ID once a call connects.
-    { find: '.menu-item.call', card: '.menu-item' }
+    { find: '.menu-item.call', card: '.menu-item' },
+    // Two toggles for one job: hide the preview, and hide the video inside
+    // it. One remaining control drives both; this one is the spare.
+    { heading: 'Hide Webcam Video', card: '.list' }
   ];
+
+  // App headings we keep but rename. `__psxEn` stays the original so
+  // headingMatches still finds the card after the label has changed.
+  var RELABEL = { 'Hide Camera Panel': 'Hide camera' };
 
   function headingMatches(h, want) {
     var cur = (h.textContent || '').trim();
@@ -4375,6 +4382,34 @@
     // Realtime shadows are off for good, so these two do nothing at all now.
     var sh = document.querySelector('input[name="shadowStrength"]');
     if (sh) hide(sh.closest('.setting'));
+    syncCamHide();
+  }
+
+  // Hide Camera Panel and Hide Webcam Video were two switches for one intent.
+  // The remaining one hides both: the wrapper (so the overlay paint stops)
+  // and the video. Driven through the app's own inputs so its stores update.
+  function syncCamHide() {
+    var panel = stripTarget({ heading: 'Hide Camera Panel', card: '.list' });
+    var video = stripTarget({ heading: 'Hide Webcam Video', card: '.list' });
+    if (panel && panel.card) {
+      var h = panel.card.querySelector('h4');
+      if (h) {
+        h.__psxEn = 'Hide Camera Panel';
+        var want = T('Hide camera');
+        if ((h.textContent || '').trim() !== want) h.textContent = want;
+      }
+    }
+    if (!panel || !panel.input || !video || !video.input) return;
+    if (!panel.input.__psxCamHide) {
+      panel.input.__psxCamHide = true;
+      panel.input.addEventListener('change', function () {
+        syncCamHide();
+      });
+    }
+    var on = !!panel.input.checked;
+    if (video.input.checked === on) return;
+    video.input.checked = on;
+    video.input.dispatchEvent(new Event('change', { bubbles: true }));
   }
 
 
@@ -4695,6 +4730,7 @@
     'Leg Tracking [WIP]': 'Rastreio de pernas [WIP]',
     'Hide Camera Panel': 'Ocultar painel da câmera',
     'Hide Webcam Video': 'Ocultar vídeo da webcam',
+    'Hide camera': 'Ocultar câmera',
     'Change Camera': 'Trocar câmera',
     'Reset Character Tracking': 'Reiniciar rastreio do personagem',
     'For eyetracking, use both face and full body tracking.':
@@ -6115,9 +6151,10 @@
     if (tag !== 'H4' && tag !== 'LABEL' && tag !== 'P' && tag !== 'BUTTON') return;
     if (isOurs(n)) return;
     var en = n.__psxEn || (n.textContent || '').trim();
-    if (!(en in PT)) return;
     n.__psxEn = en;
-    var want = cfg.lang === 'pt' ? PT[en] : en;
+    var key = RELABEL[en] || en;
+    if (!(key in PT) && !(en in PT)) return;
+    var want = T(key);
     if ((n.textContent || '').trim() !== want) n.textContent = want;
   }
 
