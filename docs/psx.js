@@ -111,10 +111,22 @@
     // recorded by the mouth wizard: one feature vector per vowel plus a rest
     // pose. null until it has been run, and the vowels fall back to a formula.
     mouth: null,
-    // Read the brow off the mesh in three dimensions instead of taking
-    // Kalidokit's flattened ratio. Off = upstream's number, which moves when
-    // the head turns whether or not the brows do.
-    brow3d: true,
+    // Read the brow off the mesh in three dimensions instead of taking the
+    // flattened ratio. Geometrically this is the right number - a distance in
+    // three dimensions does not care which way the head is pointing - but it
+    // rests on the mesh's z, which is a fitted estimate and on some cameras is
+    // noisy enough to cost more than the projection did. Off by default for
+    // that reason: it is a thing to try, not a thing to assume.
+    brow3d: false,
+    // Run the pose correction at all - the recorded per-pose mapping and the
+    // learned ladder both. Off is the plain signal with nothing moving under
+    // it, which is what manual tuning needs: a reading that will not be tuned
+    // out from underneath the sliders.
+    poseFix: true,
+    // Shifts the finished brow reading, after the gain, in the same units the
+    // readout shows. The one knob that fixes a zero sitting in the wrong place
+    // without recording anything.
+    browBias: 0,
     // multiplier applied after normalisation
     browGain: 1,
     // how far the brow has to travel before it reads as that emotion
@@ -284,6 +296,7 @@
     mouthGain: { min: 0.25, max: 3 },
     blinkGain: { min: 0.25, max: 3 },
     browGain: { min: 0.25, max: 4 },
+    browBias: { min: -1, max: 1 },
     angryAt: { min: 0, max: 0.95 },
     sorrowAt: { min: 0, max: 0.95 },
     emotionHold: { min: 0, max: 400 },
@@ -2307,6 +2320,20 @@
   // and a slope fitted through it is noise pretending to be drift.
   var BROW_POSE_MIN = 0.12;
 
+  // The pose recordings are in whichever scalar was on when they were taken,
+  // and a drift measured on one scalar is not a drift the other has. Reading
+  // them against the other one does not correct anything - it subtracts a
+  // fault that is not there, which is worse than leaving it alone. The flat
+  // scalar sags +0.30 at a full turn where the 3D one does not move at all,
+  // so an old recording under the new scalar was pushing a relaxed face a
+  // third of the way to angry and holding it there.
+  //
+  // `browCalUsable` had this check and the pose path did not, which is the
+  // whole of "now it is angry all the time". Both gates, or neither.
+  function poseCalOk(c) {
+    return !!(c && usableBrowAt(c.browAt) && !c.brow3d === !cfg.brow3d);
+  }
+
   function usableBrowAt(at) {
     var rest = browPoint(at && at.rest);
     if (!at) return false;
@@ -2322,7 +2349,7 @@
   }
 
   function browPoseDrift(c) {
-    if (!c || !usableBrowAt(c.browAt) || !isNum(c.browRest)) return 0;
+    if (!poseCalOk(c) || !isNum(c.browRest)) return 0;
     var keys = POSE_Y.concat(POSE_X);
     var d = 0;
     for (var i = 0; i < keys.length; i++) {
@@ -2411,7 +2438,7 @@
   // the furrow and raise steps existed keeps working.
   function poseField(c, rig, field, base) {
     if (!isNum(base)) return base;
-    if (!usableBrowAt(c.browAt)) return base;
+    if (!poseCalOk(c)) return base;
     var h = rig && rig.head;
     if (!h) return base;
     var at = c.browAt;
@@ -2459,7 +2486,7 @@
 
   function poseAdjustedBrow(raw, rig) {
     var c = cfg.cal;
-    if (!c || !usableBrowAt(c.browAt)) return raw;
+    if (!poseCalOk(c) || !cfg.poseFix) return raw;
     return raw - (poseBrowRest(c, rig) - c.browRest);
   }
 
@@ -2781,6 +2808,35 @@
     return out;
   }
 
+  // The fastest calibration there is: whatever this face is doing right now
+  // is neutral. It fixes only the zero - and the zero is what goes wrong -
+  // and it does it by writing the same slider a person could drag, so there
+  // is nothing hidden about what it did and nothing to undo but a number.
+  //
+  // Works in every signal mode for the same reason: it cancels the finished
+  // reading rather than reaching into whichever mapping produced it.
+  function setNeutral() {
+    if (!lastFace || !isNum(lastFace.pre)) return false;
+    if (lastFace.fixed) {
+      // A recorded zero stays where it was put, so an offset against it stays
+      // where it is put too.
+      cfg.browBias = clamp(-lastFace.pre, SPEC.browBias.min, SPEC.browBias.max);
+      log('neutral set, brow offset', cfg.browBias.toFixed(2));
+    } else {
+      // Auto re-zeroes itself continuously, and an offset against something
+      // that moves is a number the tracker spends the next few seconds
+      // undoing - it would read neutral for a moment and then drift back.
+      // Move the baseline that is in the wrong place instead.
+      if (isNum(lastFace.adj)) browTrack.base = lastFace.adj;
+      browPose = poseLadder();
+      cfg.browBias = 0;
+      log('neutral set, auto baseline moved to', num(lastFace.adj).toFixed(3));
+    }
+    save();
+    syncControls();
+    return true;
+  }
+
   function hasBlinkCal(c) {
     return !!(c && isNum(c.blinkOpen) && isNum(c.blinkClosed) &&
       (c.blinkClosed - c.blinkOpen) >= 0.05);
@@ -2831,33 +2887,40 @@
     // whatever is left, at every other angle and on the axis nothing records.
     // Raw mode is the unmapped scalar on purpose, and teaches the ladder
     // nothing - there is no rest to measure a drift against.
-    var learned = mode === 'raw' ? 0 : learnedBrowShift(rig);
+    var learned = (mode === 'raw' || !cfg.poseFix) ? 0 : learnedBrowShift(rig);
+    if (!cfg.poseFix) poseConf = 1;
     var adjBrow = poseAdjustedBrow(rawBrow, rig) - learned;
     var restNow = null;
-    if (mode === 'calibrated' && browCalUsable(cfg.cal)) {
+    var fixedZero = mode === 'calibrated' && browCalUsable(cfg.cal);
+    if (fixedZero) {
       restNow = poseBrowRest(cfg.cal, rig);
       var dev = rawBrow - learned - restNow;
       var span = poseBrowSpan(cfg.cal, rig, dev);
       learnBrowPose(rig, rawBrow - restNow, learned, span);
-      brow = clamp(calNorm(dev, span) * cfg.browGain, -1, 1);
+      brow = calNorm(dev, span);
       smile = clamp(calibratedSmile(rawSmile) * cfg.browGain, 0, 1);
     } else if (mode === 'calibrated') {
       // Old saves used Kalidokit's 0..1 brow, so furrow sat on rest. Use auto
       // for the brow until they recapture; smile still uses the recording.
       restNow = learnAutoBrow(rig, adjBrow, learned);
-      brow = clamp(normalize(browTrack, adjBrow, 0.01) * cfg.browGain, -1, 1);
+      brow = normalize(browTrack, adjBrow, 0.01);
       smile = clamp(calibratedSmile(rawSmile) * cfg.browGain, 0, 1);
     } else if (mode === 'auto') {
       restNow = learnAutoBrow(rig, adjBrow, learned);
-      brow = clamp(normalize(browTrack, adjBrow, 0.01) * cfg.browGain, -1, 1);
+      brow = normalize(browTrack, adjBrow, 0.01);
       // a smile only ever opens the mouth wider than rest, so the closing half
       // of the range is not a smile
       smile = clamp(normalize(smileTrack, rawSmile, 0.02) * cfg.browGain, 0, 1);
     } else {
-      brow = clamp(rawBrow * cfg.browGain, -1, 1);
+      brow = rawBrow;
       // the same normalisation the app uses: 0.4 -> 0.9 maps to 0 -> 1
       smile = clamp((rawSmile - 0.4) / 0.5, 0, 1);
     }
+
+    // What the signal says before the offset, unclamped, which is what the
+    // "Set neutral" button has to cancel.
+    var browPre = brow;
+    brow = clamp((brow + cfg.browBias) * cfg.browGain, -1, 1);
 
     var lift = mode === 'raw' ? 0 : (1 - poseConf) * BLIND_LIFT;
     var emoAt = now();
@@ -2912,7 +2975,8 @@
     }
 
     lastFace = {
-      brow: brow, smile: smile, out: out,
+      brow: brow, pre: browPre, adj: adjBrow, fixed: fixedZero,
+      smile: smile, out: out,
       raw: { brow: rawBrow, smile: rawSmile },
       poseRest: restNow === null ? null : restNow + learned
     };
@@ -5143,6 +5207,11 @@
     'Speech first': 'Prioridade à fala',
     'Talking at': 'Falando a partir de',
     'Signal gain': 'Ganho do sinal',
+    'Head-angle correction': 'Correção por ângulo da cabeça',
+    'Brow offset': 'Deslocamento da sobrancelha',
+    'Set neutral now': 'Definir neutro agora',
+    'No tracked face to read a neutral from.':
+      'Nenhum rosto rastreado para ler um neutro.',
     'Angry at': 'Bravo a partir de',
     'Sorrow at': 'Triste a partir de',
     'Smile at': 'Sorriso a partir de',
@@ -5419,6 +5488,7 @@
     'note.reloadPerf': 'As opções do modelo Mediapipe são aplicadas ao recarregar. Os limites de taxa valem na hora.',
     'note.emotions': 'O app so rastreia piscadas, as cinco vogais e um sorriso. Bravo, triste e fun nunca são escritos - isto os deriva da sobrancelha e da boca para que essas células possam disparar. Faça cada careta e observe a leitura para ajustar os limiares. ' +
       'A espera da emoção é quanto tempo a sobrancelha tem que ficar passada do limiar antes de virar expressão: um pico enquanto a cabeça gira dura um ou dois frames, uma careta é segurada. Só a subida espera. ' +
+      'Definir neutro agora toma o que o rosto está fazendo naquele instante como sobrancelha em repouso - a versão de um clique do assistente, e o que usar quando a leitura fica fora do zero. Deslocamento da sobrancelha é o mesmo ajuste na mão. Correção por ângulo da cabeça desliga toda a maquinaria de pose, que é o que ajustar esses dois na mão precisa: uma leitura que não está sendo re-zerada por baixo dos controles. ' +
       'Sobrancelha sem ângulo lê a sobrancelha da malha em três dimensões em vez da razão achatada do upstream, cujo numerador desce pelo rosto e cujo denominador atravessa ele - por isso aquela mexe quando a cabeça gira mesmo com as sobrancelhas paradas. Recalibre depois de trocar: a gravação pertence ao sinal que estava ligado.',
     'note.motion': 'Os ganhos de pescoço e torso são fixos no app, entao um movimento real pequeno vira um movimento grande no avatar. Baixe o ganho para mexer menos, aumente o amortecimento para mexer mais devagar. Isolar inclinação da cabeça tira do torso a parte que o rastreador copiou da cabeça - orelha no ombro deixa de deitar o peito.',
     'note.armIK': 'Mira o braço na mão que a câmera viu, em vez de repetir os ângulos do Kalidokit - é o que faz a mão chegar de fato na cabeça. Precisa de rastreio corporal (holistic). Alcance corrige a proporção de um modelo de braço curto; ganho de profundidade controla o quanto o eixo em direção à câmera conta, que é o número mais ruidoso do Mediapipe. O ombro não é animado por nada no app, então acompanhamento do ombro solta ele um pouco e o braço erguido para de cortar o pescoço.',
@@ -5484,7 +5554,12 @@
       'mouth so those cells can fire. Pull each face and watch the readout to set the ' +
       'thresholds. Emotion hold is how long the brow has to stay past one before it ' +
       'is written: a drift spike while the head turns lasts a frame or two, a face ' +
-      'making an expression holds it. Only the rise waits. Angle-free brow reads the ' +
+      'making an expression holds it. Only the rise waits. Set neutral now takes ' +
+      'whatever this face is doing at that moment as its resting brow - the one-click ' +
+      'version of the wizard, and the thing to reach for when the reading sits off ' +
+      'zero. Brow offset is the same shift by hand. Head-angle correction turns the ' +
+      'pose machinery off entirely, which is what tuning those two by hand wants: a ' +
+      'reading that is not being re-zeroed under the sliders. Angle-free brow reads the ' +
       'brow off the mesh in three dimensions instead of the flattened ratio upstream uses, ' +
       'whose numerator runs down the face and whose denominator runs across it - so ' +
       'that one moves when the head turns whether or not the brows do. Recalibrate ' +
@@ -6407,12 +6482,21 @@
     addToggle(em, 'speechFirst', T('Speech first'), STG);
     addRange(em, 'speechAt', T('Talking at'), 0, 1, 0.01, function (v) { return v.toFixed(2); }, STG);
     addRule(em);
+    addToggle(em, 'poseFix', T('Head-angle correction'), STG);
     addRange(em, 'browGain', T('Signal gain'), 0.25, 4, 0.05, function (v) { return v.toFixed(2) + 'x'; }, STG);
+    addRange(em, 'browBias', T('Brow offset'), -1, 1, 0.01, function (v) { return (v > 0 ? '+' : '') + v.toFixed(2); }, STG);
     addRange(em, 'angryAt', T('Angry at'), 0, 0.95, 0.01, function (v) { return v.toFixed(2); }, STG);
     addRange(em, 'sorrowAt', T('Sorrow at'), 0, 0.95, 0.01, function (v) { return v.toFixed(2); }, STG);
     addRange(em, 'smileAt', T('Smile at'), 0, 0.95, 0.01, function (v) { return v.toFixed(2); }, STG);
     addRange(em, 'emotionHold', T('Emotion hold'), 0, 400, 10, function (v) { return v + ' ms'; }, STG);
     addRule(em);
+
+    var zero = el('button', 'trigger ' + STG, T('Set neutral now'));
+    zero.style.cssText = 'width:100%;margin:2px 0 8px';
+    zero.addEventListener('click', function () {
+      if (!setNeutral()) setText(readoutEl, T('No tracked face to read a neutral from.'));
+    });
+    em.appendChild(zero);
 
     readoutEl = el('div', STG, T('waiting for a tracked face...'));
     readoutEl.style.cssText = 'width:100%;font-size:12px;opacity:.75;text-align:left;' +
@@ -7248,6 +7332,7 @@
     calibrateMouth: startMouthCalibration,
     resetCalibration: resetCalibration,
     browRest: browRestInfo,
+    setNeutral: setNeutral,
     resetSettings: resetSettings,
     exportSettings: exportSettings,
     importSettings: applyImported,

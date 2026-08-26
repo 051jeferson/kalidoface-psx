@@ -141,6 +141,20 @@ its smile — drives **fun** and/or **joy**. Each has its own threshold, and
 between two cells — these are whole-face swaps, so blending two lands on a patch
 of atlas that is not an expression at all.
 
+#### Tuning it by hand
+
+Three controls, for when the automatic mapping is not landing:
+
+| Control | What it does |
+| --- | --- |
+| **Set neutral now** | Takes whatever your face is doing at that moment as its resting brow. The one-click version of the wizard, and the thing to reach for the moment the reading sits off zero. In `auto` it moves the tracker's own baseline; with a recording in force it writes the offset below, because a recorded zero stays where it is put and an offset against a baseline that re-zeroes itself is a number the tracker spends the next few seconds undoing |
+| **Brow offset** | The same shift by hand, applied before the gain so it can still rescue a reading that is already pinned at ±1 — which is the state anyone reaching for it is in |
+| **Head-angle correction** | Turns the pose machinery off entirely: no recorded per-pose mapping, no learned ladder, no confidence lift. Off is the plain signal with nothing moving under it, which is what tuning the other two by hand needs |
+
+Watch the readout while you drag them. `brow` is the finished number the
+thresholds see; `[raw~rest]` beside it is what came off the tracker and where
+this layer thinks rest is.
+
 #### Angle-free brow
 
 Looking to the side used to read as an expression, and the reason was in the
