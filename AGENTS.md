@@ -2,7 +2,7 @@
 
 Fork of [yeemachine/kalidoface-3d](https://github.com/yeemachine/kalidoface-3d) retuned for PSX / low-poly VRM models. Product behaviour lives in `README.md`. This file is for agents working the repo.
 
-There is **no app source tree**. `src/` is gitignored leftover from upstream Vite. The running app is the built static site in `docs/`. All fork behaviour is `docs/psx.js` plus ~35 patched call sites in the minified bundle.
+There is **no app source tree**. `src/` is gitignored leftover from upstream Vite. The running app is the built static site in `docs/`. All fork behaviour is `docs/psx.js` plus 40 patched call sites in the minified bundle (48 find/replace pairs, since two of them only rewrite a URL).
 
 ## Layout
 
@@ -11,9 +11,14 @@ docs/                 # the app. serve this directory
   index.html          # PSX stub, then psx.js, then the hashed bundle
   psx.js              # the compatibility layer (edit here)
   assets/index.*.js   # minified Kalidoface bundle. do not hand-edit
+  vendor/             # third-party assets, served from this origin
+    mediapipe/        #   holistic + face_mesh: wasm, packed assets, tflite
+    font/             #   the three Kalidoface faces global.css asks for
+    icon/             #   favicon and the two PWA icons
 tools/
   patch.mjs           # applies / checks the hooks
   psx-patches.json    # find/replace pairs for those hooks
+  fetch-vendor.mjs    # downloads docs/vendor/ from the CDNs it replaced
 index.html            # upstream Vite entry. not used; points at missing src/
 ```
 
@@ -35,9 +40,20 @@ Do **not** run `npm run dev` / `npm run build` / `vite`. Root `index.html` impor
 ```bash
 node tools/patch.mjs           # apply hooks; already-applied patches are skipped
 node tools/patch.mjs --check   # exit 1 if any call site is missing
+
+node tools/fetch-vendor.mjs         # fetch anything missing from docs/vendor/
+node tools/fetch-vendor.mjs --check # exit 1 if a vendored file is missing
 ```
 
 In the running app console: `PSX.verify()` counts bundle call sites; `PSX.dump()` logs the loaded model.
+
+## Vendored assets
+
+`docs/vendor/` is ~55 MB and is **committed**. Mediapipe's wasm, packed assets and tflite models used to come from jsdelivr on every cold load, and the fonts and icons from `yeemachine.github.io`; `sw.js` does not intercept cross-origin requests, so none of it was ever cached and the app could not start without a working internet connection. On a Raspberry Pi that was the largest single cost of opening the page.
+
+Three things point at that directory and have to move together: the `<script>` tags and icon links in `docs/index.html`, the `@font-face` rules in `docs/global.css`, and the two `locateFile` patches at the end of `tools/psx-patches.json`. A Mediapipe version bump changes all three plus the version constants in `tools/fetch-vendor.mjs`.
+
+`pose_landmark_heavy.tflite` is deliberately not vendored: it is 27 MB and only `modelComplexity: 2` requests it, which `mpOptions` clamps away to 0 or 1. Restoring a control that can ask for complexity 2 means fetching it too.
 
 ## Architecture
 
@@ -144,9 +160,13 @@ Never edit `docs/assets/index.*.js` by hand. After a Glitch/Vite rebuild that ch
 - Restore `src/` as the place to work. The fork is `docs/psx.js`.
 - Commit an unpatched bundle. If `docs/index.html`'s module `src` hash changes, run the patcher before considering the change done.
 - Dispatch pin events in a loop. `PIN_TRIES` is 3 on purpose: a value the app rejects would re-render forever.
+- Add a hook to `psx.js` and `EXPECTED_HOOKS` without adding it to the stub in `docs/index.html`. That stub is the only thing standing between a failed `psx.js` and a TypeError per frame, and a hook missing from it fails exactly when it is needed. `PSX.hands` shipped that way.
+- Reach back out to a CDN. Everything the page loads is same-origin; see **Vendored assets**.
 
 ## Git
 
 Working branch is `glitch` (Glitch sync). `origin` is this fork; `upstream` is yeemachine/kalidoface-3d.
 
 Commits: `feat:` / `fix:` plus a short description of the user-visible change.
+
+**Never push unless asked.** The branch is synced to Glitch, so a push deploys. Commit locally and stop there.

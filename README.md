@@ -78,7 +78,7 @@ adjustable is when a cell wins:
 - **Trigger threshold** — weight an expression must clear before it takes over its material
 - **Release margin** (hysteresis) — how far below the threshold it may sag before letting go, so the face doesn't chatter at the boundary
 - **Minimum hold** — ms a cell stays on screen once picked
-- **Mouth / blink gain** — pre-threshold multipliers, so quiet talking and soft blinks still register
+- **Mouth gain** — a pre-threshold multiplier, so quiet talking still registers. The lids have no equivalent: their cell is binary, and **Eyes shut at** in the Eyes card is the same decision made directly
 
 The V axis is measured rather than configured. Unity samples V upside down
 relative to glTF, and rebasing for that is right for a VRM written by UniVRM —
@@ -89,6 +89,70 @@ neutral group is the rest cell, so converting it correctly has to land on the UV
 transform the material already shipped with: both conversions are tried against
 that and the one that actually matches is kept, per material. With no neutral
 bind there is nothing to measure, so the spec wins.
+
+### Blink calibration
+
+The tracker reports how shut each eye looks, and where that number sits is a
+property of *your* face and camera, not of blinking. Narrow eyes, glasses, or a
+camera below eye level all park a wide-open eye well above zero — so the blink
+cell sits half-on for the whole session, and there is nothing downstream that
+fixes it downstream: the whole reading is shifted, not just the part that should
+have read zero.
+
+**Eyes shut at** is the one control: how shut an eye has to look before the shut
+cell takes over. **Calibrate blink** sets it from two poses — eyes relaxed and
+open, then held shut — and puts the line halfway between the two, which is the
+split furthest from both and so the one with the most room for a wrong reading in
+either direction. The readout under the slider shows the live reading, the line it
+is being judged against, and which side it is on.
+
+It used to be a two-point range plus a **Blink gain**, which is three controls for
+a question with one answer. On an atlas a blink is binary — the cells are picked,
+never blended — so the 0..1 value in between had no consumer: everything
+downstream only ever asked whether it had crossed a bar. The range mapped a number
+onto another number so a gain could scale it so a threshold could compare it, and
+the person setting all three was aiming at this one. The output is now 0 or 1, and
+the release margin that stops a reading sitting exactly on the line from flickering
+is the same **Release margin** the cells already use.
+
+Both calibration readings are taken conservatively: *open* is the most-closed an
+open eye still looked, *shut* is the least-closed a shut eye looked. Erring inward
+on both ends means the midpoint between them is a real gap and not an artefact of
+one stray frame. A pair closer together than 0.05 is rejected rather than stored.
+
+This used to be recorded only as part of the expression wizard, and applied only
+while the *brow* signal was `calibrated`. An eyelid has nothing to do with which
+brow mapping is in force, so a blink calibration could sit there doing nothing. It
+is an ordinary setting now, and a profile carrying either older shape — the
+in-`cal` recording or the two-slider pair — collapses to the line on load.
+
+#### Furrowing your brows narrows your eyes
+
+That is anatomy, not a tracking fault — the muscles that pull the brow down pull
+the lid up with it. So an angry face genuinely raises the closedness the tracker
+reports, and on an atlas the blink cell and the angry cell cannot both show. The
+result was an angry face that sat there blinking at itself.
+
+Two things were wrong, and both are fixed:
+
+**The signals were coupled.** A third calibration pose — brows furrowed, eyes
+open — records how far a furrow alone closes the eye. The line is raised by that
+much while the brows are down, scaled by how far into a furrow the frame is: a
+half furrow raises it half as far, a raised brow not at all. A real blink still
+crosses, and the lift is capped so it always has somewhere to cross to. There is
+no slider for it — it is measured, because there is nothing here a person could
+aim at by eye.
+
+**The arbitration was a coin toss.** Cells were picked by a plain argmax over
+weights, so when both signals were up the face went to whichever of **Blink gain**
+and **Signal gain** happened to be larger — a decision nobody made, and one that
+flips frame to frame. Cells are now ranked by class first and weight only within a
+class: a vowel outranks everything, because a mouth that stops moving mid-sentence
+reads as broken; a blink outranks an emotion, because it is an event with a
+beginning and an end that takes the face for a tenth of a second and gives it
+straight back, where an emotion is a state that will still be there afterwards. An
+emotion that loses to a blink loses nothing. A blink that loses to an emotion never
+happens, and an avatar that cannot blink looks dead.
 
 ### Vowel calibration
 
@@ -143,11 +207,10 @@ of atlas that is not an expression at all.
 
 #### Tuning it by hand
 
-Three controls, for when the automatic mapping is not landing:
+Two controls, for when the automatic mapping is not landing:
 
 | Control | What it does |
 | --- | --- |
-| **Set neutral now** | Takes whatever your face is doing at that moment as its resting brow. The one-click version of the wizard, and the thing to reach for the moment the reading sits off zero. In `auto` it moves the tracker's own baseline; with a recording in force it writes the offset below, because a recorded zero stays where it is put and an offset against a baseline that re-zeroes itself is a number the tracker spends the next few seconds undoing |
 | **Brow offset** | The same shift by hand, applied before the gain so it can still rescue a reading that is already pinned at ±1 — which is the state anyone reaching for it is in |
 | **Head-angle correction** | Turns the pose machinery off entirely: no recorded per-pose mapping, no learned ladder, no confidence lift. Off is the plain signal with nothing moving under it, which is what tuning the other two by hand needs |
 
@@ -236,12 +299,35 @@ three faces, instead of being sent back and forth. That is not only faster: the
 three readings have to share one angle, and a head that goes back to the camera
 between them files three different angles under one pose.
 
-The wizard is 23 steps and takes a couple of minutes. It is run once.
+#### Why the wizard is now five steps and not twenty-three
 
-An older calibration still loads and still works exactly as it did — each field
-falls back to the frontal recording on its own — but it does not get any of
-this. **Re-run the wizard.** The finish message tells you how many poses ended
-up with their own span, and names any whose furrow or raise barely moved.
+Everything above was measured against the **old** brow scalar, whose whole
+problem was that it moved with the head: a ratio taken across the eye, with a
+numerator running down the face and a denominator running across it, drifting
++0.30 at 40° of yaw against a furrow worth 0.05 on the same face. Eighteen of
+the twenty-three steps existed to record that drift at four off-centre angles so
+it could be subtracted back out.
+
+The side-of-face denominator removed it by construction. It foreshortens *with*
+the numerator: a yaw leaves the ratio alone, a pitch shortens both by the same
+cosine, a roll turns both together. There is no longer a large angle-dependent
+error for eighteen poses to record.
+
+What drift is left — iris noise, lighting, whatever the mesh gets wrong about a
+particular face — is not the kind a recording fixes, because it is not a
+property of the angle. The **pose ladder** learns it live, at every angle
+including the ones nobody would hold for a wizard, and it is untouched by the
+trim: it runs off state built at runtime and never reads the recording. With the
+off-centre poses gone, `poseCalOk` goes false and the brow falls back to the raw
+scalar with the ladder still on top — which is the correct answer here, not a
+degraded one.
+
+So the wizard is **relax, furrow, raise, smile, close your eyes**. Under a
+minute, and the furrow step now does double duty: it is also where the
+eye-closure coupling above is measured.
+
+An older 23-step calibration still loads and still uses its recorded poses — the
+machinery that reads them is all still there. It is simply no longer asked for.
 
 **Signal range** is what makes this usable at all. Kalidokit's brow scalar only
 swings a few hundredths for most faces, so a raw threshold of `0.35` is
@@ -304,7 +390,8 @@ which step to redo.
 
 Under `auto`, the resting value only drifts while your face is near rest, so
 holding an expression doesn't turn it into the new neutral and fade out mid
-grimace. **Reset auto range** starts that learning over.
+grimace. `PSX.resetCalibration()` starts that learning over, and so does
+finishing any wizard; **Reset PSX settings** clears it with everything else.
 
 **Speech first** fixes the other half. On a PSX atlas the vowels and the emotions
 are cells of the *same* face texture, so they cannot both show — an emotion that
@@ -323,10 +410,12 @@ the loaded model actually has.
 
 ### Language
 
-The panel speaks English or Portuguese (BR), switched in the PSX Hands card. A
-fresh profile picks its language from the browser's own, so a machine in
-Portuguese starts in Portuguese; a saved profile always wins over that, and the
-picker over both.
+The panel speaks English or Portuguese (BR), switched by the picker at the very
+top of the Settings tab. A fresh profile picks its language from the browser's
+own, so a machine in Portuguese starts in Portuguese; a saved profile always
+wins over that, and the picker over both. The `<html lang>` attribute follows
+it, so a screen reader picks the right voice and the browser stops offering to
+translate a page that is already in the reader's language.
 
 **The spoken calibration prompts follow that setting**, because the voice reads
 the same translated strings the prompt shows and can never drift from what is on
@@ -343,6 +432,13 @@ cached per language and dropped again on `voiceschanged`.
 If no Portuguese voice is installed at all, nothing in the browser can fix it —
 the console says so once, in as many words, and the prompts are read by the
 system default until one is added in the OS speech settings.
+
+A machine with **no voices at all** is a different case and a common one:
+Chromium on Raspberry Pi OS reports an empty voice list unless a speech engine
+is installed, and `speak()` on an empty list is silence with no error. The
+Motion Calibration card says so in a line under the cues toggle rather than
+leaving the feature looking half-broken — and the on-screen prompt below covers
+the same ground without a voice at all.
 
 Upstream cannot do this: it ships an `en`/`ru` map for the menu buttons only,
 its language store is built as `J("en")`, and the `navigator.languages[0]`
@@ -365,15 +461,32 @@ adds or removes a card, so it never triggers an injection pass.
 The neck rig multiplies the solved head rotation by `1` and the chest/spine rig
 by `0.05`, both hardcoded, then lerps toward the result at `0.04 + dt*4` and
 `0.04 + dt*2`. A small real movement therefore lands as a large avatar movement,
-with nothing upstream to tune. **Head / neck gain** and **Torso gain** scale the
-rotation; **Damping** scales the lerp, so the avatar eases into a pose instead of
-snapping to it.
+with nothing upstream to tune. **Head / neck gain** and **Torso lean gain** scale
+the rotation; the adaptive filter under **Fine tuning** scales the lerp, so the
+avatar eases into a pose instead of snapping to it. Torso *pitch* has no slider
+of its own — it rides on the head signal at a fixed ratio, so the head-turn step
+is what sets it.
 
 **Calibrate motion** sets them for you. Unlike the expression wizard it does not
 wait for a keypress: a motion pose either has no hand free to reach the keyboard
 or turns back toward it to press the key, jolting the exact signal being read. So
 each step prints its prompt, counts you in for five seconds, then reads while you
 hold. **Space** skips the count-in once you are already set, **Esc** cancels.
+
+**The prompt is drawn over the canvas**, large, not only in the settings card.
+Every pose in these wizards is held at arm's length from the screen and several
+of them are turned away from it, which is the same reason the spoken prompts
+exist — and speech is not available on every machine. The overlay shows the step
+number, the pose, its hint and the count-in, and it never takes a click: it is
+`pointer-events: none` throughout, so **Esc** and the card's Cancel button stay
+the way out. The verdict stays up for a few seconds after the run so it can be
+read from wherever the last pose was held.
+
+The card itself opens on the two gains and the Calibrate button. The eleven
+remaining sliders — the filter, the reach set, the twist, the anchor, the
+prediction and the dropout hold — are behind a **Fine tuning** disclosure: the
+wizard measures what they are for, and eleven sliders in a column read as eleven
+things to set before the feature works.
 
 The steps, in order:
 
@@ -629,9 +742,9 @@ number than have one picked:
 
 | Knob | What it costs upstream |
 | --- | --- |
-| **Tracking rate** | One Holistic/FaceMesh inference per animation frame. This is where nearly all the CPU goes; 24–30fps is plenty for face tracking |
-| **Render rate** | One full render per animation frame, up to the display's refresh. Capping to 20–30 roughly halves GPU time on a 60Hz screen |
-| **Lite pose model** | Holistic `modelComplexity` 1. Dropping to 0 trades pose accuracy for a much cheaper network |
+| **Tracking rate** | One Holistic/FaceMesh inference per animation frame. This is where nearly all the CPU goes; 24–30fps is plenty for face tracking. **Defaults to 24** |
+| **Render rate** | One full render per animation frame, up to the display's refresh. Capping to 20–30 roughly halves GPU time on a 60Hz screen. **Defaults to 30**, because the era's own cadence was 20–30 — here the cap is the look, not a concession |
+| **Lite pose model** | Holistic `modelComplexity` 1. Dropping to 0 trades pose accuracy for a much cheaper network. **Off by default** — see below |
 
 Three of upstream's costs are not options here, because this fork targets PSX-era
 models and nothing else:
@@ -652,6 +765,29 @@ reason PSX mode looks right in the first place.
 The Mediapipe options are read once at startup, so those apply on reload; the
 rate caps and the auto throttle take effect immediately.
 
+**Low power preset** sets all of it in one click — `0.5x` render scale, 30fps
+render, 20fps tracking and the lite pose model. Those are five controls across
+two tabs, two of which need a reload, and nothing in the panel said which five.
+
+**Nothing loads from a CDN.** Mediapipe's wasm, packed assets and pose models
+came from jsdelivr on every cold load, and the three fonts and the icons from
+`yeemachine.github.io` — tens of megabytes across a third-party network round
+trip before the first frame. The service worker does not intercept cross-origin
+requests, so none of it was ever cached, and the app could not start at all
+without a working internet connection. All of it now lives in `docs/vendor/` and
+is served from the same origin as the page, which also means the worker caches
+it: the second load comes off disk, and an offline one works. On a Raspberry Pi
+that round trip was the largest single cost of opening the page.
+
+The icon font matters more than its size suggests. Kalicon's glyphs are selected
+by the *name* of the icon — `<i class="kalicon">jellyfill</i>` — so a font that
+does not arrive does not degrade to a fallback glyph, it spells `jellyfill`
+across the menu. That is why it is `font-display: block` while the text face is
+`swap`: blocking on a local file is milliseconds.
+
+Google Tag Manager is gone too, along with the 26 remote iOS splash images and
+the social-card artwork that still carried upstream's branding.
+
 **Capturing this alongside OBS.** Everything above is paced off
 `requestAnimationFrame`, and a browser stops handing those out when it decides
 nobody is looking — a minimised window, or one Chrome has marked occluded because
@@ -663,7 +799,7 @@ keep the window unminimised.
 
 ## Keeping the hooks alive
 
-The PSX layer only runs because a call to it was written into ~35 places in the
+The PSX layer only runs because a call to it was written into 40 places in the
 minified bundle. Those edits are invisible once committed and **do not survive
 the bundle being regenerated** — and this project syncs with Glitch, so that
 happens. When it does, `psx.js` still loads, still builds its panels, and
@@ -687,7 +823,7 @@ logs the resolved materials, UV binds and the last solved face.
 
 ### If psx.js does not load
 
-Those ~35 call sites are unguarded and on the hot path — the render loop, the
+Those 40 call sites are unguarded and on the hot path — the render loop, the
 bone rig, the tracking loop. A 404 or a parse error in `psx.js` would mean a
 `TypeError` per frame and a dead app. So `docs/index.html` defines
 `window.PSX` inline first, with every hook returning exactly what the stock code
@@ -711,16 +847,21 @@ and scoped class names, so they look native. Controls are split by what they do:
 
 **Settings tab** — per-model calibration, next to the app's own tracking options:
 
-- **Face Expressions** — Trigger threshold, Release margin, Minimum hold, Mouth gain, Blink gain, Preview cell (force one expression for calibration)
-- **Emotion Detection** — Detect emotions, Signal range (`calibrated` / `auto` / `raw`), One emotion at a time, Speech first, Talking at, Signal gain, Angry at, Sorrow at, Smile at, live readout, Calibrate expressions and Reset auto range
-- **Motion Calibration** — Motion calibration, Head / neck gain, Torso gain, Torso lean gain, Head-tilt isolation, Arm gain, Damping, Arm retarget, Wrist from hand model, Reach, Depth gain, Shoulder follow, Forearm twist, Face anchor, Prediction, Dropout hold, Tracking sanity
-- **Performance** — Performance caps, Tracking rate, Render rate, Lite pose model
-- **PSX Hands** — Language, Driven fingers (`all fingers` / `thumb only` / `none`), Export settings, Import settings, Reset PSX settings
+- **Language** — English or Portuguese (BR). First thing in the tab, because it is what someone who cannot read the rest of the panel is looking for
+- **Face Expressions** — Trigger threshold, Release margin, Minimum hold, Mouth gain, Preview cell (force one expression for calibration)
+- **Eyes** — Eyes shut at, live eye readout, Calibrate blink
+- **Emotion Detection** — Signal gain, Brow offset, Angry at, Sorrow at, Smile at, Emotion hold, live readout, Calibrate expressions, Vowel hold, Calibrate vowels
+- **Motion Calibration** — Calibration cues, Head / neck gain, Torso lean gain, Calibrate motion, and a **Fine tuning** disclosure holding Steadiness, Responsiveness, Reach, Reach up, Right arm, Left arm, Shoulder follow, Forearm twist, Face anchor, Prediction, Dropout hold and Head-tilt isolation
+- **Performance** — Auto throttle, Tracking rate, Render rate, Lite pose model, Low power preset
+- **PSX Hands** — Driven fingers (`all fingers` / `thumb only` / `none`)
+- **Profile** — Export settings, Import settings, Reset PSX settings
 
-Every switch is **off by default**, and with it off the matching hooks fall back
-to stock behaviour. **Arm retarget** is the one exception: it is a rig rather
-than a gain, it is right for every model, and it is on. Anything the app reads only at startup — PSX mode, MSAA,
-SMAA, render scale, shadows, Mediapipe model options — applies on reload, and the
+There is no master switch on any of these. A gain whose default is the stock
+value has nothing for one to turn off, and the things that genuinely are not
+preferences — the arm retarget, the pose correction, the adaptive filter — are
+rigs rather than settings and decide for themselves when they cannot run.
+Anything the app reads only at startup — render scale, Mediapipe model options —
+applies on reload, and the
 card says so once you touch one. Everything else is live.
 
 Settings persist in `localStorage` under the key `kf3d.psx`. **Export settings**
@@ -757,7 +898,7 @@ the same filter the renderer did.
 1. Load your `.vrm`, open **Settings**, turn on **PSX mode**, reload.
 2. Use **Preview cell** to force each expression key in turn and confirm the atlas cell is right. If every expression lands on the wrong cell, toggle **Flip V axis**.
 3. If the face chatters between two cells, raise **Release margin** or **Minimum hold**.
-4. If quiet talking doesn't register, raise **Mouth gain**; same for **Blink gain**.
+4. If quiet talking doesn't register, raise **Mouth gain**. If blinks miss or stick, run **Calibrate blink**, or nudge **Eyes shut at** while watching the readout.
 5. For a material that will not switch, `PSX.dump()` in the console lists the resolved UV binds, the current cell, and the last solved `brow` / `smile` values with the emotion weights they produced.
 6. For emotions, hit **Calibrate expressions** and follow the four prompts. Then pull each face and watch the card's live readout — the thresholds should already be roughly right, and **Angry at** / **Sorrow at** / **Smile at** trim them. If an expression stops your lip sync, that is what **Speech first** is for.
 
