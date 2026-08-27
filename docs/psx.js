@@ -62,11 +62,13 @@
     lang: localeLang(),
     // A calibration pose is held at arm's length from the screen, where the
     // prompt cannot be read and - worse - there is no way to tell the count-in
-    // from the reading. Both cues carry that across the room.
-    calSound: true,
-    calVoice: true,
+    // from the reading. The beeps and the spoken prompt carry that across the
+    // room, and they are one switch: nobody wants the tones without the words
+    // or the words without the tones, and two toggles for one answer is one
+    // toggle too many.
+    calCues: true,
 
-    // --- the actual PS1 signatures (all gated behind `enabled`) -------
+    // --- the actual PS1 signatures ------------------------------------
     // The console had no floating point in its GPU: vertices were snapped to
     // an integer screen grid, which is where the characteristic wobble comes
     // from. Lower grid = coarser = wobblier.
@@ -84,9 +86,33 @@
     hysteresis: 0.1,
     // minimum ms a cell stays on screen once picked
     holdMs: 80,
-    // pre-threshold multipliers, so quiet talking / soft blinks still register
+    // pre-threshold multiplier, so quiet talking still registers
     mouthGain: 1,
-    blinkGain: 1,
+
+    // --- eyes ----------------------------------------------------------
+    // One number: how shut the eye has to look before it counts as shut.
+    //
+    // This was a two-point range and a gain, which is three controls for a
+    // question with one answer. On an atlas a blink is binary - the cells are
+    // picked, never blended - so the 0..1 value in between had no consumer:
+    // everything downstream only ever asked whether it had crossed a bar. The
+    // range mapped a number onto another number so that a gain could scale it
+    // so that a threshold could compare it, and the person setting all three
+    // was aiming at this one.
+    //
+    // Everyone's eyes read differently and the mesh does not agree with itself
+    // between faces - narrow eyes, glasses and a low camera all park a
+    // wide-open eye well up the scale - which is why it is a setting at all
+    // and why the wizard measures it.
+    eyeShutAt: 0.5,
+    // How far to raise that while the brows are down, at a full furrow.
+    // Furrowing narrows the eye - the same muscles do both - so without this
+    // an angry face keeps tripping the blink cell, and on an atlas that means
+    // the angry cell never gets to stay on screen. Measured by the wizard;
+    // no slider, because there is nothing here a person could aim at by eye.
+    // 0 = never measured, which leaves it inert.
+    eyeFurrowLift: 0,
+
     // '' = live tracking; otherwise force this expression key (calibration)
     preview: '',
 
@@ -94,9 +120,6 @@
     fingers: 'thumb',
 
     // --- emotion presets ----------------------------------------------
-    // Drive angry / sorrow / fun from the solved face. Off = stock, which
-    // never writes those presets at all, so their atlas cells can never win.
-    emotions: false,
     // Where the 0..1 signal range comes from:
     //   'calibrated' - the guided calibration below. Records what each face
     //                  actually reaches, so a brow that furrows far but barely
@@ -105,23 +128,19 @@
     //   'raw'        - Kalidokit's numbers untouched. Almost never usable:
     //                  the brow scalar only swings a few hundredths, so a
     //                  threshold of 0.35 can never be reached.
+    // Not on the panel. The wizard sets it, and the only other value anyone
+    // would reach for is the one it already falls back to on its own.
     signal: 'auto',
     // recorded by the guided calibration; null until it has been run
     cal: null,
     // recorded by the mouth wizard: one feature vector per vowel plus a rest
     // pose. null until it has been run, and the vowels fall back to a formula.
     mouth: null,
-    // Read the brow off the mesh in three dimensions instead of taking the
-    // flattened ratio. Geometrically this is the right number - a distance in
-    // three dimensions does not care which way the head is pointing - but it
-    // rests on the mesh's z, which is a fitted estimate and on some cameras is
-    // noisy enough to cost more than the projection did. Off by default for
-    // that reason: it is a thing to try, not a thing to assume.
-    brow3d: false,
     // Run the pose correction at all - the recorded per-pose mapping and the
     // learned ladder both. Off is the plain signal with nothing moving under
     // it, which is what manual tuning needs: a reading that will not be tuned
-    // out from underneath the sliders.
+    // out from underneath the sliders. Not on the panel - it is a thing to do
+    // from the console while chasing a fault, not a setting to leave off.
     poseFix: true,
     // Shifts the finished brow reading, after the gain, in the same units the
     // readout shows. The one knob that fixes a zero sitting in the wrong place
@@ -139,27 +158,16 @@
     emotionHold: 100,
     // how wide the mouth corners have to go before it reads as a smile
     smileAt: 0.3,
-    // Let the mouth win while it is talking. On a PSX atlas the vowels and the
-    // emotions are cells of the same face texture, so they cannot both show -
-    // without this an emotion pins the face and the lip sync stops.
-    speechFirst: true,
-    // how loud a vowel has to be to count as talking
-    speechAt: 0.2,
     // how much closer another vowel has to be before the mouth swaps cell.
     // 0 = swap on any lead, which flickers; this is the hysteresis of speech.
     mouthStick: 0.25,
-    // which preset a smile drives: 'fun' | 'joy' | 'both'
-    smileKey: 'fun',
-    // let only the strongest emotion through
-    exclusive: true,
 
     // --- motion -------------------------------------------------------
-    // Enable the gains below. Off = the app's own values.
-    motion: false,
     // neck rotation gain; stock is 1
     headGain: 1,
-    // chest / spine / upper chest pitch gain; stock is 0.05. This one rides on
-    // the head, so it cannot be opened up without over-pitching the torso.
+    // Chest / spine / upper chest pitch gain; stock is 0.05. This one rides on
+    // the head and keeps a fixed ratio to it, so the head-turn calibration
+    // step is what sets it - there is nothing a slider of its own could say.
     bodyGain: 0.05,
     // the same three bones' lean and twist, which come from the pose solver
     // rather than the head. Stock shares bodyGain; the lean calibration needs
@@ -168,18 +176,17 @@
     // How much of Spine.z is treated as a head roll the pose solver copied.
     // 0 = stock (a head tilt leans the torso); 1 = strip a 1:1 coupling.
     leanHead: 0,
-    // arm/hand euler multiplier; 1 = stock Kalidokit. Only reaches the wrist
-    // roll while the retarget below is on, since the retarget replaces the
-    // upper/lower arm angles outright.
+    // Arm/hand euler multiplier; 1 = stock Kalidokit. Only reaches the wrist
+    // roll while the retarget is on, since the retarget replaces the upper and
+    // lower arm angles outright - and the T-pose step measures it, so it is
+    // not a slider either.
     armGain: 1,
-    // 0 = stock responsiveness, 1 = as heavy as it goes. Only used when the
-    // adaptive filter below is off, plus as a final scale when it is on.
-    damping: 0,
 
     // --- adaptive smoothing ---------------------------------------------
-    // One-euro instead of a flat factor: filter hard while the pose is held,
-    // barely at all while it moves. Off = the flat `damping` alone.
-    adaptive: true,
+    // One-euro rather than a flat damping factor: filter hard while the pose
+    // is held, barely at all while it moves. A flat factor has to choose
+    // between settling a held pose and following a fast one, and there is no
+    // setting of it that does both - so there is no longer a switch back to it.
     // Hz. The cutoff a motionless signal is filtered at - lower is smoother,
     // and is what the "hold still" calibration step measures.
     minCutoff: 0.9,
@@ -194,14 +201,10 @@
 
     // --- arm retarget ---------------------------------------------------
     // Aim the arm at the hand the camera saw instead of replaying Kalidokit's
-    // solved angles. Not gated behind `motion`: it is a rig, not a gain.
+    // solved angles. Not a panel control - it is the rig, and the one thing
+    // that turns it off is a model whose arm it cannot drive, which it works
+    // out for itself.
     armIK: true,
-    // Aim the wrist from the hand model's own 21 landmarks instead of from
-    // Kalidokit's Euler wrist. The hand model is the only tracker that looks at
-    // the hand, and it is the one already driving the fingers - but holistic
-    // only runs it when it thinks it has found a hand, and a hand it has found
-    // in the wrong place is reported as confidently as a right one.
-    handIK: true,
     // model arm lengths per unit of the user's. 1 = the model reaches exactly
     // as far, in its own proportions, as the person does. Raise it when a
     // short-armed model cannot get its hands to its own head.
@@ -211,7 +214,8 @@
     // job now, and since the elbow angle sets how far the hand goes this only
     // steers direction - where a value under 1 tilts every gesture toward the
     // camera off to one side, so the hand never gets in front of the face.
-    // 1 = believe the reported depth; the depth calibration measures the rest.
+    // 1 = believe the reported depth. The point-at-the-camera step measures
+    // it; there is no value here for a person to find by eye.
     armDepth: 1,
     // Gain on the up axis of the hand target, as a factor on Reach. Reach is
     // measured with the arms straight out to the sides, where nothing is
@@ -238,10 +242,6 @@
     // ms to coast the arm on its last good target before easing it back to the
     // stock rig. 0 = hand it straight back, which is what upstream does.
     armHold: 350,
-    // Cross-check the two trackers against each other and distrust a frame
-    // they disagree on. Off = believe whatever arrives, which is upstream.
-    sanity: true,
-
     // --- backgrounds ----------------------------------------------------
     // Saved background colours, as hex strings. The app keeps its own
     // background list in a plain in-memory store that nothing ever writes to
@@ -252,8 +252,6 @@
     colours: [],
 
     // --- performance --------------------------------------------------
-    // Enable the caps below. Off = the app's own behaviour.
-    perf: false,
     // Shed tracking rate on its own while the machine cannot keep up, and take
     // it back when it can. Independent of the fixed caps, and on by default:
     // it costs nothing while there is headroom and it is the difference
@@ -262,10 +260,26 @@
     perfAuto: true,
     // Mediapipe inferences per second. 0 = one per animation frame (stock),
     // which is where nearly all the CPU goes.
-    trackFps: 0,
-    // rendered frames per second. 0 = display rate (stock).
-    renderFps: 0,
-    // Holistic modelComplexity 0 (lite) instead of 1
+    //
+    // 24 rather than uncapped. Holistic never reaches a display rate anyway, so
+    // the frames an uncapped tracker asks for are frames it cannot deliver -
+    // it just spends the whole CPU finding that out. 24 is above what the face
+    // needs to look alive and below what the machine was straining at.
+    trackFps: 24,
+    // Rendered frames per second. 0 = display rate (stock).
+    //
+    // 30, because this is a PSX fork: the era's own cadence was 20-30, so a cap
+    // here is the look rather than a concession to the machine. It halves GPU
+    // time on a 60Hz screen and nothing about the result is worse for it.
+    renderFps: 30,
+    // Holistic modelComplexity 0 (lite) instead of 1.
+    //
+    // Off by default, and it is the one performance setting that is a real
+    // trade rather than a free win. The arm retarget is built on pose landmark
+    // positions - which wrist a hand sits on, whether a palm is behind the
+    // skull, how long a forearm reads - and those are exactly what the lite
+    // network is worse at. The rate caps cost latency nobody sees; this costs
+    // accuracy in the one part of the fork that needed the most work.
     poseLite: false,
 
     verbose: false
@@ -294,21 +308,20 @@
     hysteresis: { min: 0, max: 0.5 },
     holdMs: { min: 0, max: 400 },
     mouthGain: { min: 0.25, max: 3 },
-    blinkGain: { min: 0.25, max: 3 },
+    eyeShutAt: { min: 0.05, max: 0.95 },
+    eyeFurrowLift: { min: 0, max: 0.6 },
     browGain: { min: 0.25, max: 4 },
     browBias: { min: -1, max: 1 },
     angryAt: { min: 0, max: 0.95 },
     sorrowAt: { min: 0, max: 0.95 },
     emotionHold: { min: 0, max: 400 },
     smileAt: { min: 0, max: 0.95 },
-    speechAt: { min: 0, max: 1 },
     mouthStick: { min: 0, max: 1 },
     headGain: { min: 0, max: 1.5 },
     bodyGain: { min: 0, max: 0.2 },
     leanGain: { min: 0, max: 1 },
     leanHead: { min: 0, max: 1 },
     armGain: { min: 0.5, max: 2.5 },
-    damping: { min: 0, max: 0.95 },
     minCutoff: { min: 0.2, max: 5 },
     beta: { min: 0, max: 3 },
     armReach: { min: 0.5, max: 2 },
@@ -325,7 +338,6 @@
     renderFps: { min: 0, max: 60 },
     colorLevels: { one: [8, 16, 32, 64] },
     fingers: { one: ['all', 'thumb', 'none'] },
-    smileKey: { one: ['fun', 'joy', 'both'] },
     signal: { one: ['calibrated', 'auto', 'raw'] },
     lang: { one: ['en', 'pt'] }
   };
@@ -337,6 +349,12 @@
   // is neither, and `isAlphaHex` reads length alone - so a '#0f0' let through
   // here would come back out of an imported file as an opaque colour that the
   // swatch draws as a checkerboard.
+  // Narrower than this and the eye map is a division by almost nothing: one
+  // noisy frame would swing the lid from open to shut. Declared here because
+  // `load()` reads it during the eye-calibration migration, which runs before
+  // anything further down the file exists.
+  var EYE_SPAN_MIN = 0.05;
+
   var HEX_RE = /^#([0-9a-fA-F]{6}|[0-9a-fA-F]{8})$/;
   // An imported file is not necessarily one this app wrote. Colours cost a
   // localStorage write each, so the list is capped rather than trusted.
@@ -406,16 +424,44 @@
 
   function load() {
     var out = {};
+    var saved = null;
     for (var k in DEFAULTS) out[k] = DEFAULTS[k];
     try {
       var raw = localStorage.getItem(STORE_KEY);
       if (raw) {
-        var saved = JSON.parse(raw);
+        saved = JSON.parse(raw);
         for (var j in saved) if (j in out) out[j] = sanitize(j, saved[j]);
       }
     } catch (e) {}
     out.preview = '';
+    migrateEyeCal(out, saved);
     return out;
+  }
+
+  // The eye reading has been stored two ways before this one: inside `cal` as
+  // `blinkOpen`/`blinkClosed`, and briefly as an `eyeOpenAt`/`eyeShutAt` pair.
+  // Both were a range where this is a line, and the line that best replaces a
+  // range is its midpoint - so either shape converts rather than being thrown
+  // away and asked for again.
+  //
+  // Takes the raw saved object, not the loaded settings: `eyeOpenAt` is no
+  // longer a key of DEFAULTS, so by the time `out` is built it has been
+  // dropped. Only runs while the setting is still at its default, so a line
+  // the person has since moved is never overwritten.
+  function migrateEyeCal(out, saved) {
+    if (out.eyeShutAt !== DEFAULTS.eyeShutAt) return;
+    var lo = null, hi = null;
+    if (saved && isNum(saved.eyeOpenAt) && isNum(saved.eyeShutAt)) {
+      lo = saved.eyeOpenAt;
+      hi = saved.eyeShutAt;
+    } else {
+      var c = out.cal;
+      if (!c || !isNum(c.blinkOpen) || !isNum(c.blinkClosed)) return;
+      lo = c.blinkOpen;
+      hi = c.blinkClosed;
+    }
+    if (!(hi - lo >= EYE_SPAN_MIN)) return;
+    out.eyeShutAt = clamp((lo + hi) / 2, SPEC.eyeShutAt.min, SPEC.eyeShutAt.max);
   }
 
   function resetSettings() {
@@ -450,9 +496,38 @@
     return { kind: EXPORT_KIND, version: EXPORT_VERSION, settings: data };
   }
 
-  // The panel is rebuilt whenever the language changes, so this is looked up
-  // through a variable the rebuild reassigns rather than held across it.
+  // The panel is rebuilt whenever the language changes, so these are looked up
+  // through variables the rebuild reassigns rather than held across it.
   var importNoteEl = null;
+  var voiceNoteEl = null;
+
+  // The voice list can arrive after the card was built, so this is called both
+  // from the card and from `voiceschanged`.
+  function syncVoiceNote() {
+    if (!voiceNoteEl) return;
+    // `null` is "the list has not loaded yet" and must not be reported as a
+    // machine with no voices - that reads as a fault on every normal browser
+    // for the first second of the session.
+    var show = cfg.calCues && speechAvailable() === false;
+    voiceNoteEl.style.display = show ? '' : 'none';
+  }
+
+  // Everything that makes this run on a small machine, in one place. Two of
+  // these are read once at startup, so the reload note appears with them.
+  function applyLowPower() {
+    cfg.pixelRatio = 0.5;
+    cfg.renderFps = 30;
+    cfg.trackFps = 20;
+    cfg.poseLite = true;
+    cfg.perfAuto = true;
+    save();
+    // liveChange returns early on the first reload-only key, so the others
+    // would never reach applyCanvasFilter. Drive it per key.
+    liveChange('pixelRatio');
+    liveChange('poseLite');
+    liveChange('renderFps');
+    syncControls();
+  }
 
   function setImportNote(msg) {
     if (importNoteEl) setText(importNoteEl, msg);
@@ -967,9 +1042,11 @@
     return uvDist(flipped, entry.base) <= uvDist(plain, entry.base);
   }
 
+  // Blink had a gain here too. It scaled a value that is now 0 or 1, on its way
+  // to a bar the person sets directly - so it could only ever move the same
+  // decision `Eyes shut at` moves, in units nobody could reason about.
   function gainFor(key) {
     if (MOUTH_KEYS[key]) return cfg.mouthGain;
-    if (BLINK_KEYS[key]) return cfg.blinkGain;
     return 1;
   }
 
@@ -1029,14 +1106,7 @@
       if (holding && !(e.current && MOUTH_KEYS[e.current])) continue;
 
       var best = pickBest(e, proxy);
-      // hysteresis: the cell already on screen only has to clear the lower bar
-      var bar = (best.cell && best.cell.key === e.current)
-        ? Math.max(0, cfg.threshold - cfg.hysteresis)
-        : cfg.threshold;
-      if (best.cell && MOUTH_KEYS[best.cell.key]) {
-        bar = Math.min(bar, 0.18);
-      }
-      var chosen = (best.cell && best.weight >= bar) ? best.cell : null;
+      var chosen = best.over ? best.cell : null;
       var tag = chosen ? chosen.key : null;
 
       if (tag === e.current && e.since) continue;
@@ -1047,19 +1117,67 @@
     }
   }
 
+  // The bar this cell has to clear. Hysteresis belongs to whichever cell is on
+  // screen, so it is asked per cell rather than of the winner: asking the
+  // winner meant the cell already showing was judged against the high bar
+  // whenever something else briefly outweighed it.
+  function barFor(e, cell) {
+    var bar = (cell.key === e.current)
+      ? Math.max(0, cfg.threshold - cfg.hysteresis)
+      : cfg.threshold;
+    // Visemes change every syllable and never get near a full weight; held to
+    // the same bar as an expression the mouth would simply stop moving.
+    if (MOUTH_KEYS[cell.key]) bar = Math.min(bar, 0.18);
+    return bar;
+  }
+
+  // Blink and angry are not comparable magnitudes. Furrowing your brows
+  // genuinely narrows your eyes - the same muscles do both - so both signals
+  // rise together, and a plain argmax handed the face to whichever of Blink
+  // gain and Signal gain happened to be larger. That is not a decision anyone
+  // made, and it flips frame to frame, which is what "the angry face keeps
+  // blinking at itself" is.
+  //
+  // So: class first, weight only within a class. A vowel outranks everything
+  // because a mouth that stops moving mid-sentence reads as broken, and speech
+  // is continuous where the other two are not. A blink outranks an emotion
+  // because it is an event with a beginning and an end - it takes the face for
+  // the tenth of a second it lasts and gives it straight back, where an
+  // emotion is a state that will still be there afterwards. An emotion that
+  // loses to a blink loses nothing; a blink that loses to an emotion never
+  // happens at all, and an avatar that cannot blink looks dead.
+  //
+  // `eyeFurrowLift` is the other half of this, and the more important one: it
+  // stops the furrow reaching the blink bar in the first place, so most frames
+  // never get here with both above it.
+  function classRank(key) {
+    if (MOUTH_KEYS[key]) return 2;
+    if (BLINK_KEYS[key]) return 1;
+    return 0;
+  }
+
   function pickBest(e, proxy) {
-    var best = null, bestW = 0;
+    var best = null, bestW = 0, bestRank = -1;
     for (var c = 0; c < e.cells.length; c++) {
       var cell = e.cells[c];
       var w = expressionWeight(proxy, cell.key);
       w *= gainFor(cell.key);
       if (w > 1) w = 1;
       // isBinary is about not interpolating morphs. We already snap the UV to
-      // one cell, so a second 0.5 gate just fights Blink gain and the threshold
+      // one cell, so a second 0.5 gate just fights the threshold
       // on groups UniVRM marked binary (blink usually is).
-      if (w > bestW) { bestW = w; best = cell; }
+      //
+      // A cell that clears its own bar beats one that does not, whatever the
+      // raw numbers say. Below every bar they all rank -1 and the largest
+      // weight wins, which is only ever used to report what was closest.
+      var rank = w >= barFor(e, cell) ? classRank(cell.key) : -1;
+      if (rank > bestRank || (rank === bestRank && w > bestW)) {
+        bestRank = rank;
+        bestW = w;
+        best = cell;
+      }
     }
-    return { cell: best, weight: bestW };
+    return { cell: best, weight: bestW, over: bestRank >= 0 };
   }
 
   // --------------------------------------------------- emotion presets
@@ -1080,6 +1198,16 @@
   var EMOTION_KEYS = ['angry', 'sorrow', 'fun', 'joy'];
   var lastFace = null;
   var lastBlink = null;
+  // The tracker's own closedness, before the eye map. Shown beside the mapped
+  // value so the two eye sliders can be set by watching a real face.
+  var lastEyeRaw = null;
+  // where the line sat on that frame, so the readout can show the reading and
+  // the bar it is being judged against side by side
+  var lastEyeBar = null;
+  // per-lid latch, for the release margin
+  var shutL = false;
+  var shutR = false;
+  var eyeReadoutEl = null;
   var lastViseme = { key: null, w: 0 };
   // how sure the mouth classifier is that this is the recorded grin, 0 = not it
   var mouthSays = 0;
@@ -1143,11 +1271,27 @@
   var readoutAt = 0;
 
   function paintReadout() {
-    if (!readoutEl || !readoutEl.isConnected) return;
+    var live = (readoutEl && readoutEl.isConnected) ||
+      (eyeReadoutEl && eyeReadoutEl.isConnected);
+    if (!live) return;
     if (!lastFace && lastBlink == null) return;
     var rt = now();
     if (rt - readoutAt < READOUT_EVERY) return;
     readoutAt = rt;
+
+    // The eye line, for the card that holds the two eye sliders. `raw` is what
+    // they are set against; `->` is what the map makes of it.
+    if (eyeReadoutEl && eyeReadoutEl.isConnected && lastEyeRaw != null) {
+      // The reading, the line it is being judged against right now (which the
+      // furrow moves), and which side of it that puts the lid on.
+      setText(eyeReadoutEl,
+        T('eyes') + ' ' + lastEyeRaw.toFixed(3) +
+        '  /  ' + (lastEyeBar == null ? '-' : lastEyeBar.toFixed(3)) +
+        '  ->  ' + T(lastBlink ? 'shut' : 'open') +
+        (faceOcc ? '  ·  ' + T('hand on face') : ''));
+    }
+
+    if (!readoutEl || !readoutEl.isConnected) return;
     var parts = [];
     if (lastFace) {
       var top = null;
@@ -1162,7 +1306,10 @@
         ' [' + lastFace.raw.smile.toFixed(3) + ']');
       parts.push(top ? top + ' ' + lastFace.out[top].toFixed(2) : 'neutral');
     }
-    if (lastBlink != null) parts.push('blink ' + lastBlink.toFixed(2));
+    if (lastBlink != null) {
+      parts.push('blink ' + lastBlink.toFixed(2) +
+        (lastEyeRaw != null ? ' [' + lastEyeRaw.toFixed(3) + ']' : ''));
+    }
     if (faceOcc) parts.push(T('hand on face'));
     setText(readoutEl, parts.join('  ·  '));
   }
@@ -1171,6 +1318,7 @@
     browTrack = tracker();
     smileTrack = tracker();
     browPose = poseLadder();
+    resetBrowFilter();
     log('auto calibration reset');
   }
 
@@ -1267,13 +1415,59 @@
   // between "turned left" and "facing the camera" files three different
   // angles under one pose. `at` is which pose a step belongs to, `expr` is
   // which of the three faces it is.
+  // The eye pair on its own. The expression wizard already records these - but
+  // it takes twenty-five poses to get there, and an eye map is the one thing in
+  // it that a person wants to redo by itself: it goes wrong when the light or
+  // the camera angle changes, neither of which moves a brow span.
+  //
+  // Two readings at one pose, not five across the head angles the expression
+  // wizard uses. A lid does not foreshorten the way a brow-to-lid gap does, and
+  // asking for four more poses to measure that would be asking for them to be
+  // held for nothing.
+  var BLINK_STEPS = [
+    { key: 'eyesOpen', eyes: 'open',
+      title: 'Eyes open, look at the camera',
+      hint: 'Relaxed - not wide, just how you normally sit' },
+    { key: 'eyesShut', eyes: 'closed',
+      title: 'Close your eyes',
+      hint: 'Still facing the camera, and hold them shut' },
+    // The pose that makes the two signals fight. Reading how far a furrow
+    // alone closes the eye is the only way to stop it counting as a blink.
+    { key: 'eyesFurrow', eyes: 'furrow',
+      title: 'Furrow your brows, eyes open',
+      hint: 'Angry face - brows down and together, but keep your eyes open' }
+  ];
+
+  // Five poses, one head angle.
+  //
+  // This was twenty-three: the same three faces repeated at four off-centre
+  // head angles, plus an eyes-shut reading at three of them. All eighteen of
+  // those existed to record how far the brow reading drifted as the head
+  // turned - which was the largest error in the old scalar by a factor of six,
+  // and is not an error this one has. The side-of-face denominator foreshortens
+  // with the numerator, so a yaw leaves the ratio alone, a pitch shortens both
+  // by the same cosine and a roll turns both together.
+  //
+  // What drift is left - iris noise, lighting, whatever the mesh gets wrong -
+  // is not the kind a recording fixes anyway, because it is not a property of
+  // the angle. The pose ladder learns it live, at every angle including the
+  // ones nobody would hold for a wizard, and it is unaffected by any of this:
+  // it runs off `browPose`, which is built at runtime and never read from the
+  // recording. Dropping the recorded poses drops `browAt`, `poseCalOk` goes
+  // false, and `poseAdjustedBrow` returns the raw scalar with the ladder still
+  // applied on top - which is the correct answer, not a degraded one.
+  //
+  // A profile recorded with the eighteen still loads and still uses them.
   var CAL_STEPS = [
     { key: 'rest',         at: 'rest', expr: 'rest', eyes: 'open',
       title: 'Relax your face',
       hint: 'Neutral, looking at the camera, eyes open' },
-    { key: 'down',         at: 'rest', expr: 'down',
+    // `eyes: 'furrow'` as well as the brow: this is the pose where the two
+    // signals fight, so it is the pose that measures the coupling. The short
+    // blink wizard asks for it separately for people who only need that.
+    { key: 'down',         at: 'rest', expr: 'down', eyes: 'furrow',
       title: 'Furrow your brows',
-      hint: 'Angry - pull them down and together' },
+      hint: 'Angry - pull them down and together, and keep your eyes open' },
     { key: 'up',           at: 'rest', expr: 'up',
       title: 'Raise your brows',
       hint: 'Surprised - lift them as high as you can' },
@@ -1281,65 +1475,7 @@
       hint: 'Big smile, and hold it' },
     { key: 'blink',        eyes: 'closed',
       title: 'Close your eyes',
-      hint: 'Still facing the camera, and hold them shut' },
-
-    { key: 'leftNear', at: 'leftNear', expr: 'rest', eyes: 'open',
-      title: 'Turn a little left, relax your face',
-      hint: 'About half a turn - the angle you use glancing at a second screen' },
-    { key: 'leftOpen',     at: 'leftOpen', expr: 'rest', eyes: 'open',
-      title: 'Turn ~40° left, relax your face',
-      hint: 'Head turned, looking past the camera, brows relaxed' },
-    { key: 'leftDown',     at: 'leftOpen', expr: 'down',
-      title: 'Still turned left - furrow your brows',
-      hint: 'Same angle. Do not turn back toward the camera' },
-    { key: 'leftUp',       at: 'leftOpen', expr: 'up',
-      title: 'Still turned left - raise them',
-      hint: 'Same angle, as high as you can' },
-    { key: 'leftClosed',   eyes: 'closed',
-      title: 'Hold that left turn, close your eyes',
-      hint: 'Same angle, eyes shut' },
-
-    { key: 'rightNear', at: 'rightNear', expr: 'rest', eyes: 'open',
-      title: 'Turn a little right, relax your face',
-      hint: 'About half a turn, the other way' },
-    { key: 'rightOpen',    at: 'rightOpen', expr: 'rest', eyes: 'open',
-      title: 'Turn ~40° right, relax your face',
-      hint: 'Head turned the other way, brows relaxed' },
-    { key: 'rightDown',    at: 'rightOpen', expr: 'down',
-      title: 'Still turned right - furrow your brows',
-      hint: 'Same angle. Do not turn back toward the camera' },
-    { key: 'rightUp',      at: 'rightOpen', expr: 'up',
-      title: 'Still turned right - raise them',
-      hint: 'Same angle, as high as you can' },
-    { key: 'rightClosed',  eyes: 'closed',
-      title: 'Hold that right turn, close your eyes',
-      hint: 'Same angle, eyes shut' },
-
-    { key: 'gazeUpNear', at: 'gazeUpNear', expr: 'rest', eyes: 'open',
-      title: 'Tilt your head back a little, relax your face',
-      hint: 'About half of the full tilt' },
-    { key: 'gazeUp',       at: 'gazeUp', expr: 'rest', eyes: 'open',
-      title: 'Look up, relax your face',
-      hint: 'Tilt your head back, brows relaxed, do not squint' },
-    { key: 'gazeUpDown',   at: 'gazeUp', expr: 'down',
-      title: 'Still looking up - furrow your brows',
-      hint: 'Chin still up' },
-    { key: 'gazeUpUp',     at: 'gazeUp', expr: 'up',
-      title: 'Still looking up - raise them',
-      hint: 'Chin still up, as high as you can' },
-
-    { key: 'gazeDownNear', at: 'gazeDownNear', expr: 'rest', eyes: 'open',
-      title: 'Dip your chin a little, relax your face',
-      hint: 'About half of the full dip, eyes open' },
-    { key: 'gazeDown',     at: 'gazeDown', expr: 'rest', eyes: 'open',
-      title: 'Look down, relax your face',
-      hint: 'Chin down, eyes open, brows relaxed' },
-    { key: 'gazeDownDown', at: 'gazeDown', expr: 'down',
-      title: 'Still looking down - furrow your brows',
-      hint: 'Chin still down' },
-    { key: 'gazeDownUp',   at: 'gazeDown', expr: 'up',
-      title: 'Still looking down - raise them',
-      hint: 'Chin still down, as high as you can' }
+      hint: 'Still facing the camera, and hold them shut' }
   ];
   // The face wizard waits for the person to say they are in the pose rather
   // than counting them down: their hands are free, and a countdown only races
@@ -1383,7 +1519,7 @@
   }
 
   function cue(notes) {
-    if (!cfg.calSound) return;
+    if (!cfg.calCues) return;
     try {
       var AC = window.AudioContext || window.webkitAudioContext;
       if (!AC) return;
@@ -1454,20 +1590,46 @@
     return got;
   }
 
+  // Whether this machine can speak at all, as opposed to whether it has the
+  // right language. Chromium on Raspberry Pi OS reports an empty voice list
+  // unless a speech engine is installed, and `speak()` on an empty list is
+  // silence with no error - so the one cue that carries across a room simply
+  // does not happen, and nothing on screen says why. `null` = not asked yet.
+  var voiceAny = null;
+
+  function speechAvailable() {
+    try {
+      if (!window.speechSynthesis) return false;
+      var list = window.speechSynthesis.getVoices();
+      // An empty list before `voiceschanged` fires is "not loaded yet", not
+      // "none installed": answer unknown rather than accusing the machine.
+      if (!list || !list.length) return voiceAny;
+      return true;
+    } catch (e) { return false; }
+  }
+
   try {
     if (window.speechSynthesis && window.speechSynthesis.addEventListener) {
       window.speechSynthesis.addEventListener('voiceschanged', function () {
         voiceFor = {};
+        var list = window.speechSynthesis.getVoices();
+        voiceAny = !!(list && list.length);
+        syncVoiceNote();
       });
     }
     // Chrome only starts loading the list once it has been asked for.
-    if (window.speechSynthesis) window.speechSynthesis.getVoices();
+    if (window.speechSynthesis) {
+      var boot = window.speechSynthesis.getVoices();
+      if (boot && boot.length) voiceAny = true;
+    } else {
+      voiceAny = false;
+    }
   } catch (e) { /* as with the tones */ }
 
   // Voice runs off the same translated strings the prompt shows, so it never
   // needs its own script - and never drifts from what is on screen.
   function say(text) {
-    if (!cfg.calVoice || !text) return;
+    if (!cfg.calCues || !text) return;
     try {
       var synth = window.speechSynthesis;
       if (!synth) return;
@@ -1500,6 +1662,9 @@
   var calMouthEl = null;
   var calMouthBtn = null;
   var calMouthCancelBtn = null;
+  var calBlinkEl = null;
+  var calBlinkBtn = null;
+  var calBlinkCancelBtn = null;
   var calCancelBtn = null;
   var calMotionCancelBtn = null;
 
@@ -1598,6 +1763,7 @@
   function steps() {
     if (calRun.kind === 'motion') return calRun.steps;
     if (calRun.kind === 'mouth') return MOUTH_STEPS;
+    if (calRun.kind === 'blink') return BLINK_STEPS;
     return CAL_STEPS;
   }
 
@@ -1620,7 +1786,9 @@
     calRun.tickAt = -1;
     // Only the face wizard waits for the key. A vowel has to be voiced to read
     // right, and someone holding "oooo" while hunting for Space stops voicing
-    // it - the same reason the motion poses are counted in.
+    // it - the same reason the motion poses are counted in, and the same reason
+    // the blink pair is: half of that one is held with the eyes shut, so there
+    // is nothing on screen to read and the count-in is the only cue there is.
     if (calRun.kind !== 'face') {
       calRun.phase = 'prep';
       // A step whose instruction takes longer to say than the count-in lasts
@@ -1662,6 +1830,7 @@
   function startCalibration() { begin('face'); }
   function startMotionCalibration() { begin('motion'); }
   function startMouthCalibration() { begin('mouth'); }
+  function startBlinkCalibration() { begin('blink'); }
 
   function stopCalibration(note, spoken) {
     hush();
@@ -1673,6 +1842,10 @@
     calRun = null;
     if (el0) setText(el0, note || '');
     syncCalUi();
+    // The verdict is the one line the person who just held the pose actually
+    // wants, and they are still across the room from the card it was written
+    // into. Leave it up long enough to be read, then get out of the way.
+    if (spoken) flashHud(spoken, note || '');
   }
 
   // Runs while a motion step is counting in and while any step is being
@@ -1865,13 +2038,82 @@
       if (st.eyes === 'open') {
         if (!calRun.openEyes) calRun.openEyes = [];
         calRun.openEyes.push(median(cl));
+      } else if (st.eyes === 'furrow') {
+        // The median, not a percentile: this is a held pose, and the extreme
+        // frame of it is as often a flinch that shut the eye as it is the
+        // furrow. Overstating it would lift the floor so far that a real
+        // blink stops registering while the brows are down.
+        if (!calRun.furrowEyes) calRun.furrowEyes = [];
+        calRun.furrowEyes.push(median(cl));
       } else {
         if (!calRun.closedEyes) calRun.closedEyes = [];
         calRun.closedEyes.push(pct(cl, 0.9));
       }
       calRun.shake = Math.max(calRun.shake || 0, spread(cl));
     }
+    if (calRun.kind === 'blink') { nextStep(BLINK_STEPS.length, finishBlink); return; }
     nextStep(CAL_STEPS.length, finishCalibration);
+  }
+
+  // The open reading is the *most closed* an open eye looked, and the closed
+  // one the *least closed* a shut eye looked - the same conservative pair the
+  // expression wizard takes, for the same reason. Erring inward on both ends
+  // means a half-blink lands inside the range instead of clipping at it.
+  function eyeSpanFrom(openEyes, closedEyes) {
+    if (!openEyes || !closedEyes || !openEyes.length || !closedEyes.length) return null;
+    var open = openEyes[0], i;
+    for (i = 1; i < openEyes.length; i++) if (openEyes[i] > open) open = openEyes[i];
+    var closed = closedEyes[0];
+    for (i = 1; i < closedEyes.length; i++) if (closedEyes[i] < closed) closed = closedEyes[i];
+    if (closed - open < EYE_SPAN_MIN) return null;
+    return { open: clamp(open, 0, 1), closed: clamp(closed, 0, 1) };
+  }
+
+  // The line goes halfway between the two measured classes, which is the split
+  // furthest from both of them - the most room a wrong reading in either
+  // direction has before it lands on the wrong side.
+  function applyEyeSpan(span) {
+    cfg.eyeShutAt = clamp((span.open + span.closed) / 2,
+      SPEC.eyeShutAt.min, SPEC.eyeShutAt.max);
+    // Whatever was measured before belongs to the old line.
+    cfg.eyeFurrowLift = 0;
+  }
+
+  // How much further a furrowed eye reads than a relaxed one. A furrow can
+  // only ever close the eye, so a reading at or below the open one measured
+  // nothing and is left inert rather than stored as a negative correction.
+  // Capped so the raised line still leaves a real blink somewhere to go.
+  function applyFurrow(furrowEyes, span) {
+    cfg.eyeFurrowLift = 0;
+    if (!furrowEyes || !furrowEyes.length || !span) return 0;
+    var v = median(furrowEyes);
+    if (!isNum(v) || !(v > span.open)) return 0;
+    var room = Math.max(0, span.closed - EYE_SPAN_MIN - cfg.eyeShutAt);
+    cfg.eyeFurrowLift = clamp(v - span.open, 0, Math.min(SPEC.eyeFurrowLift.max, room));
+    return cfg.eyeFurrowLift;
+  }
+
+  function finishBlink() {
+    var span = eyeSpanFrom(calRun.openEyes, calRun.closedEyes);
+    if (!span) {
+      // Not a failure worth throwing the old map away for: whatever was there
+      // is still the better answer than the identity.
+      stopCalibration(T('Eyes read almost the same open and shut - redo it, holding them properly shut.'), T('redo this'));
+      return;
+    }
+    applyEyeSpan(span);
+    var furrow = applyFurrow(calRun.furrowEyes, span);
+    save();
+    syncControls();
+    var msg = T('Blink calibrated') + ' - ' + T('open') + ' ' + span.open.toFixed(3) +
+      ', ' + T('shut') + ' ' + span.closed.toFixed(3) +
+      ', ' + T('line at') + ' ' + cfg.eyeShutAt.toFixed(3) + '.';
+    if (furrow) {
+      msg += ' ' + T('Furrow closes the eye by') + ' ' + furrow.toFixed(3) +
+        ' - ' + T('that much is discounted while the brows are down.');
+    }
+    log('blink calibration', { span: span, furrow: furrow });
+    stopCalibration(msg, T('Blink calibrated'));
   }
 
   // The neck rig clamps its rotation to +/-0.8, so mapping the widest turn the
@@ -2018,7 +2260,6 @@
     cfg.headGain = clamp(0.8 / dev, 0, 1.5);
     // this one rides on the head signal, so it stays in the stock ratio to it
     cfg.bodyGain = clamp(STOCK_BODY_GAIN * (cfg.headGain / STOCK_HEAD_GAIN), 0, 0.2);
-    cfg.motion = true;
     var notes = [];
 
     // How hard a held pose has to be filtered is a property of the camera and
@@ -2026,7 +2267,6 @@
     // guessing at. The constant is empirical: it puts a clean webcam near 2 Hz
     // and a grainy one under 1.
     if (isNum(c.noise)) {
-      cfg.adaptive = true;
       cfg.minCutoff = clamp(0.008 / Math.max(c.noise, 0.0005), 0.3, 3);
       notes.push(T('Steadiness') + ' ' + cfg.minCutoff.toFixed(2) + 'Hz');
     }
@@ -2160,20 +2400,14 @@
 
     // Floor = the most-closed an open eye still looked across every pose.
     // Peak = the weakest closed pose, so a blink while turned still reaches 1.
-    var openEyes = calRun.openEyes || [];
-    var closedEyes = calRun.closedEyes || [];
-    if (openEyes.length && closedEyes.length) {
-      var open = openEyes[0];
-      var i;
-      for (i = 1; i < openEyes.length; i++) if (openEyes[i] > open) open = openEyes[i];
-      var closed = closedEyes[0];
-      for (i = 1; i < closedEyes.length; i++) if (closedEyes[i] < closed) closed = closedEyes[i];
-      if (closed - open >= 0.05) {
-        c.blinkOpen = open;
-        c.blinkClosed = closed;
-      } else {
-        weak.push('blink');
-      }
+    // Written to the eye settings, the same two the short blink wizard and the
+    // two sliders write - there is one eye map, not one per way of reaching it.
+    var eyeSpan = eyeSpanFrom(calRun.openEyes, calRun.closedEyes);
+    if (eyeSpan) {
+      applyEyeSpan(eyeSpan);
+      // Order matters: the furrow lift is capped against the line, so the line
+      // has to be in place first.
+      applyFurrow(calRun.furrowEyes, eyeSpan);
     } else {
       weak.push('blink');
     }
@@ -2196,7 +2430,7 @@
     }
 
     if (usableBrowAt(calRun.browAt)) c.browAt = calRun.browAt;
-    c.brow3d = !!cfg.brow3d;
+    c.src = BROW_SRC;
 
     cfg.cal = c;
     cfg.signal = 'calibrated';
@@ -2204,16 +2438,13 @@
     save();
     syncControls();
 
-    var blinkSpan = (isNum(c.blinkOpen) && isNum(c.blinkClosed))
-      ? (c.blinkClosed - c.blinkOpen) : 0;
+    var blinkSpan = eyeSpan ? eyeSpan.closed - eyeSpan.open : 0;
     var poseDrift = browPoseDrift(c);
     var msg = shakeNote(Math.max(down, up, blinkSpan)) + T('Calibrated') +
       ' - ' + T('furrow') + ' ' + down.toFixed(3) +
       ', ' + T('raise') + ' ' + up.toFixed(3) +
       ', ' + T('smile') + ' ' + sm.toFixed(3);
-    if (isNum(c.blinkOpen) && isNum(c.blinkClosed)) {
-      msg += ', ' + T('blink') + ' ' + (c.blinkClosed - c.blinkOpen).toFixed(3);
-    }
+    if (blinkSpan) msg += ', ' + T('blink') + ' ' + blinkSpan.toFixed(3);
     if (poseDrift > 0) msg += ', ' + T('brow drift') + ' ' + poseDrift.toFixed(3);
     if (spans) msg += ', ' + spans + ' ' + T('poses with their own span');
     msg += '.';
@@ -2230,12 +2461,112 @@
     if (!calRun) return null;
     if (calRun.kind === 'motion') return calMotionEl;
     if (calRun.kind === 'mouth') return calMouthEl;
+    if (calRun.kind === 'blink') return calBlinkEl;
     return calEl;
   }
 
+  // ------------------------------------------------------ calibration HUD
+  //
+  // The prompt used to exist only inside the settings card, which is the one
+  // place it cannot be read: every pose in these wizards is held at arm's
+  // length from the screen, several of them turned away from it, and the card
+  // is 12px text behind the panel the pose is being performed in front of.
+  // That is the reason the spoken prompts exist at all.
+  //
+  // Speech is not a substitute, and on the machine this fork targets it is
+  // often not available: Chromium on Raspberry Pi OS ships with no
+  // speechSynthesis voices unless one is installed, so `say()` is silence and
+  // nothing tells the user why. So the prompt is also drawn large, over the
+  // canvas, where the pose can see it.
+  //
+  // `pointer-events: none` throughout: this sits over the whole viewport and
+  // must never eat a click meant for the app. Esc and the card's own Cancel
+  // button stay the way out.
+  var hudEl = null, hudStep = null, hudTitle = null, hudHint = null, hudLine = null;
+
+  function buildHud() {
+    if (hudEl && hudEl.isConnected) return hudEl;
+    var body = document.body;
+    if (!body) return null;
+    hudEl = el('div', 'psx-injected');
+    hudEl.id = 'psx-cal-hud';
+    hudEl.style.cssText =
+      'position:fixed;left:50%;top:6vh;transform:translateX(-50%);' +
+      'z-index:2147483000;pointer-events:none;display:none;' +
+      'max-width:min(92vw,900px);padding:18px 28px;border-radius:14px;' +
+      'background:rgba(12,12,18,.82);box-shadow:0 8px 40px rgba(0,0,0,.55);' +
+      'text-align:center;color:#fff;line-height:1.25;' +
+      'font-family:inherit;text-shadow:0 2px 8px rgba(0,0,0,.9)';
+
+    hudStep = el('div', null, '');
+    hudStep.style.cssText = 'font-size:14px;opacity:.6;letter-spacing:.16em;' +
+      'text-transform:uppercase;font-variant-numeric:tabular-nums';
+
+    hudTitle = el('div', null, '');
+    // clamped rather than fixed: this is read from across a room on a monitor
+    // and from a foot away on a laptop, and the longest prompts are a sentence
+    hudTitle.style.cssText = 'font-size:clamp(24px,4.2vw,46px);font-weight:700;margin-top:6px';
+
+    hudHint = el('div', null, '');
+    hudHint.style.cssText = 'font-size:clamp(15px,2vw,22px);opacity:.85;margin-top:8px';
+
+    hudLine = el('div', null, '');
+    hudLine.style.cssText = 'font-size:clamp(13px,1.5vw,17px);opacity:.6;margin-top:12px;' +
+      'font-variant-numeric:tabular-nums';
+
+    hudEl.appendChild(hudStep);
+    hudEl.appendChild(hudTitle);
+    hudEl.appendChild(hudHint);
+    hudEl.appendChild(hudLine);
+    body.appendChild(hudEl);
+    return hudEl;
+  }
+
+  // Called from syncCalUi, so the HUD appears and goes with the run rather than
+  // waiting for the next painted frame - a wizard that is counting in has not
+  // necessarily had a tracked frame yet.
+  function syncCalHud() {
+    if (!calRun) {
+      // A verdict still being shown owns the HUD until its own timer is up.
+      if (hudEl && !hudFlashAt) hudEl.style.display = 'none';
+      return;
+    }
+    if (buildHud()) hudEl.style.display = '';
+  }
+
+  // One timer, cleared before it is reset, so two runs finishing close together
+  // cannot leave the earlier verdict on screen over the later one.
+  var hudFlashAt = null;
+  var HUD_FLASH_MS = 4500;
+
+  function flashHud(title, sub) {
+    if (!buildHud()) return;
+    if (hudFlashAt) clearTimeout(hudFlashAt);
+    hudEl.style.display = '';
+    setText(hudStep, '');
+    setText(hudTitle, title);
+    setText(hudHint, sub || '');
+    setText(hudLine, '');
+    hudFlashAt = setTimeout(function () {
+      hudFlashAt = null;
+      // A new run may have started inside the window; that one owns the HUD now.
+      if (!calRun && hudEl) hudEl.style.display = 'none';
+    }, HUD_FLASH_MS);
+  }
+
+  function paintHud(st, line) {
+    if (hudFlashAt) { clearTimeout(hudFlashAt); hudFlashAt = null; }
+    if (!buildHud()) return;
+    hudEl.style.display = '';
+    setText(hudStep, (calRun.i + 1) + ' / ' + steps().length);
+    setText(hudTitle, T(st.title));
+    setText(hudHint, T(st.hint));
+    setText(hudLine, line);
+  }
+
   function paintCalibration(left) {
+    if (!calRun) return;
     var calEl = calTarget();
-    if (!calEl || !calRun) return;
     var st = steps()[calRun.i];
     var line;
     if (calRun.phase === 'prep') {
@@ -2255,6 +2586,10 @@
         if (calRun.acc.fit.n < FIT_MIN) line += ' - ' + T('straighten your elbows');
       }
     }
+    paintHud(st, line + (calRun.note ? '  ' + calRun.note : ''));
+    // The card keeps its copy: it is where the result is written when the run
+    // ends, and the panel may well be the thing being read on a laptop.
+    if (!calEl) return;
     setText(calEl,
       (calRun.i + 1) + '/' + steps().length + '  ' + T(st.title) +
       NL + T(st.hint) +
@@ -2309,7 +2644,7 @@
   function browCalUsable(c) {
     return !!(c && isNum(c.browRest) && isNum(c.browDown) && isNum(c.browUp) &&
       c.browDown < c.browRest - 0.002 && c.browUp > c.browRest + 0.002 &&
-      !c.brow3d === !cfg.brow3d);
+      c.src === BROW_SRC);
   }
 
   function browPoint(p) {
@@ -2331,7 +2666,7 @@
   // `browCalUsable` had this check and the pose path did not, which is the
   // whole of "now it is angry all the time". Both gates, or neither.
   function poseCalOk(c) {
-    return !!(c && usableBrowAt(c.browAt) && !c.brow3d === !cfg.brow3d);
+    return !!(c && usableBrowAt(c.browAt) && c.src === BROW_SRC);
   }
 
   function usableBrowAt(at) {
@@ -2525,65 +2860,178 @@
   // away. The three on top run down the face and the one underneath runs
   // across it, so they do not foreshorten together: turn the head and the span
   // underneath shortens while the three on top barely move, dip the chin and
-  // the opposite happens. The ratio moves without a muscle having done
-  // anything.
+  // the opposite happens, roll the head and the whole ratio walks. Measured on
+  // a rigid face in front of a lens it moves +0.30 at 40 degrees of yaw
+  // against a furrow worth 0.05 on the same face - six times the expression,
+  // from a head that turned.
   //
   // That is the whole of "looking aside reads as angry", and it is not a
-  // threshold that wants tuning or a rest that wants relearning - it is a
-  // length divided by another length that is being measured at a different
+  // threshold that wants tuning or a rest that wants relearning. It is a
+  // length divided by another length that is not being measured at the same
   // angle. Correcting it afterwards, however well, is correcting for a
   // projection that did not have to happen.
   //
-  // The mesh reports z too, on roughly the same scale as x, and a distance
-  // taken in three dimensions does not care which way the head is pointing.
-  // Same landmarks, same formula, same constant - just not flattened onto the
-  // camera plane first. The pose ladder below stays: iris noise, lighting and
-  // whatever z gets wrong are still drift, and it is now the only thing left
-  // for it to learn.
+  // What it takes to fix is not more geometry, it is a denominator that
+  // foreshortens with the numerator. So: divide the brow-to-lid gap by a rigid
+  // *vertical* beside it - the face oval down the side of the head, temple to
+  // jaw, past the ear - and take the gap along that vertical's own direction
+  // rather than as a bare length. Both run down the face, both are on the same
+  // side of it, both sit at much the same depth. A yaw leaves a vertical alone,
+  // a pitch shortens both by the same cosine, a roll turns both together, and
+  // moving nearer the camera scales both. Nothing in the ratio moves unless a
+  // brow does.
+  //
+  // Two other readings were tried and are worse. Kalidokit's distances taken
+  // in three dimensions is geometrically exact and rests on the mesh's z,
+  // which is a fitted estimate: on a noisy camera it costs more than the
+  // projection did. Decomposing each gap onto a face-plane basis - eye corners
+  // across, forehead-to-nasion down - is exact for a flat face and a face is
+  // not flat: the nasion stands proud of the forehead by a third of the length
+  // between them, so that basis leans out of the plane it claims to be in, and
+  // on a synthetic sweep of 105 head poses it was *worse* than upstream on the
+  // deepest of three face profiles. This one is better than upstream on all
+  // three, at every camera distance, by about three to one on the mean drift
+  // and with the furrow itself reading within a tenth of its size at the
+  // camera whatever the head is doing.
+  //
+  // What is left for the pose recordings and the ladder is the little that
+  // perspective does between two depths a few centimetres apart. That is what
+  // they were always meant to be for.
+  //
+  // Each side carries its own reference so that neither borrows the other's
+  // foreshortening: 127 -> 93 down the right of the face, 356 -> 323 down the
+  // left, both on the face oval and neither touched by an expression. The
+  // chin (152) is the obvious long vertical and is the wrong one - it moves
+  // with the jaw, so every spoken vowel would arrive in the brow signal.
   var BROW_SIDES = [
-    { ref: [35, 244], pairs: [[63, 229], [105, 230], [66, 231]] },
-    { ref: [265, 464], pairs: [[293, 449], [334, 450], [296, 451]] }
+    { up: [127, 93], pairs: [[63, 229], [105, 230], [66, 231]] },
+    { up: [356, 323], pairs: [[293, 449], [334, 450], [296, 451]] }
   ];
-  // Kalidokit's own neutral ratio, kept so the scalar lands in the range every
-  // threshold, gain and recording in this file already expects.
-  var BROW_NEUTRAL = 1.15;
+  // The gap is a little under half that side length on a relaxed face, so this
+  // is the same job Kalidokit's 1.15 does: put a neutral brow near zero, a
+  // furrow below it and a raise above. Only the zero, and every mapping under
+  // this subtracts a measured rest anyway - a face whose proportions differ
+  // shifts the zero, it does not break the reading.
+  var BROW_NEUTRAL = 0.45;
 
-  // what the two ways of reading it last said, for comparing them live
-  var browRead = { mesh: null, flat: null };
+  // A recording belongs to the scalar it was taken against, and is stamped
+  // with it. Two ways of reading a brow do not share a rest - the flat ratio
+  // sags a third of the way to angry at a full turn where this one does not
+  // move - so a recording read against a different one puts the zero
+  // permanently wrong, which is the fault it was recorded to fix. A profile
+  // carrying another stamp, or none, is rejected for the brow and falls back
+  // to auto until it is recorded again; the smile and the vowels in it are
+  // untouched by any of this and are still used.
+  var BROW_SRC = 'side';
 
-  function lmDist(a, b) {
-    if (!a || !b) return 0;
-    var dx = num(a.x) - num(b.x), dy = num(a.y) - num(b.y), dz = num(a.z) - num(b.z);
-    return Math.sqrt(dx * dx + dy * dy + dz * dz);
+  // what each way of reading it last said, for comparing them live
+  var browRead = { side: null, flat: null };
+
+  // Image plane only. z is exactly what this is built to do without.
+  function sub2(a, b, out) {
+    out.x = num(a.x) - num(b.x);
+    out.y = num(a.y) - num(b.y);
+    return out;
   }
 
+  // Made once and written over: this runs eight times per solved face for the
+  // life of the session, the same reason `armDbg` holds raw numbers.
+  var axU = { x: 0, y: 0 }, axD = { x: 0, y: 0 };
+
   function browSideRatio(lm, side) {
-    var ref = lmDist(lm[side.ref[0]], lm[side.ref[1]]);
-    if (!(ref > 1e-6)) return null;
+    var u = sub2(lm[side.up[1]], lm[side.up[0]], axU);
+    var len = Math.sqrt(u.x * u.x + u.y * u.y);
+    if (!(len > 1e-6)) return null;
     var sum = 0;
     for (var i = 0; i < side.pairs.length; i++) {
-      var d = lmDist(lm[side.pairs[i][0]], lm[side.pairs[i][1]]);
-      if (!(d > 0)) return null;
-      sum += d;
+      var d = sub2(lm[side.pairs[i][0]], lm[side.pairs[i][1]], axD);
+      // how far the gap reaches along the reference, not how long it is: a
+      // furrow slides the brow down the face, and the sideways part of that
+      // vector is anatomy rather than expression
+      var along = Math.abs((d.x * u.x + d.y * u.y) / len);
+      if (!(along > 0)) return null;
+      sum += along;
     }
-    return (sum / side.pairs.length) / ref / BROW_NEUTRAL - 1;
+    return (sum / side.pairs.length) / len / BROW_NEUTRAL - 1;
   }
 
   // Called from inside the bundle's own face handler, not from our hook, so
   // nothing here may throw: a face result is not something the app checks.
   function browScalar(lm, fallback) {
     browRead.flat = isNum(fallback) ? fallback : null;
-    browRead.mesh = null;
-    if (!cfg.brow3d || !lm || lm.length < 468) return fallback;
-    try {
-      var a = browSideRatio(lm, BROW_SIDES[0]);
-      var b = browSideRatio(lm, BROW_SIDES[1]);
-      if (a === null || b === null) return fallback;
-      var v = (a + b) / 2;
-      if (!isNum(v)) return fallback;
-      browRead.mesh = v;
-      return v;
-    } catch (e) { return fallback; }
+    browRead.side = null;
+    var v = null;
+    if (lm && lm.length >= 468) {
+      try {
+        var a = browSideRatio(lm, BROW_SIDES[0]);
+        var b = browSideRatio(lm, BROW_SIDES[1]);
+        if (a !== null && b !== null && isNum((a + b) / 2)) {
+          v = (a + b) / 2;
+          browRead.side = v;
+        }
+      } catch (e) { v = null; }
+    }
+    // A frame this could not read is not a reason to hand back Kalidokit's
+    // number: the two do not share a rest, so swapping between them mid-session
+    // steps the signal by more than any expression does. Hold what the filter
+    // last had instead, and only fall back before it has ever had anything.
+    if (v === null) return browFilt.v === null ? fallback : browFilt.v;
+    return filterBrow(v);
+  }
+
+  // ------------------------------------------------------- brow noise floor
+  //
+  // The scalar above is pose-invariant, not noise-free: it is eight landmark
+  // positions a frame, and Mediapipe moves every one of them a little on every
+  // frame. A furrow is worth a few hundredths and so is a tenth of a second of
+  // that jitter, which is what makes one threshold both trip on nothing and
+  // miss a real face.
+  //
+  // One-euro, on the scalar itself rather than on anything downstream of it:
+  // filter hard while the brow is sitting still, let go the moment it moves,
+  // so a held expression is steady and the onset of one is not late. It runs
+  // before the pose correction and before either mapping, so everything under
+  // it - the recorded span, the ladder, the thresholds, the readout - sees the
+  // same quieter signal, and the calibration records against exactly what
+  // tracking will read.
+  //
+  // Its own constants, not the motion filter's: those are tuned in radians of
+  // head rotation per second, and this is a ratio that swings by hundredths.
+  // Swept against the two things they trade between, on a synthetic face with
+  // a pixel of landmark jitter on it: at these values a pixel of jitter is
+  // 0.10 of a furrow where unfiltered it is 0.29, and a furrow arrives in six
+  // frames - about 200ms, against an `emotionHold` of 100. Opening beta right
+  // up buys two frames and gives back most of the noise; closing it to a plain
+  // low-pass halves the noise again and costs two thirds of a second.
+  var BROW_MIN_CUTOFF = 1;     // Hz a motionless brow is filtered at
+  var BROW_BETA = 4;           // how fast that opens up, per brow unit/s
+  var browFilt = { v: null, dv: 0, at: 0 };
+
+  function resetBrowFilter() { browFilt.v = null; browFilt.dv = 0; browFilt.at = 0; }
+
+  function filterBrow(raw) {
+    if (!isNum(raw)) return raw;
+    var t = now();
+    if (browFilt.v === null) {
+      browFilt.v = raw;
+      browFilt.at = t;
+      return raw;
+    }
+    var dt = (t - browFilt.at) / 1000;
+    browFilt.at = t;
+    if (!(dt > 0)) return browFilt.v;
+    // A stalled tab or a dropped inference is not a fast brow. Clamp the gap
+    // rather than trust it, or one long frame opens the cutoff all the way and
+    // lets that frame's noise straight through.
+    dt = Math.min(dt, 0.2);
+    // The derivative gets its own fixed low-pass, as one-euro specifies. An
+    // unfiltered one is noise deciding how much noise to let through.
+    var ad = dt / (1 / (2 * Math.PI) + dt);
+    browFilt.dv += ((raw - browFilt.v) / dt - browFilt.dv) * ad;
+    var fc = BROW_MIN_CUTOFF + BROW_BETA * Math.abs(browFilt.dv);
+    var a = dt / (1 / (2 * Math.PI * fc) + dt);
+    browFilt.v += (raw - browFilt.v) * clamp(a, 0, 1);
+    return browFilt.v;
   }
 
   // ------------------------------------------------ learned pose brow rest
@@ -2610,7 +3058,15 @@
   var POSE_CELL = 0.18;               // ~10 degrees of head rotation each
   var POSE_MID = (POSE_CELLS - 1) / 2;
   var POSE_WARM = 20;                 // frames before a cell is believed in full
-  var POSE_CREEP = 0.01;              // per-frame pull once it is warm
+  // The long-run pull, once `1 / n` has fallen below it. It is the rate at
+  // which a cell that already has an opinion changes its mind, and at 0.01 it
+  // was fast enough to change it about an expression: a face held at an
+  // off-centre pose for a few seconds was partly adopted as that pose's
+  // neutral, and the expression faded while it was still being pulled. That is
+  // "it will not hold an expression". It only binds after ~400 frames, well
+  // past `POSE_WARM`, so a new cell still arrives within a second of the head
+  // turning that way - nothing about cold cells changes.
+  var POSE_CREEP = 0.0025;            // per-frame pull once it is warm
   var POSE_SEED = 2;                  // how far a warm cell may be extrapolated
                                       //   outward to seed a colder one
 
@@ -2787,10 +3243,10 @@
   function browRestInfo() {
     var out = {
       conf: r2(poseConf),
-      brow3d: cfg.brow3d,
+      src: BROW_SRC,
       // what each way of reading the mesh last said. Turn the head with a
-      // relaxed face: mesh should sit still, flat is the one that walks.
-      mesh: browRead.mesh == null ? null : +browRead.mesh.toFixed(4),
+      // relaxed face: `side` should sit still, `flat` is the one that walks.
+      side: browRead.side == null ? null : +browRead.side.toFixed(4),
       flat: browRead.flat == null ? null : +browRead.flat.toFixed(4)
     };
     for (var i = 0; i < POSE_AXES.length; i++) {
@@ -2808,43 +3264,69 @@
     return out;
   }
 
-  // The fastest calibration there is: whatever this face is doing right now
-  // is neutral. It fixes only the zero - and the zero is what goes wrong -
-  // and it does it by writing the same slider a person could drag, so there
-  // is nothing hidden about what it did and nothing to undo but a number.
+  // `Set neutral now` and `Reset auto range` stood here. Both existed because
+  // the brow's zero used to wander: the old scalar was a ratio measured across
+  // the eye while its numerator ran down the face, so it moved whenever the
+  // head did, and a person needed a way to say "no, *this* is my resting
+  // brow". Measuring against the side of the face removed the wander, and the
+  // pose ladder relearns whatever is left on its own.
   //
-  // Works in every signal mode for the same reason: it cancels the finished
-  // reading rather than reaching into whichever mapping produced it.
-  function setNeutral() {
-    if (!lastFace || !isNum(lastFace.pre)) return false;
-    if (lastFace.fixed) {
-      // A recorded zero stays where it was put, so an offset against it stays
-      // where it is put too.
-      cfg.browBias = clamp(-lastFace.pre, SPEC.browBias.min, SPEC.browBias.max);
-      log('neutral set, brow offset', cfg.browBias.toFixed(2));
-    } else {
-      // Auto re-zeroes itself continuously, and an offset against something
-      // that moves is a number the tracker spends the next few seconds
-      // undoing - it would read neutral for a moment and then drift back.
-      // Move the baseline that is in the wrong place instead.
-      if (isNum(lastFace.adj)) browTrack.base = lastFace.adj;
-      browPose = poseLadder();
-      cfg.browBias = 0;
-      log('neutral set, auto baseline moved to', num(lastFace.adj).toFixed(3));
-    }
-    save();
-    syncControls();
-    return true;
+  // What is left of each is already reachable and better named: `Brow offset`
+  // is the same shift by hand, against a zero that now stays put, and
+  // `resetCalibration()` still runs from `Reset PSX settings`, from the end of
+  // a wizard, and from `PSX.resetCalibration()` in the console.
+  //
+  // ------------------------------------------------------------ eye mapping
+  //
+  // The tracker reports how open each eye is; this maps that onto 0..1 for the
+  // blink cell. Both ends are settings rather than a recorded pair gated on
+  // `signal`, because an eyelid has nothing to do with which brow mapping is
+  // in force - tying the two together meant a blink calibration did nothing at
+  // all until the brow happened to be calibrated too.
+  //
+  // The defaults, 0 and 1, are the identity map: exactly what an uncalibrated
+  // profile did before. Calibrating writes them; the two sliders are the same
+  // numbers by hand.
+  // Where the line sits this frame: the setting, raised by whatever the furrow
+  // accounts for, and lowered by the release margin once the eye is already
+  // shut. That margin is the same `hysteresis` the cells use and is here for
+  // the same reason - a reading sitting exactly on the line would otherwise
+  // flip every frame.
+  function eyeBar(lift, wasShut) {
+    var at = cfg.eyeShutAt + (lift > 0 ? lift : 0);
+    if (wasShut) at -= cfg.hysteresis;
+    return clamp(at, 0.02, 0.995);
   }
 
-  function hasBlinkCal(c) {
-    return !!(c && isNum(c.blinkOpen) && isNum(c.blinkClosed) &&
-      (c.blinkClosed - c.blinkOpen) >= 0.05);
+  // 0 or 1. A blink on a texture atlas is not a quantity - the cell is either
+  // the shut one or it is not - so there is nothing for a value in between to
+  // mean, and every consumer downstream was thresholding it anyway.
+  function eyeShut(closedness, lift, wasShut) {
+    return closedness >= eyeBar(lift, wasShut) ? 1 : 0;
   }
 
-  function calibratedBlink(closedness) {
-    var c = cfg.cal;
-    return (closedness - c.blinkOpen) / (c.blinkClosed - c.blinkOpen);
+  // ------------------------------------------- furrow / blink decoupling
+  //
+  // Furrowing your brows narrows your eyes. That is anatomy, not a tracking
+  // fault: the same muscles that pull the brow down pull the lid up, so the
+  // closedness the tracker reports genuinely rises when you pull an angry
+  // face. Nothing downstream can tell that rise apart from the start of a
+  // blink, and on a texture atlas the two cells cannot both show - so an angry
+  // face sat there blinking at itself.
+  //
+  // `eyeFurrowLift` is how much further a fully furrowed eye reads than a
+  // relaxed one, measured by the wizard. Scaled here by how far into a furrow
+  // this frame is - a half furrow raises the line half as far, a raised brow
+  // does not raise it at all.
+  //
+  // Read off the previous frame's brow, which is one inference behind. The
+  // brow is one-euro filtered and a furrow takes a couple of hundred
+  // milliseconds to arrive, so a frame of lag on the correction is well inside
+  // the thing being corrected.
+  function furrowLift() {
+    if (!(cfg.eyeFurrowLift > 0)) return 0;
+    if (!lastFace || !isNum(lastFace.brow)) return 0;
+    return cfg.eyeFurrowLift * clamp(-lastFace.brow, 0, 1);
   }
 
   // How much further the brow has to travel before angry or sorrow is claimed
@@ -2852,6 +3334,13 @@
   // guess there, and a guess is not something to call an expression from -
   // but a real furrow still gets there, it just has to be a real one.
   var BLIND_LIFT = 0.3;
+
+  // How loud a vowel has to be before the mouth is treated as talking, and the
+  // emotions sharing its texture stand down for it. The alternative - an
+  // emotion pinning the face while the lip sync runs underneath it, invisible -
+  // is not something anyone would choose, so this is a constant rather than a
+  // switch and a slider.
+  var SPEECH_AT = 0.2;
 
   var emoSince = { angry: 0, sorrow: 0 };
 
@@ -2864,7 +3353,6 @@
   }
 
   function driveEmotions(vrm, rig, rawBrow, rawSmile) {
-    if (!cfg.emotions) return;
     var proxy = vrm && vrm.blendShapeProxy;
     if (!proxy || !rig) return;
     if (faceOcc && lastFace) {
@@ -2948,16 +3436,15 @@
 
     // A furrowed brow over a wide mouth reads as neither. On a PSX atlas these
     // are whole-face swaps, so blending two of them lands between cells - only
-    // the loudest one gets to speak.
-    if (cfg.exclusive) {
-      var top = null;
-      for (var i = 0; i < EMOTION_KEYS.length; i++) {
-        var k = EMOTION_KEYS[i];
-        if (out[k] > 0 && (!top || out[k] > out[top])) top = k;
-      }
-      for (var j = 0; j < EMOTION_KEYS.length; j++) {
-        if (EMOTION_KEYS[j] !== top) out[EMOTION_KEYS[j]] = 0;
-      }
+    // the loudest one gets to speak. There is no blending to fall back to on a
+    // face made of texture cells, so this is not a choice anyone has to make.
+    var top = null;
+    for (var i = 0; i < EMOTION_KEYS.length; i++) {
+      var k = EMOTION_KEYS[i];
+      if (out[k] > 0 && (!top || out[k] > out[top])) top = k;
+    }
+    for (var j = 0; j < EMOTION_KEYS.length; j++) {
+      if (EMOTION_KEYS[j] !== top) out[EMOTION_KEYS[j]] = 0;
     }
 
     // Vowels and a smile on the *same* atlas cell cannot both show. Angry
@@ -2966,8 +3453,7 @@
     // Only stand down an emotion that actually shares a mouth texture.
     var smiling = sm > 0;
     var articulating = lastViseme.key && lastViseme.w >= 0.15 && lastViseme.key !== 'a';
-    var talking = cfg.speechFirst &&
-      (mouthLevel(proxy, smiling) >= cfg.speechAt || articulating);
+    var talking = mouthLevel(proxy, smiling) >= SPEECH_AT || articulating;
     if (talking) {
       for (var q = 0; q < EMOTION_KEYS.length; q++) {
         if (emotionFightsMouth(EMOTION_KEYS[q])) out[EMOTION_KEYS[q]] = 0;
@@ -3007,9 +3493,17 @@
     var rawR = isNum(eye.r) ? clamp(1 - eye.r, 0, 1) : 0;
     if (!isNum(eye.l)) rawL = rawR;
     if (!isNum(eye.r)) rawR = rawL;
-    var useCal = cfg.signal === 'calibrated' && hasBlinkCal(cfg.cal);
-    var l = useCal ? clamp(calibratedBlink(rawL), 0, 1) : rawL;
-    var r = useCal ? clamp(calibratedBlink(rawR), 0, 1) : rawR;
+    var lift = furrowLift();
+    // Each lid keeps its own latch, or a wink would drag the other eye's
+    // release margin around with it.
+    var l = eyeShut(rawL, lift, shutL);
+    var r = eyeShut(rawR, lift, shutR);
+    shutL = !!l;
+    shutR = !!r;
+    // What the slider is set against: the tracker's own reading, before the
+    // line. Setting it by eye is impossible without this on screen.
+    lastEyeRaw = rawL > rawR ? rawL : rawR;
+    lastEyeBar = eyeBar(lift, shutL || shutR);
     // A palm over an eye reads as that lid shutting. Hold the last open/shut
     // the mesh reported while it could still see the face.
     if (faceOcc && heldBlink) {
@@ -3254,10 +3748,13 @@
   // large avatar movement, with nothing to tune. These hooks put a gain and a
   // damping factor in front of both.
 
-  function headGain() { return cfg.motion ? cfg.headGain : STOCK_HEAD_GAIN; }
-  function bodyGain() { return cfg.motion ? cfg.bodyGain : STOCK_BODY_GAIN; }
-  function leanGain() { return cfg.motion ? cfg.leanGain : STOCK_LEAN_GAIN; }
-  function armGain() { return cfg.motion ? cfg.armGain : 1; }
+  // The gains default to their stock values, so there is nothing for a master
+  // switch to turn off: it only ever meant "ignore what the calibration just
+  // measured", which is not a state to leave anyone in.
+  function headGain() { return cfg.headGain; }
+  function bodyGain() { return cfg.bodyGain; }
+  function leanGain() { return cfg.leanGain; }
+  function armGain() { return cfg.armGain; }
 
   // The pose solver reports head roll as a torso lean. Subtract only the
   // component that agrees with the head, and never reverse past zero - a
@@ -3265,7 +3762,7 @@
   // the other way. Off / uncalibrated is identity, which is stock.
   function spineLean(z, headZ) {
     z = num(z);
-    if (!cfg.motion || !(cfg.leanHead > 0)) return z;
+    if (!(cfg.leanHead > 0)) return z;
     var couple = cfg.leanHead * num(headZ);
     if (couple * z <= 0) return z;
     if (Math.abs(couple) >= Math.abs(z)) return 0;
@@ -3590,27 +4087,21 @@
   }
 
   function smooth(t) {
-    if (!cfg.motion) return t;
-    var a = t;
-    if (cfg.adaptive) {
-      // The bundle says which bone it is smoothing in the alpha itself:
-      // 0.04 + dt*4 for the neck, *2 for the torso, *6 for the wrist. Reading
-      // that multiplier back out keeps the torso trailing the head by the same
-      // ratio it does upstream, instead of flattening every bone onto one
-      // cutoff and making the whole body turn as one board.
-      var n = frameDt > 1e-4 ? clamp((t - 0.04) / frameDt, 1, 8) : 4;
-      a = euroAlpha(frameDt, speedNow, n / 4);
-    }
+    // The bundle says which bone it is smoothing in the alpha itself:
+    // 0.04 + dt*4 for the neck, *2 for the torso, *6 for the wrist. Reading
+    // that multiplier back out keeps the torso trailing the head by the same
+    // ratio it does upstream, instead of flattening every bone onto one
+    // cutoff and making the whole body turn as one board.
+    var n = frameDt > 1e-4 ? clamp((t - 0.04) / frameDt, 1, 8) : 4;
+    var a = euroAlpha(frameDt, speedNow, n / 4);
     // A frame the sanity check does not believe still reaches the neck and the
     // torso - there is no hook that can drop it. Crawling toward it instead of
     // following it turns the jump into a wobble, and the next frame anyone
     // believes pulls it back. A hand on the face can jump the mesh without
     // invalidating the pose, so that crawl is on faceTrusted, and the arms
     // still retarget (they do not go through this lerp).
-    if (cfg.sanity && (!poseTrusted || !faceTrusted)) a = Math.min(a, 0.01);
-    if (!cfg.damping) return a;
-    // never return 0, or the bone would freeze instead of easing
-    return Math.max(a * (1 - cfg.damping), 0.002);
+    if (!poseTrusted || !faceTrusted) a = Math.min(a, 0.01);
+    return a;
   }
 
   // ------------------------------------------------------------ arm retarget
@@ -3844,11 +4335,6 @@
 
   function noteFaceBox(rig) {
     noteFaceOcc();
-    if (!cfg.sanity) {
-      poseTrusted = true;
-      faceTrusted = true;
-      return;
-    }
     var h = rig && rig.head;
     var box = h && h.position;
     var nose = poseImg && poseImg[LM_NOSE];
@@ -3895,7 +4381,6 @@
   var armLenSeen = { Right: meter(), Left: meter() };
 
   function armLenOk(side, len) {
-    if (!cfg.sanity) return true;
     var st = armLenSeen[side];
     if (st.n >= SANITY_WARMUP && len > st.hi * 1.25 && st.bad < SANITY_GIVE_UP) {
       st.bad++;
@@ -4356,7 +4841,7 @@
       reach: r2(cfg.armReach), up: r2(cfg.reachUp), depth: r2(cfg.armDepth),
       sides: [r2(cfg.reachR), r2(cfg.reachL)],
       headAnchor: cfg.headAnchor,
-      twist: cfg.twist, handIK: cfg.handIK,
+      twist: cfg.twist,
       handSwaps: handSwaps,
       right: armSide(armDbg.Right),
       left: armSide(armDbg.Left)
@@ -4508,7 +4993,7 @@
     // the two trackers disagree about where this person even is
     armWhy = (lm && now() - poseLmAt > POSE_STALE_MS) ? 'landmarks are stale'
       : (!lm ? 'no pose landmarks' : 'this arm is not visible');
-    if (live && cfg.sanity && !poseTrusted) { live = false; armWhy = 'sanity rejected the pose'; }
+    if (live && !poseTrusted) { live = false; armWhy = 'sanity rejected the pose'; }
     if (!live) return coast(c, side, upper, lower, hand);
 
     // both arms of a frame read the same landmarks, and the landmarks only
@@ -4714,9 +5199,7 @@
     // the retarget has its own signal, so it runs the one-euro filter directly
     // on the hand target instead of going through `smooth`'s shared estimate
     var k = instant ? 1
-      : (cfg.motion && cfg.adaptive
-        ? euroAlpha(dt, c.vel[side] ? vlen(c.vel[side]) * scale : 0)
-        : clamp(smooth(0.04 + dt * 4), 0.002, 1));
+      : euroAlpha(dt, c.vel[side] ? vlen(c.vel[side]) * scale : 0);
     if (!instant && c.off[side]) off = vlerp(c.off[side], off, k);
     c.off[side] = off;
 
@@ -4845,7 +5328,7 @@
     // reads better here than it ever did on the stock rig - but it is a wrist
     // angle inferred from the arm, and the hand model is looking straight at
     // the thing it is measuring.
-    var hw = cfg.handIK ? handWant(side, mb, sx, depth) : null;
+    var hw = handWant(side, mb, sx, depth);
     var hChild = hw ? handChild(vrm, side, mirrored) : null;
     if (hw && hChild) {
       // Filtered as a direction, on the target's own alpha. The wrist is the
@@ -5190,38 +5673,43 @@
     'Release margin': 'Margem de liberação',
     'Minimum hold': 'Tempo mínimo',
     'Mouth gain': 'Ganho da boca',
-    'Blink gain': 'Ganho da piscada',
     'Preview cell': 'Pré-visualizar célula',
     'live tracking': 'rastreio ao vivo',
     'Load a VRM to calibrate individual cells.': 'Carregue um VRM para calibrar células individuais.',
 
     // --- emotions ---
     'Emotion Detection': 'Detecção de emoções',
-    'Detect emotions': 'Detectar emoções',
-    'Angle-free brow': 'Sobrancelha sem ângulo',
-    'Signal range': 'Faixa do sinal',
-    'calibrated': 'calibrado',
-    'auto': 'auto',
-    'raw': 'bruto',
-    'One emotion at a time': 'Uma emoção por vez',
-    'Speech first': 'Prioridade à fala',
-    'Talking at': 'Falando a partir de',
     'Signal gain': 'Ganho do sinal',
-    'Head-angle correction': 'Correção por ângulo da cabeça',
     'Brow offset': 'Deslocamento da sobrancelha',
-    'Set neutral now': 'Definir neutro agora',
-    'No tracked face to read a neutral from.':
-      'Nenhum rosto rastreado para ler um neutro.',
+    'Eyes': 'Olhos',
+    'Eyes shut at': 'Olhos fechados em',
+    'line at': 'linha em',
+    'Calibrate blink': 'Calibrar piscar',
+    'Blink calibrated': 'Piscar calibrado',
+    'Eyes open, look at the camera': 'Olhos abertos, olhando para a câmera',
+    'Relaxed - not wide, just how you normally sit':
+      'Relaxados - nao arregalados, do jeito que voce normalmente fica',
+    'Eyes read almost the same open and shut - redo it, holding them properly shut.':
+      'Os olhos leem quase igual abertos e fechados - refaca, mantendo-os bem fechados.',
+    'Furrow your brows, eyes open': 'Franza as sobrancelhas, olhos abertos',
+    'Angry face - brows down and together, but keep your eyes open':
+      'Cara de bravo - sobrancelhas para baixo e juntas, mas mantenha os olhos abertos',
+    'Angry - pull them down and together, and keep your eyes open':
+      'Bravo - puxe para baixo e junte, e mantenha os olhos abertos',
+    'Furrow closes the eye by': 'Franzir fecha o olho em',
+    'that much is discounted while the brows are down.':
+      'isso é descontado enquanto as sobrancelhas estão baixas.',
+    'eyes': 'olhos',
+    'open': 'aberto',
+    'shut': 'fechado',
+    'span': 'faixa',
     'Angry at': 'Bravo a partir de',
     'Sorrow at': 'Triste a partir de',
     'Smile at': 'Sorriso a partir de',
     'Emotion hold': 'Espera da emoção',
-    'Smile drives': 'Sorriso aciona',
-    'fun + joy': 'fun + joy',
     'waiting for a tracked face...': 'aguardando um rosto rastreado...',
     'Calibrate expressions': 'Calibrar expressões',
     'Cancel calibration': 'Cancelar calibração',
-    'Reset auto range': 'Zerar faixa automática',
     'Calibrate motion': 'Calibrar movimento',
     'Calibrate vowels': 'Calibrar vogais',
     'Vowel hold': 'Segurar vogal',
@@ -5365,7 +5853,6 @@
 
     // --- motion ---
     'Motion Calibration': 'Calibragem de movimento',
-    'Motion calibration': 'Calibragem de movimento',
     'Head / neck gain': 'Ganho de cabeça / pescoço',
     'Torso gain': 'Ganho do torso',
     'Torso lean gain': 'Ganho de inclinação do torso',
@@ -5373,20 +5860,24 @@
     'Tilt your head to one side': 'Incline a cabeça para um lado',
     'Ear toward your shoulder - keep your shoulders level':
       'Orelha em direção ao ombro - mantenha os ombros nivelados',
-    'Adaptive smoothing': 'Suavização adaptativa',
     'Steadiness': 'Firmeza',
     'Responsiveness': 'Resposta',
     'Prediction': 'Predição',
     'Dropout hold': 'Segurar na perda',
-    'Tracking sanity': 'Sanidade do rastreio',
     'Arm gain': 'Ganho dos braços',
-    'Damping': 'Amortecimento',
-    'Arm retarget': 'Retarget dos braços',
     'Reach': 'Alcance',
-    'Depth gain': 'Ganho de profundidade',
     'Reach up': 'Alcance para cima',
-    'Calibration beeps': 'Bipes na calibragem',
-    'Spoken prompts': 'Instruções faladas',
+    'Calibration cues': 'Avisos da calibragem',
+    'Fine tuning': 'Ajuste fino',
+    'Low power preset': 'Preset de baixo consumo',
+    'Profile': 'Perfil',
+    'note.novoice': 'Este navegador não tem nenhuma voz de fala instalada, então as ' +
+      'instruções faladas ficam mudas - os bipes e o texto na tela continuam ' +
+      'funcionando. No Raspberry Pi OS, instalar um motor de fala dá uma lista ' +
+      'de vozes ao Chromium.',
+    'note.lowpower': 'Metade da escala de render, render a 30fps, rastreio a 20fps e o ' +
+      'modelo de pose leve - o que faz isto rodar numa máquina pequena, num lugar ' +
+      'só. As duas opções de modelo valem no próximo carregamento.',
     'Motion calibration done': 'Calibragem de movimento concluída',
     'It came out good.': 'Ficou boa.',
     'It came out poor - run it again.': 'Ficou ruim - rode de novo.',
@@ -5443,7 +5934,6 @@
 
     // --- performance ---
     'Performance': 'Desempenho',
-    'Performance caps': 'Limites de desempenho',
     'Auto throttle': 'Ajuste automático',
     'Tracking rate': 'Taxa de rastreio',
     'Render rate': 'Taxa de render',
@@ -5457,7 +5947,6 @@
     'all fingers': 'todos os dedos',
     'thumb only': 'só o polegar',
     'none': 'nenhum',
-    'Wrist from hand model': 'Pulso pelo modelo de mão',
     'Presets': 'Predefinidas',
     'Saved': 'Salvas',
     'saved colours': 'cores salvas',
@@ -5484,17 +5973,17 @@
     'Portuguese (BR)': 'Português (BR)',
 
     // --- notes ---
+    'note.eyes': 'Uma linha só: o quanto o olho precisa parecer fechado para a célula de olho fechado assumir. Onde esse número cai é propriedade dos teus olhos, dos óculos e de onde a câmera está, não do piscar - por isso vale medir; um olho bem aberto quase nunca lê perto de zero. A leitura mostra o valor ao vivo, a linha contra a qual ele está sendo julgado e de que lado ele está; arraste até uma piscada cruzar e um rosto relaxado não. Calibrar piscar define isso a partir de duas poses, na metade entre as duas, e uma terceira pose mede o quanto franzir as sobrancelhas fecha o olho sozinho - isso é descontado enquanto as sobrancelhas estão baixas, que é o que impede a cara de bravo de ficar piscando sozinha.',
     'note.reloadRender': 'A escala de render e aplicada ao recarregar.',
     'note.reloadPerf': 'As opções do modelo Mediapipe são aplicadas ao recarregar. Os limites de taxa valem na hora.',
     'note.emotions': 'O app so rastreia piscadas, as cinco vogais e um sorriso. Bravo, triste e fun nunca são escritos - isto os deriva da sobrancelha e da boca para que essas células possam disparar. Faça cada careta e observe a leitura para ajustar os limiares. ' +
       'A espera da emoção é quanto tempo a sobrancelha tem que ficar passada do limiar antes de virar expressão: um pico enquanto a cabeça gira dura um ou dois frames, uma careta é segurada. Só a subida espera. ' +
-      'Definir neutro agora toma o que o rosto está fazendo naquele instante como sobrancelha em repouso - a versão de um clique do assistente, e o que usar quando a leitura fica fora do zero. Deslocamento da sobrancelha é o mesmo ajuste na mão. Correção por ângulo da cabeça desliga toda a maquinaria de pose, que é o que ajustar esses dois na mão precisa: uma leitura que não está sendo re-zerada por baixo dos controles. ' +
-      'Sobrancelha sem ângulo lê a sobrancelha da malha em três dimensões em vez da razão achatada do upstream, cujo numerador desce pelo rosto e cujo denominador atravessa ele - por isso aquela mexe quando a cabeça gira mesmo com as sobrancelhas paradas. Recalibre depois de trocar: a gravação pertence ao sinal que estava ligado.',
-    'note.motion': 'Os ganhos de pescoço e torso são fixos no app, entao um movimento real pequeno vira um movimento grande no avatar. Baixe o ganho para mexer menos, aumente o amortecimento para mexer mais devagar. Isolar inclinação da cabeça tira do torso a parte que o rastreador copiou da cabeça - orelha no ombro deixa de deitar o peito.',
-    'note.armIK': 'Mira o braço na mão que a câmera viu, em vez de repetir os ângulos do Kalidokit - é o que faz a mão chegar de fato na cabeça. Precisa de rastreio corporal (holistic). Alcance corrige a proporção de um modelo de braço curto; ganho de profundidade controla o quanto o eixo em direção à câmera conta, que é o número mais ruidoso do Mediapipe. O ombro não é animado por nada no app, então acompanhamento do ombro solta ele um pouco e o braço erguido para de cortar o pescoço.',
+      'Deslocamento da sobrancelha empurra a leitura pronta na mão, para um rosto que o mapeamento ainda lê um pouco fora do zero. ' +
+      'A sobrancelha agora é medida contra a lateral do teu próprio rosto, e não atravessando o olho, então ela encurta junto com a sobrancelha em vez de contra: girar, inclinar ou deitar a cabeça quase não mexe na leitura. A calibragem grava o que sobra, e as duas coisas juntas são o motivo de olhar para o lado não ler mais como bravo.',
+    'note.motion': 'Os ganhos de pescoço e torso são fixos no app, entao um movimento real pequeno vira um movimento grande no avatar. Baixe o ganho para mexer menos. Tudo que o assistente consegue medir na tua própria câmera - o quanto você gira de verdade, o quanto a câmera treme, quanto de uma inclinação de torso é na verdade a cabeça, até onde teus braços alcançam - ele ajusta sozinho; o que sobra aqui é o punhado de números que é questão de gosto.',
+    'note.armIK': 'Mira o braço na mão que a câmera viu, em vez de repetir os ângulos do Kalidokit - é o que faz a mão chegar de fato na cabeça. Precisa de rastreio corporal (holistic). Alcance corrige a proporção de um modelo de braço curto. O ombro não é animado por nada no app, então acompanhamento do ombro solta ele um pouco e o braço erguido para de cortar o pescoço. Um frame em que a malha do rosto e a pose do corpo discordam sobre onde teu rosto está quer dizer que uma das duas te perdeu - esses são segurados em vez de seguidos, com limiares aprendidos da tua própria câmera.',
     'note.mouth': 'O app reporta cinco pesos de vogal que sobem todos juntos com a mandíbula, então um deles ganha diga o que disser e a boca acaba com um formato aberto só. Isto grava o que o teu rosto marca enquanto você fala cada vogal em voz alta, e escolhe a gravação mais próxima do frame atual - silêncio incluído, que é o que libera a célula da boca para o sorriso. Segurar vogal é o quanto outra vogal precisa estar mais perto para a boca trocar de célula.',
-    'note.sanity': 'A malha do rosto e a pose do corpo dizem as duas onde o teu rosto está, no mesmo quadro normalizado. A distância entre elas é uma propriedade do teu rosto e fica parada enquanto as duas te rastreiam - então quando ela salta, uma das duas te perdeu. Visibilidade nunca pega isso: um rastreio travado na coisa errada reporta confiança total. Frames reprovados são segurados em vez de seguidos. O comprimento do braço é checado do mesmo jeito, por lado. Os dois limiares são aprendidos da tua câmera, não ajustados aqui. Uma mão no rosto é outro caso: a malha vê a palma e dispara piscada/boca, mas a pose ainda te tem - a expressão segura o último quadro bom e o braço continua indo à boca.',
-    'note.adaptive': 'Um amortecimento fixo tem que escolher: o suficiente para assentar uma pose parada vira borracha num movimento rápido, e o suficiente para o movimento rápido deixa o tremor. O adaptativo filtra forte quando você está parado e quase nada quando você se mexe. Firmeza é o quanto uma pose parada é filtrada - o passo de ficar parado na calibragem mede isso na sua própria câmera. Resposta é a rapidez com que ele solta quando você se mexe.',
+    'note.adaptive': 'Um amortecimento fixo tem que escolher: o suficiente para assentar uma pose parada vira borracha num movimento rápido, e o suficiente para o movimento rápido deixa o tremor. Isto filtra forte quando você está parado e quase nada quando você se mexe. Firmeza é o quanto uma pose parada é filtrada - o passo de ficar parado na calibragem mede isso na sua própria câmera. Resposta é a rapidez com que ele solta quando você se mexe.',
     'note.perf': 'O app roda uma inferencia do Mediapipe a cada frame e renderiza a cada frame. A taxa de rastreio é onde vai quase toda a CPU. ' +
       'O ajuste automático larga taxa de rastreio sozinho enquanto a máquina não dá conta - OBS gravando, um render rodando - e devolve quando sobra folga. ' +
       'Os limites fixos abaixo continuam valendo por cima dele.',
@@ -5546,6 +6035,21 @@
   };
 
   var EN = {
+    'note.novoice': 'This browser has no speech voices installed, so the spoken ' +
+      'prompts are silent - the beeps and the on-screen prompt still work. On ' +
+      'Raspberry Pi OS, installing a speech engine gives Chromium a voice list.',
+    'note.lowpower': 'Half render scale, 30fps render, 20fps tracking and the lite ' +
+      'pose model - the settings that make this run on a small machine, in one ' +
+      'place. The two model options apply on reload.',
+    'note.eyes': 'One line: how shut an eye has to look before the shut cell takes ' +
+      'over. Where that number falls is a property of your eyes, your glasses and ' +
+      'where the camera sits, not of blinking, so it is worth measuring - a wide-open ' +
+      'eye rarely reads near zero. The readout shows the live reading, the line it is ' +
+      'being judged against, and which side it is on; drag until a blink crosses and ' +
+      'a relaxed face does not. Calibrate blink sets it from two poses, halfway ' +
+      'between the two, and a third pose measures how far furrowing your brows closes ' +
+      'the eye on its own - that much is discounted while the brows are down, which is ' +
+      'what stops an angry face blinking at itself.',
     'note.reloadRender': 'Render scale applies on reload.',
     'note.reloadPerf': 'The Mediapipe model options apply on reload. ' +
       'The rate caps take effect immediately.',
@@ -5553,28 +6057,29 @@
       'sorrow and fun are never written at all - this derives them from the brow and ' +
       'mouth so those cells can fire. Pull each face and watch the readout to set the ' +
       'thresholds. Emotion hold is how long the brow has to stay past one before it ' +
-      'is written: a drift spike while the head turns lasts a frame or two, a face ' +
-      'making an expression holds it. Only the rise waits. Set neutral now takes ' +
-      'whatever this face is doing at that moment as its resting brow - the one-click ' +
-      'version of the wizard, and the thing to reach for when the reading sits off ' +
-      'zero. Brow offset is the same shift by hand. Head-angle correction turns the ' +
-      'pose machinery off entirely, which is what tuning those two by hand wants: a ' +
-      'reading that is not being re-zeroed under the sliders. Angle-free brow reads the ' +
-      'brow off the mesh in three dimensions instead of the flattened ratio upstream uses, ' +
-      'whose numerator runs down the face and whose denominator runs across it - so ' +
-      'that one moves when the head turns whether or not the brows do. Recalibrate ' +
-      'after switching it: the recording belongs to whichever scalar was on.',
+      'is written: a spike while the head turns lasts a frame or two, a face making ' +
+      'an expression holds it. Only the rise waits. Brow offset shifts the ' +
+      'finished reading by hand, for a face the mapping still reads a little ' +
+      'off zero. The brow itself is now measured ' +
+      'against the side of your own face rather than across your eye, so it ' +
+      'foreshortens with the brow instead of against it: turning, tilting or ' +
+      'rolling your head barely moves the reading at all. Calibrating records ' +
+      'what is left, and the two together are why a glance to the side no longer ' +
+      'reads as angry.',
     'note.motion': 'The neck and torso gains are hardcoded upstream, so a small real ' +
-      'movement lands as a large avatar movement. Lower the gain to move less, raise ' +
-      'the damping to move slower. Head-tilt isolation strips the part of a torso ' +
-      'lean the pose solver copied from a head roll, so an ear-to-shoulder no longer ' +
-      'tips the chest.',
+      'movement lands as a large avatar movement. Lower the gain to move less. ' +
+      'Everything the wizard can measure off your own camera - how far you actually ' +
+      'turn, how steady the camera is, how much of a torso lean is really a head ' +
+      'tilt, how far your arms reach - it sets for itself; what is left here is the ' +
+      'handful of numbers that are a matter of taste.',
     'note.armIK': 'Aims the arm at the hand the camera saw instead of replaying ' +
       'Kalidokit’s angles - this is what gets the hand onto the head at all. Needs ' +
-      'full-body (holistic) tracking. Reach corrects for a short-armed model; depth ' +
-      'gain sets how much the toward-camera axis counts, which is Mediapipe’s ' +
-      'noisiest number. Nothing upstream drives the shoulder at all, so shoulder ' +
-      'follow lets it turn a little and keeps a raised arm out of the neck.',
+      'full-body (holistic) tracking. Reach corrects for a short-armed model. ' +
+      'Nothing upstream drives the shoulder at all, so shoulder follow lets it turn ' +
+      'a little and keeps a raised arm out of the neck. A frame where the face mesh ' +
+      'and the body pose disagree about where your face is means one of them has ' +
+      'lost you - those are coasted rather than followed, on thresholds learned from ' +
+      'your own camera.',
     'note.bgColour': 'The picker keeps one colour, and there was no way to keep a '
       + 'second one or drop one you are done with. Click a swatch to apply it and '
       + 'load it back into the picker to edit; × deletes it. The app never wrote '
@@ -5587,20 +6092,10 @@
       + 'vowel out loud, and picks whichever recording a live frame lands nearest - '
       + 'silence included, which is what frees the mouth cell for a smile. Vowel hold '
       + 'is how much closer another vowel has to be before the mouth swaps cell.',
-    'note.sanity': 'The face mesh and the body pose both report where your face is, '
-      + 'in the same normalised frame. The gap between the two belongs to your face '
-      + 'and holds still while both are tracking you, so when it jumps one of them has '
-      + 'lost you - which visibility never catches, because a tracker locked onto the '
-      + 'wrong thing is perfectly confident. Frames that fail it are coasted rather '
-      + 'than followed. Arm length is checked the same way, per side. Both thresholds '
-      + 'are learned from your own camera, not set here. A hand on the face is a '
-      + 'different case: the mesh sees a palm and fires blink/mouth, but the pose '
-      + 'still has you - the expression holds the last good frame and the arm still '
-      + 'goes to the mouth.',
     'note.adaptive': 'A flat damping factor has to choose: enough to settle a held ' +
       'pose turns a fast move to rubber, enough for the fast move leaves the tremor ' +
-      'in. Adaptive filters hard while you are still and barely at all while you ' +
-      'move. Steadiness is how hard a motionless pose is filtered - the hold-still ' +
+      'in. This filters hard while you are still and barely at all while you move. ' +
+      'Steadiness is how hard a motionless pose is filtered - the hold-still ' +
       'calibration step measures it off your own camera. Responsiveness is how ' +
       'quickly that lets go once you move.',
     'note.perf': 'Upstream runs a Mediapipe inference on every animation frame, renders ' +
@@ -5789,7 +6284,7 @@
     // the flag differently.
     if ('refineFaceLandmarks' in opts) opts.refineFaceLandmarks = true;
     if ('refineLandmarks' in opts) opts.refineLandmarks = true;
-    if (cfg.perf && 'modelComplexity' in opts) opts.modelComplexity = cfg.poseLite ? 0 : 1;
+    if ('modelComplexity' in opts) opts.modelComplexity = cfg.poseLite ? 0 : 1;
     log('mediapipe options', opts);
     return opts;
   }
@@ -5874,7 +6369,7 @@
   // What it is doing, for anyone wondering why the face slowed down.
   function perfInfo() {
     return {
-      auto: cfg.perfAuto, caps: cfg.perf,
+      auto: cfg.perfAuto,
       trackFps: cfg.trackFps, renderFps: cfg.renderFps, poseLite: cfg.poseLite,
       autoFps: r2(autoFps),
       frameMs: r2(autoBest),
@@ -5899,7 +6394,7 @@
     }
     trackSeen = tn;
 
-    var fps = cfg.perf ? cfg.trackFps : 0;
+    var fps = cfg.trackFps;
     if (cfg.perfAuto) fps = fps ? Math.min(fps, autoFps) : autoFps;
     // At the ceiling there is nothing to wait for: hand it straight back to the
     // animation frame, which is what upstream does.
@@ -5920,7 +6415,7 @@
     if (autoSeen) autoNote(seen - autoSeen);
     autoSeen = seen;
 
-    var fps = cfg.perf ? cfg.renderFps : 0;
+    var fps = cfg.renderFps;
     if (fps) {
       var t = now();
       // a few ms of slack, or a 30fps budget would keep missing 60Hz ticks by a
@@ -6048,9 +6543,8 @@
             : '') +
           (faceOcc ? ' [hand on face]' : '') +
           ' ->', lastFace.out);
-      } else if (cfg.emotions) {
-        console.warn('emotion detection is on but no face has been solved yet - ' +
-          'is face tracking running?');
+      } else {
+        console.warn('no face has been solved yet - is face tracking running?');
       }
       var missing = wanted.filter(function (p) { return !presetMap[p]; });
       if (missing.length) {
@@ -6185,11 +6679,8 @@
   var REBUILDS = { lang: 1 };
 
   var NEEDS_RELOAD = {
-    pixelRatio: 1, perf: 1, poseLite: 1
+    pixelRatio: 1, poseLite: 1
   };
-  // A different scalar has a different rest, so everything that had learned
-  // one is now holding the wrong number.
-  var RESETS_CAL = { brow3d: 1 };
   // Snap-mode UV only writes on a cell change, so these have to drop the latch
   // or a new threshold would sit there until the expression itself changed.
   // Nothing else needs that - and doing it on every slider tick is what made
@@ -6217,6 +6708,17 @@
     return h;
   }
 
+  // The document says what language it is in, which is not the same question as
+  // what the labels say. A screen reader picks its voice off this attribute and
+  // the browser offers to translate a page whose declared language is not the
+  // reader's - and it shipped hardcoded `en` while the whole UI was Portuguese.
+  function applyDocLang() {
+    var root = document.documentElement;
+    if (!root) return;
+    var want = cfg.lang === 'pt' ? 'pt-BR' : 'en';
+    if (root.getAttribute('lang') !== want) root.setAttribute('lang', want);
+  }
+
   function liveChange(key) {
     if (NEEDS_RELOAD[key]) {
       pendingReload = true;
@@ -6226,8 +6728,10 @@
     }
     applyCanvasFilter();
     syncShaderUniforms();
-    if (RESETS_CAL[key]) resetCalibration();
-    if (REBUILDS[key]) rebuildPanels();
+    // Turning the cues off hides the "this machine has no voice" note with
+    // them: it is an explanation of a switch that is now off.
+    if (key === 'calCues') syncVoiceNote();
+    if (REBUILDS[key]) { applyDocLang(); rebuildPanels(); }
     if (LATCH_KEYS[key]) refreshModels();
   }
 
@@ -6394,6 +6898,22 @@
 
   function addRule(parent) { parent.appendChild(el('hr', FX)); }
 
+  // A disclosure for the controls a card does not need open. Native
+  // <details>/<summary> rather than a button and a class: it is keyboard
+  // operable and announced as a disclosure without a line of script, and the
+  // sliders inside keep their own scoped classes, so the app's styling reaches
+  // them exactly as it does anywhere else in the card.
+  function addDetails(parent, label, sc) {
+    var d = el('details', sc || FX);
+    d.style.cssText = 'width:100%;margin:4px 0';
+    var s = el('summary', sc || FX, label);
+    s.style.cssText = 'cursor:pointer;opacity:.55;font-size:11px;padding:8px 0;' +
+      'letter-spacing:.08em;text-transform:uppercase;user-select:none';
+    d.appendChild(s);
+    parent.appendChild(d);
+    return d;
+  }
+
   // Shown only once a reload-only key has been touched. Both panels get one,
   // since either can hold a control the app reads only at startup.
   function reloadNote(parent, text, sc) {
@@ -6401,7 +6921,7 @@
     note.className = (sc || FX) + ' psx-reload-note';
     note.style.cssText = 'width:100%;opacity:.5;font-size:12px;margin-top:16px;text-align:left';
     note.style.display = pendingReload ? '' : 'none';
-    var btn = el('button', 'trigger ' + STG, 'Reload to apply');
+    var btn = el('button', 'trigger ' + STG, T('Reload to apply'));
     btn.style.marginTop = '12px';
     btn.addEventListener('click', function () { location.reload(); });
     note.appendChild(btn);
@@ -6450,13 +6970,22 @@
   function buildSettings() {
     var frag = document.createDocumentFragment();
 
+    // First card in the tab. It was the last control of a card headed "PSX
+    // Hands", which is the one place nobody looks for it - and it is the
+    // control most needed by someone who cannot read the rest of the panel.
+    // No card heading: the select carries its own, and two "Language" labels
+    // stacked on each other is worse than none.
+    var lg = card(null, STG);
+    addSelect(lg, 'lang', T('Language'), ['en', 'pt'],
+      [T('English'), T('Portuguese (BR)')], STG);
+    frag.appendChild(lg);
+
     var x = card(T('Face Expressions'), STG);
     addRange(x, 'threshold', T('Trigger threshold'), 0, 1, 0.01, function (v) { return v.toFixed(2); }, STG);
     addRange(x, 'hysteresis', T('Release margin'), 0, 0.5, 0.01, function (v) { return v.toFixed(2); }, STG);
     addRange(x, 'holdMs', T('Minimum hold'), 0, 400, 10, function (v) { return v + ' ms'; }, STG);
     addRule(x);
     addRange(x, 'mouthGain', T('Mouth gain'), 0.25, 3, 0.05, function (v) { return v.toFixed(2) + 'x'; }, STG);
-    addRange(x, 'blinkGain', T('Blink gain'), 0.25, 3, 0.05, function (v) { return v.toFixed(2) + 'x'; }, STG);
     addRule(x);
     var keys = expressionKeys();
     if (keys.length) {
@@ -6468,21 +6997,49 @@
     }
     frag.appendChild(x);
 
+    // --- eyes ----------------------------------------------------------
+    var ey = card(T('Eyes'), STG);
+    var eyNote = el('div', STG, T('note.eyes'));
+    eyNote.style.cssText = 'width:100%;opacity:.5;font-size:12px;margin:0 0 4px;text-align:left';
+    ey.appendChild(eyNote);
+    addRange(ey, 'eyeShutAt', T('Eyes shut at'), 0.05, 0.95, 0.005,
+      function (v) { return v.toFixed(3); }, STG);
+
+    // Its own copy of the live numbers. The main readout is in the Emotion card
+    // below, and setting the line by eye means watching the raw reading while
+    // dragging it - which cannot be done with the number off screen.
+    eyeReadoutEl = el('div', STG, T('waiting for a tracked face...'));
+    eyeReadoutEl.style.cssText = 'width:100%;font-size:12px;opacity:.75;text-align:left;' +
+      'margin-top:6px;font-variant-numeric:tabular-nums;font-feature-settings:"tnum"';
+    ey.appendChild(eyeReadoutEl);
+
+    calBlinkEl = el('div', STG, '');
+    calBlinkEl.style.cssText = 'width:100%;font-size:12px;opacity:.85;text-align:left;' +
+      'white-space:pre-line;margin-top:10px;line-height:1.5';
+    ey.appendChild(calBlinkEl);
+
+    calBlinkBtn = el('button', 'trigger ' + STG, T('Calibrate blink'));
+    calBlinkBtn.style.marginTop = '12px';
+    calBlinkBtn.addEventListener('click', function () {
+      if (!calRun) startBlinkCalibration();
+      else if (calRun.kind === 'blink') captureStep();
+    });
+    ey.appendChild(calBlinkBtn);
+
+    calBlinkCancelBtn = el('button', 'trigger reset ' + STG, T('Cancel calibration'));
+    calBlinkCancelBtn.style.marginTop = '8px';
+    calBlinkCancelBtn.style.display = 'none';
+    calBlinkCancelBtn.addEventListener('click', function () {
+      stopCalibration(T('Calibration cancelled.'), T('Cancelled.'));
+    });
+    ey.appendChild(calBlinkCancelBtn);
+    frag.appendChild(ey);
+
     // --- emotions ------------------------------------------------------
     var em = card(T('Emotion Detection'), STG);
     var emNote = el('div', STG, T('note.emotions'));
     emNote.style.cssText = 'width:100%;opacity:.5;font-size:12px;margin:0 0 4px;text-align:left';
     em.appendChild(emNote);
-    addToggle(em, 'emotions', T('Detect emotions'), STG);
-    addToggle(em, 'brow3d', T('Angle-free brow'), STG);
-    addSelect(em, 'signal', T('Signal range'), ['calibrated', 'auto', 'raw'],
-      [T('calibrated'), T('auto'), T('raw')], STG);
-    addToggle(em, 'exclusive', T('One emotion at a time'), STG);
-    addRule(em);
-    addToggle(em, 'speechFirst', T('Speech first'), STG);
-    addRange(em, 'speechAt', T('Talking at'), 0, 1, 0.01, function (v) { return v.toFixed(2); }, STG);
-    addRule(em);
-    addToggle(em, 'poseFix', T('Head-angle correction'), STG);
     addRange(em, 'browGain', T('Signal gain'), 0.25, 4, 0.05, function (v) { return v.toFixed(2) + 'x'; }, STG);
     addRange(em, 'browBias', T('Brow offset'), -1, 1, 0.01, function (v) { return (v > 0 ? '+' : '') + v.toFixed(2); }, STG);
     addRange(em, 'angryAt', T('Angry at'), 0, 0.95, 0.01, function (v) { return v.toFixed(2); }, STG);
@@ -6490,13 +7047,6 @@
     addRange(em, 'smileAt', T('Smile at'), 0, 0.95, 0.01, function (v) { return v.toFixed(2); }, STG);
     addRange(em, 'emotionHold', T('Emotion hold'), 0, 400, 10, function (v) { return v + ' ms'; }, STG);
     addRule(em);
-
-    var zero = el('button', 'trigger ' + STG, T('Set neutral now'));
-    zero.style.cssText = 'width:100%;margin:2px 0 8px';
-    zero.addEventListener('click', function () {
-      if (!setNeutral()) setText(readoutEl, T('No tracked face to read a neutral from.'));
-    });
-    em.appendChild(zero);
 
     readoutEl = el('div', STG, T('waiting for a tracked face...'));
     readoutEl.style.cssText = 'width:100%;font-size:12px;opacity:.75;text-align:left;' +
@@ -6550,12 +7100,6 @@
       stopCalibration(T('Calibration cancelled.'), T('Cancelled.'));
     });
     em.appendChild(calMouthCancelBtn);
-    addRule(em);
-
-    var recal = el('button', 'trigger ' + STG, T('Reset auto range'));
-    recal.style.marginTop = '8px';
-    recal.addEventListener('click', function () { resetCalibration(); });
-    em.appendChild(recal);
     syncCalUi();
     frag.appendChild(em);
 
@@ -6564,47 +7108,48 @@
     var moNote = el('div', STG, T('note.motion'));
     moNote.style.cssText = 'width:100%;opacity:.5;font-size:12px;margin:0 0 4px;text-align:left';
     mo.appendChild(moNote);
-    addToggle(mo, 'motion', T('Motion calibration'), STG);
-    addToggle(mo, 'calSound', T('Calibration beeps'), STG);
-    addToggle(mo, 'calVoice', T('Spoken prompts'), STG);
+    addToggle(mo, 'calCues', T('Calibration cues'), STG);
+
+    // Shown only on a machine that has no voice at all. `say()` on an empty
+    // voice list is silence and no error, and the beeps still work - so
+    // without this the cues look half-broken with nothing to explain it.
+    voiceNoteEl = el('div', STG, T('note.novoice'));
+    voiceNoteEl.style.cssText = 'width:100%;opacity:.55;font-size:12px;margin:2px 0 4px;' +
+      'text-align:left;line-height:1.5';
+    mo.appendChild(voiceNoteEl);
+    syncVoiceNote();
+
     addRule(mo);
     addRange(mo, 'headGain', T('Head / neck gain'), 0, 1.5, 0.05, function (v) { return v.toFixed(2) + 'x'; }, STG);
-    addRange(mo, 'bodyGain', T('Torso gain'), 0, 0.2, 0.005, function (v) { return v.toFixed(3) + 'x'; }, STG);
     addRange(mo, 'leanGain', T('Torso lean gain'), 0, 1, 0.02, function (v) { return v.toFixed(2) + 'x'; }, STG);
-    addRange(mo, 'leanHead', T('Head-tilt isolation'), 0, 1, 0.02, function (v) { return v.toFixed(2); }, STG);
-    addRange(mo, 'armGain', T('Arm gain'), 0.5, 2.5, 0.05, function (v) { return v.toFixed(2) + 'x'; }, STG);
 
-    addRule(mo);
+    // Everything below is measured by the wizard or left alone. Eleven sliders
+    // in one column read as eleven things to set before the feature works,
+    // which is the opposite of what the wizard is for - so the card opens on
+    // the two gains and a Calibrate button, and the rest is a disclosure for
+    // the session where something specific is being chased.
+    var adv = addDetails(mo, T('Fine tuning'), STG);
+
     var fxNote = el('div', STG, T('note.adaptive'));
     fxNote.style.cssText = 'width:100%;opacity:.5;font-size:12px;margin:0 0 4px;text-align:left';
-    mo.appendChild(fxNote);
-    addToggle(mo, 'adaptive', T('Adaptive smoothing'), STG);
-    addRange(mo, 'minCutoff', T('Steadiness'), 0.2, 5, 0.05, function (v) { return v.toFixed(2) + 'Hz'; }, STG);
-    addRange(mo, 'beta', T('Responsiveness'), 0, 3, 0.05, function (v) { return v.toFixed(2); }, STG);
-    addRange(mo, 'damping', T('Damping'), 0, 0.95, 0.01, function (v) { return v.toFixed(2); }, STG);
+    adv.appendChild(fxNote);
+    addRange(adv, 'minCutoff', T('Steadiness'), 0.2, 5, 0.05, function (v) { return v.toFixed(2) + 'Hz'; }, STG);
+    addRange(adv, 'beta', T('Responsiveness'), 0, 3, 0.05, function (v) { return v.toFixed(2); }, STG);
 
-    addRule(mo);
+    addRule(adv);
     var ikNote = el('div', STG, T('note.armIK'));
     ikNote.style.cssText = 'width:100%;opacity:.5;font-size:12px;margin:0 0 4px;text-align:left';
-    mo.appendChild(ikNote);
-    addToggle(mo, 'armIK', T('Arm retarget'), STG);
-    addToggle(mo, 'handIK', T('Wrist from hand model'), STG);
-    addRange(mo, 'armReach', T('Reach'), 0.5, 2, 0.05, function (v) { return v.toFixed(2) + 'x'; }, STG);
-    addRange(mo, 'armDepth', T('Depth gain'), 0, 2, 0.05, function (v) { return v.toFixed(2) + 'x'; }, STG);
-    addRange(mo, 'reachUp', T('Reach up'), 0.5, 2, 0.05, function (v) { return v.toFixed(2) + 'x'; }, STG);
-    addRange(mo, 'reachR', T('Right arm'), 0.5, 2, 0.05, function (v) { return v.toFixed(2) + 'x'; }, STG);
-    addRange(mo, 'reachL', T('Left arm'), 0.5, 2, 0.05, function (v) { return v.toFixed(2) + 'x'; }, STG);
-    addRange(mo, 'shoulder', T('Shoulder follow'), 0, 0.6, 0.05, function (v) { return v.toFixed(2); }, STG);
-    addRange(mo, 'twist', T('Forearm twist'), 0, 1, 0.05, function (v) { return v.toFixed(2); }, STG);
-    addRange(mo, 'headAnchor', T('Face anchor'), 0, 1, 0.05, function (v) { return v.toFixed(2); }, STG);
-    addRange(mo, 'predict', T('Prediction'), 0, 1, 0.05, function (v) { return v.toFixed(2); }, STG);
-    addRange(mo, 'armHold', T('Dropout hold'), 0, 1000, 25, function (v) { return v.toFixed(0) + 'ms'; }, STG);
-
-    addRule(mo);
-    var snNote = el('div', STG, T('note.sanity'));
-    snNote.style.cssText = 'width:100%;opacity:.5;font-size:12px;margin:0 0 4px;text-align:left';
-    mo.appendChild(snNote);
-    addToggle(mo, 'sanity', T('Tracking sanity'), STG);
+    adv.appendChild(ikNote);
+    addRange(adv, 'armReach', T('Reach'), 0.5, 2, 0.05, function (v) { return v.toFixed(2) + 'x'; }, STG);
+    addRange(adv, 'reachUp', T('Reach up'), 0.5, 2, 0.05, function (v) { return v.toFixed(2) + 'x'; }, STG);
+    addRange(adv, 'reachR', T('Right arm'), 0.5, 2, 0.05, function (v) { return v.toFixed(2) + 'x'; }, STG);
+    addRange(adv, 'reachL', T('Left arm'), 0.5, 2, 0.05, function (v) { return v.toFixed(2) + 'x'; }, STG);
+    addRange(adv, 'shoulder', T('Shoulder follow'), 0, 0.6, 0.05, function (v) { return v.toFixed(2); }, STG);
+    addRange(adv, 'twist', T('Forearm twist'), 0, 1, 0.05, function (v) { return v.toFixed(2); }, STG);
+    addRange(adv, 'headAnchor', T('Face anchor'), 0, 1, 0.05, function (v) { return v.toFixed(2); }, STG);
+    addRange(adv, 'predict', T('Prediction'), 0, 1, 0.05, function (v) { return v.toFixed(2); }, STG);
+    addRange(adv, 'armHold', T('Dropout hold'), 0, 1000, 25, function (v) { return v.toFixed(0) + 'ms'; }, STG);
+    addRange(adv, 'leanHead', T('Head-tilt isolation'), 0, 1, 0.05, function (v) { return v.toFixed(2); }, STG);
 
     calMotionEl = el('div', STG, '');
     calMotionEl.style.cssText = 'width:100%;font-size:12px;opacity:.85;text-align:left;' +
@@ -6636,25 +7181,35 @@
     pf.appendChild(pfNote);
     addToggle(pf, 'perfAuto', T('Auto throttle'), STG);
     addRule(pf);
-    addToggle(pf, 'perf', T('Performance caps'), STG);
-    addRule(pf);
     addRange(pf, 'trackFps', T('Tracking rate'), 0, 60, 1, fpsLabel, STG);
     addRange(pf, 'renderFps', T('Render rate'), 0, 60, 1, fpsLabel, STG);
     addRule(pf);
     addToggle(pf, 'poseLite', T('Lite pose model'), STG);
+
+    // The settings that make this run on a Raspberry Pi are five controls in
+    // two different tabs, two of which need a reload, and knowing which five is
+    // not something the panel says anywhere. One button.
+    var lowNote = el('div', STG, T('note.lowpower'));
+    lowNote.style.cssText = 'width:100%;opacity:.5;font-size:12px;margin:12px 0 4px;text-align:left';
+    pf.appendChild(lowNote);
+    var low = el('button', 'trigger ' + STG, T('Low power preset'));
+    low.style.marginTop = '4px';
+    low.addEventListener('click', function () { applyLowPower(); });
+    pf.appendChild(low);
+
     reloadNote(pf, T('note.reloadPerf'), STG);
     frag.appendChild(pf);
 
     var hnd = card(T('PSX Hands'), STG);
-    addSelect(hnd, 'lang', T('Language'), ['en', 'pt'],
-      [T('English'), T('Portuguese (BR)')], STG);
-    addRule(hnd);
     addSelect(hnd, 'fingers', T('Driven fingers'), ['all', 'thumb', 'none'],
       [T('all fingers'), T('thumb only'), T('none')], STG);
+    frag.appendChild(hnd);
+
+    // Export / import / reset are about the settings file, not about hands.
+    var io = card(T('Profile'), STG);
     var exp = el('button', 'trigger ' + STG, T('Export settings'));
-    exp.style.marginTop = '20px';
     exp.addEventListener('click', function () { exportSettings(); });
-    hnd.appendChild(exp);
+    io.appendChild(exp);
 
     var file = el('input', STG);
     file.type = 'file';
@@ -6665,25 +7220,25 @@
       file.value = '';
       importSettingsFile(f);
     });
-    hnd.appendChild(file);
+    io.appendChild(file);
 
     var imp = el('button', 'trigger ' + STG, T('Import settings'));
     imp.style.marginTop = '8px';
     imp.addEventListener('click', function () { file.click(); });
-    hnd.appendChild(imp);
+    io.appendChild(imp);
 
     importNoteEl = el('div', STG, '');
     importNoteEl.style.cssText = 'width:100%;font-size:12px;opacity:.85;text-align:left;' +
       'white-space:pre-line;margin-top:10px;line-height:1.5';
-    hnd.appendChild(importNoteEl);
+    io.appendChild(importNoteEl);
 
     var rst = el('button', 'trigger reset ' + STG, T('Reset PSX settings'));
     rst.style.marginTop = '8px';
     rst.addEventListener('click', function () { resetSettings(); });
-    hnd.appendChild(rst);
+    io.appendChild(rst);
     // .last only exists in the Effects scope, so carry FX along for the margin
-    hnd.classList.add('last', FX);
-    frag.appendChild(hnd);
+    io.classList.add('last', FX);
+    frag.appendChild(io);
 
     return frag;
   }
@@ -6695,20 +7250,29 @@
     return calRun.phase === 'hold' ? T('Reading...') : T('Capture (Space)');
   }
 
-  function syncCalUi() {
+  // One wizard runs at a time, so the other two start buttons do nothing at all
+  // while one is going - they looked exactly as clickable as the live one and
+  // answered a click with silence. Disable them, and show only the cancel that
+  // belongs to the run: three identical Cancel buttons appearing at once said
+  // there were three things to cancel.
+  function syncCalBtn(btn, cancel, kind, idle) {
     var busy = !!calRun;
-    if (calBtn) {
-      setText(calBtn, calLabel(busy && calRun.kind === 'face', T('Calibrate expressions')));
+    var mine = busy && calRun.kind === kind;
+    if (btn) {
+      setText(btn, calLabel(mine, idle));
+      btn.disabled = busy && !mine;
+      btn.style.opacity = btn.disabled ? '.4' : '';
+      btn.style.pointerEvents = btn.disabled ? 'none' : '';
     }
-    if (calMotionBtn) {
-      setText(calMotionBtn, calLabel(busy && calRun.kind === 'motion', T('Calibrate motion')));
-    }
-    if (calMouthBtn) {
-      setText(calMouthBtn, calLabel(busy && calRun.kind === 'mouth', T('Calibrate vowels')));
-    }
-    if (calCancelBtn) calCancelBtn.style.display = busy ? '' : 'none';
-    if (calMotionCancelBtn) calMotionCancelBtn.style.display = busy ? '' : 'none';
-    if (calMouthCancelBtn) calMouthCancelBtn.style.display = busy ? '' : 'none';
+    if (cancel) cancel.style.display = mine ? '' : 'none';
+  }
+
+  function syncCalUi() {
+    syncCalBtn(calBtn, calCancelBtn, 'face', T('Calibrate expressions'));
+    syncCalBtn(calMotionBtn, calMotionCancelBtn, 'motion', T('Calibrate motion'));
+    syncCalBtn(calMouthBtn, calMouthCancelBtn, 'mouth', T('Calibrate vowels'));
+    syncCalBtn(calBlinkBtn, calBlinkCancelBtn, 'blink', T('Calibrate blink'));
+    syncCalHud();
   }
 
   function syncControls() {
@@ -7043,8 +7607,13 @@
       n.remove();
     });
     controls = [];
-    calEl = calMotionEl = calBtn = calMotionBtn = readoutEl = null;
-    calCancelBtn = calMotionCancelBtn = null;
+    // Every handle into a card that was just removed. Missing one leaves a
+    // detached node being written to forever: syncCalUi would keep relabelling
+    // the old button and the new one would never change.
+    calEl = calMotionEl = calMouthEl = calBlinkEl = null;
+    readoutEl = eyeReadoutEl = importNoteEl = null;
+    calBtn = calMotionBtn = calMouthBtn = calBlinkBtn = null;
+    calCancelBtn = calMotionCancelBtn = calMouthCancelBtn = calBlinkCancelBtn = null;
     bgCard = null;
     lastInject = 0;
     translateTree(document.body || document.documentElement);
@@ -7194,7 +7763,18 @@
     return true;
   }
 
+  // Somewhere the key belongs to whatever has focus, not to us. Space in a
+  // text field is a space, and Escape in one is how you back out of it - both
+  // of these listeners preventDefault, so without this the app's own hex field
+  // cannot be typed into while a wizard is running.
+  function typingIn(t) {
+    if (!t || t.nodeType !== 1) return false;
+    return t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' ||
+      !!t.isContentEditable;
+  }
+
   function onCalKey(e) {
+    if (typingIn(e.target)) return;
     if (!calRun) {
       if (e.key === 'Escape' && closePanel()) e.preventDefault();
       return;
@@ -7259,6 +7839,7 @@
   }
 
   injectAppCss();
+  applyDocLang();
 
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', startObserver);
@@ -7330,9 +7911,9 @@
     calibrate: startCalibration,
     calibrateMotion: startMotionCalibration,
     calibrateMouth: startMouthCalibration,
+    calibrateBlink: startBlinkCalibration,
     resetCalibration: resetCalibration,
     browRest: browRestInfo,
-    setNeutral: setNeutral,
     resetSettings: resetSettings,
     exportSettings: exportSettings,
     importSettings: applyImported,
