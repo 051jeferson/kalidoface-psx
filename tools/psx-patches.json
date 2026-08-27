@@ -184,6 +184,14 @@
     {
       "find": "const i={Right:l.leftHandLandmarks||null,Left:l.rightHandLandmarks||null};",
       "replace": "const i=window.PSX.hands({Right:l.leftHandLandmarks||null,Left:l.rightHandLandmarks||null},t);"
+    },
+    {
+      "find": "locateFile:p=>`https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh@0.4.1633559619/${p}`",
+      "replace": "locateFile:p=>new URL(\"vendor/mediapipe/face_mesh/\"+p,document.baseURI).href"
+    },
+    {
+      "find": "locateFile:p=>`https://cdn.jsdelivr.net/npm/@mediapipe/holistic@0.5.1635989137/${p}`",
+      "replace": "locateFile:p=>new URL(\"vendor/mediapipe/holistic/\"+p,document.baseURI).href"
     }
   ],
   "vendorPatches": [

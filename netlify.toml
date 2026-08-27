@@ -24,3 +24,18 @@
   for = "/assets/*"
   [headers.values]
     Cache-Control = "public, max-age=31536000, immutable"
+
+# Mediapipe, the fonts and the icons, vendored out of the CDNs they used to be
+# fetched from. Not "immutable": these paths carry no content hash, so a
+# Mediapipe version bump reuses them. A week is long enough that a Raspberry Pi
+# is not re-downloading ~55 MB, and short enough that a bump lands by itself.
+[[headers]]
+  for = "/vendor/*"
+  [headers.values]
+    Cache-Control = "public, max-age=604800"
+
+# global.css names the vendored fonts, so it must not outlive a change to them.
+[[headers]]
+  for = "/global.css"
+  [headers.values]
+    Cache-Control = "no-cache"

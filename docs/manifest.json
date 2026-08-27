@@ -1,40 +1,26 @@
 {
-    "name": "Kalidoface 3D",
-    "short_name": "Kalidoface 3D",
+    "name": "Kalidoface PSX",
+    "short_name": "Kalidoface PSX",
+    "description": "Drive a PSX-era VRM avatar from your webcam: point-sampled textures, affine mapping, texture-atlas faces and a landmark arm retarget.",
+    "lang": "en",
     "background_color": "#000000",
     "theme_color": "#000000",
     "display": "fullscreen",
+    "orientation": "any",
     "start_url": "./?source=pwa",
+    "scope": "./",
     "icons": [
         {
-            "src": "https://yeemachine.github.io/k2021/favicon/kalidoface3d/manifest-icon-192.png",
+            "src": "./vendor/icon/manifest-icon-192.png",
             "sizes": "192x192",
             "type": "image/png",
             "purpose": "maskable any"
         },
         {
-            "src": "https://yeemachine.github.io/k2021/favicon/kalidoface3d/manifest-icon-512.png",
+            "src": "./vendor/icon/manifest-icon-512.png",
             "sizes": "512x512",
             "type": "image/png",
             "purpose": "maskable any"
         }
-    ],
-    "splash_pages": null,
-    "url": "https://3d.kalidoface.com",
-    "lang": "English",
-    "screenshots": [
-        {
-            "src": "[Embedded]",
-            "sizes": "1280x800",
-            "type": "image/png"
-        },
-        {
-            "src": "[Embedded]",
-            "sizes": "750x1334",
-            "type": "image/png"
-        }
-    ],
-    "orientation": "any",
-    "description": "Animate virtual characters using your browser webcam in real time! Perfect for livestreaming, chatting with friends, or just having fun!",
-    "scope": "/"
+    ]
 }

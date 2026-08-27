@@ -36,7 +36,9 @@ function findFromHtml(re, err) {
 
 function applyList(filePath, patches, labelOf) {
   if (!patches || !patches.length) {
-    return { applied: 0, missing: 0, failed: 0 };
+    // Same shape as the real return: the caller reads `.applied.length`, and a
+    // number there makes the missing-patch count NaN instead of zero.
+    return { src: '', applied: [], already: [], failed: [], filePath, rel: '' };
   }
   if (!fs.existsSync(filePath)) {
     console.error(`file not found: ${path.relative(root, filePath)}`);

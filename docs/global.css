@@ -1,22 +1,30 @@
+/* Served from this origin. These three were fetched from yeemachine.github.io
+   on every load, which sw.js does not cache (cross-origin), so the UI waited on
+   a third-party round trip every time and had no text or icons at all offline.
+   Run `node tools/fetch-vendor.mjs` to populate docs/vendor/font/. */
+
+/* Jelly is a text face, so `swap` is right: a fallback glyph is readable and
+   the real one arrives a frame later. */
 @font-face {
   font-family: "Jelly";
-  font-display: block;
-  src: url("https://yeemachine.github.io/k2021/font/kalidoface-jelly.ttf")
-    format("truetype");
+  font-display: swap;
+  src: url("./vendor/font/kalidoface-jelly.ttf") format("truetype");
 }
 
+/* Kalicon is the icon font, and its glyphs are selected by the *name* of the
+   icon: `<i class="kalicon">jellyfill</i>`. Swapping in a fallback would spell
+   "jellyfill" across the menu, so these two stay `block` - which now costs
+   milliseconds off local disk rather than a network round trip. */
 @font-face {
   font-family: "Kalicon";
   font-display: block;
-  src: url("https://yeemachine.github.io/k2021/font/kalidoface-regular.woff")
-    format("woff");
+  src: url("./vendor/font/kalidoface-regular.woff") format("woff");
 }
 
 @font-face {
   font-family: "Kalicon Variable";
   font-display: block;
-  src: url("https://yeemachine.github.io/k2021/font/kalidoface-variable.ttf")
-    format("truetype");
+  src: url("./vendor/font/kalidoface-variable.ttf") format("truetype");
 }
 
 @keyframes jiggle {

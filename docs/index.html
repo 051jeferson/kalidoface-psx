@@ -2,45 +2,20 @@
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <!-- HTML Meta Tags -->
-    <title>Kalidoface 3D - Face & Full Body Tracking</title>
+    <!-- HTML Meta Tags. The social card carried upstream's title, domain and
+         artwork; a fork claiming those is worse than having none. -->
+    <title>Kalidoface PSX - PS1-style webcam VTubing</title>
     <meta
       name="description"
-      content="Animate character faces, poses and fingers in 3D using just your browser webcam!"
+      content="Drive a PSX-era VRM avatar from your webcam: point-sampled textures, affine mapping, texture-atlas faces and a landmark arm retarget."
     />
-
-    <!-- Facebook Meta Tags -->
-    <meta property="og:url" content="https://3d.kalidoface.com/" />
     <meta property="og:type" content="website" />
-    <meta
-      property="og:title"
-      content="Kalidoface 3D - Face & Full Body Tracking"
-    />
+    <meta property="og:title" content="Kalidoface PSX" />
     <meta
       property="og:description"
-      content="Animate character faces, poses and fingers in 3D using just your browser webcam!"
+      content="Drive a PSX-era VRM avatar from your webcam."
     />
-    <meta
-      property="og:image"
-      content="https://yeemachine.github.io/k2021/favicon/kalidoface3d/meta.jpg"
-    />
-
-    <!-- Twitter Meta Tags -->
-    <meta name="twitter:card" content="summary_large_image" />
-    <meta property="twitter:domain" content="3d.kalidoface.com" />
-    <meta property="twitter:url" content="https://3d.kalidoface.com/" />
-    <meta
-      name="twitter:title"
-      content="Kalidoface 3D - Face & Full Body Tracking"
-    />
-    <meta
-      name="twitter:description"
-      content="Animate character faces, poses and fingers in 3D using just your browser webcam!"
-    />
-    <meta
-      name="twitter:image"
-      content="https://yeemachine.github.io/k2021/favicon/kalidoface3d/meta.jpg"
-    />
+    <meta name="twitter:card" content="summary" />
 
     <link rel="manifest" href="./manifest.json" />
     <meta http-equiv="X-UA-Compatible" content="IE=edge" />
@@ -50,163 +25,40 @@
     <meta name="viewport" content="viewport-fit=cover, user-scalable=no, width=device-width, initial-scale=1, maximum-scale=1">
 
     <meta name="theme-color" content="#16161d" />
-    <base href="%PUBLIC_URL%" />
+    <!-- `<base href="%PUBLIC_URL%">` used to sit here: an unsubstituted build
+         placeholder that shipped to production. It only ever worked because it
+         replaced the last path segment, which happens to be a no-op. -->
     <link rel="stylesheet" href="./global.css" />
     <script>
       var parcelRequire;
     </script>
-    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils@0.3.1620248257/drawing_utils.js" crossorigin="anonymous"></script>
-    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/holistic@0.5.1635989137/holistic.js" crossorigin="anonymous"></script>
-    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh@0.4.1633559619/face_mesh.min.js" crossorigin="anonymous"></script>
-    <link
-      rel="shortcut icon"
-      href="https://yeemachine.github.io/k2021/favicon/kalidoface3d/icon-circle.svg"
-    />
-
-    <link
-      rel="apple-touch-icon"
-      href="https://yeemachine.github.io/k2021/favicon/kalidoface3d/apple-icon-180.png"
-    />
-
-    <link
-      rel="apple-touch-startup-image"
-      href="https://yeemachine.github.io/k2021/splash/apple-splash-2048-2732.jpg"
-      media="(device-width: 1024px) and (device-height: 1366px) and (-webkit-device-pixel-ratio: 2) and (orientation: portrait)"
-    />
-    <link
-      rel="apple-touch-startup-image"
-      href="https://yeemachine.github.io/k2021/splash/apple-splash-2732-2048.jpg"
-      media="(device-width: 1024px) and (device-height: 1366px) and (-webkit-device-pixel-ratio: 2) and (orientation: landscape)"
-    />
-    <link
-      rel="apple-touch-startup-image"
-      href="https://yeemachine.github.io/k2021/splash/apple-splash-1668-2388.jpg"
-      media="(device-width: 834px) and (device-height: 1194px) and (-webkit-device-pixel-ratio: 2) and (orientation: portrait)"
-    />
-    <link
-      rel="apple-touch-startup-image"
-      href="https://yeemachine.github.io/k2021/splash/apple-splash-2388-1668.jpg"
-      media="(device-width: 834px) and (device-height: 1194px) and (-webkit-device-pixel-ratio: 2) and (orientation: landscape)"
-    />
-    <link
-      rel="apple-touch-startup-image"
-      href="https://yeemachine.github.io/k2021/splash/apple-splash-1536-2048.jpg"
-      media="(device-width: 768px) and (device-height: 1024px) and (-webkit-device-pixel-ratio: 2) and (orientation: portrait)"
-    />
-    <link
-      rel="apple-touch-startup-image"
-      href="https://yeemachine.github.io/k2021/splash/apple-splash-2048-1536.jpg"
-      media="(device-width: 768px) and (device-height: 1024px) and (-webkit-device-pixel-ratio: 2) and (orientation: landscape)"
-    />
-    <link
-      rel="apple-touch-startup-image"
-      href="https://yeemachine.github.io/k2021/splash/apple-splash-1668-2224.jpg"
-      media="(device-width: 834px) and (device-height: 1112px) and (-webkit-device-pixel-ratio: 2) and (orientation: portrait)"
-    />
-    <link
-      rel="apple-touch-startup-image"
-      href="https://yeemachine.github.io/k2021/splash/apple-splash-2224-1668.jpg"
-      media="(device-width: 834px) and (device-height: 1112px) and (-webkit-device-pixel-ratio: 2) and (orientation: landscape)"
-    />
-    <link
-      rel="apple-touch-startup-image"
-      href="https://yeemachine.github.io/k2021/splash/apple-splash-1620-2160.jpg"
-      media="(device-width: 810px) and (device-height: 1080px) and (-webkit-device-pixel-ratio: 2) and (orientation: portrait)"
-    />
-    <link
-      rel="apple-touch-startup-image"
-      href="https://yeemachine.github.io/k2021/splash/apple-splash-2160-1620.jpg"
-      media="(device-width: 810px) and (device-height: 1080px) and (-webkit-device-pixel-ratio: 2) and (orientation: landscape)"
-    />
-    <link
-      rel="apple-touch-startup-image"
-      href="https://yeemachine.github.io/k2021/splash/apple-splash-1284-2778.jpg"
-      media="(device-width: 428px) and (device-height: 926px) and (-webkit-device-pixel-ratio: 3) and (orientation: portrait)"
-    />
-    <link
-      rel="apple-touch-startup-image"
-      href="https://yeemachine.github.io/k2021/splash/apple-splash-2778-1284.jpg"
-      media="(device-width: 428px) and (device-height: 926px) and (-webkit-device-pixel-ratio: 3) and (orientation: landscape)"
-    />
-    <link
-      rel="apple-touch-startup-image"
-      href="https://yeemachine.github.io/k2021/splash/apple-splash-1170-2532.jpg"
-      media="(device-width: 390px) and (device-height: 844px) and (-webkit-device-pixel-ratio: 3) and (orientation: portrait)"
-    />
-    <link
-      rel="apple-touch-startup-image"
-      href="https://yeemachine.github.io/k2021/splash/apple-splash-2532-1170.jpg"
-      media="(device-width: 390px) and (device-height: 844px) and (-webkit-device-pixel-ratio: 3) and (orientation: landscape)"
-    />
-    <link
-      rel="apple-touch-startup-image"
-      href="https://yeemachine.github.io/k2021/splash/apple-splash-1125-2436.jpg"
-      media="(device-width: 375px) and (device-height: 812px) and (-webkit-device-pixel-ratio: 3) and (orientation: portrait)"
-    />
-    <link
-      rel="apple-touch-startup-image"
-      href="https://yeemachine.github.io/k2021/splash/apple-splash-2436-1125.jpg"
-      media="(device-width: 375px) and (device-height: 812px) and (-webkit-device-pixel-ratio: 3) and (orientation: landscape)"
-    />
-    <link
-      rel="apple-touch-startup-image"
-      href="https://yeemachine.github.io/k2021/splash/apple-splash-1242-2688.jpg"
-      media="(device-width: 414px) and (device-height: 896px) and (-webkit-device-pixel-ratio: 3) and (orientation: portrait)"
-    />
-    <link
-      rel="apple-touch-startup-image"
-      href="https://yeemachine.github.io/k2021/splash/apple-splash-2688-1242.jpg"
-      media="(device-width: 414px) and (device-height: 896px) and (-webkit-device-pixel-ratio: 3) and (orientation: landscape)"
-    />
-    <link
-      rel="apple-touch-startup-image"
-      href="https://yeemachine.github.io/k2021/splash/apple-splash-828-1792.jpg"
-      media="(device-width: 414px) and (device-height: 896px) and (-webkit-device-pixel-ratio: 2) and (orientation: portrait)"
-    />
-    <link
-      rel="apple-touch-startup-image"
-      href="https://yeemachine.github.io/k2021/splash/apple-splash-1792-828.jpg"
-      media="(device-width: 414px) and (device-height: 896px) and (-webkit-device-pixel-ratio: 2) and (orientation: landscape)"
-    />
-    <link
-      rel="apple-touch-startup-image"
-      href="https://yeemachine.github.io/k2021/splash/apple-splash-1242-2208.jpg"
-      media="(device-width: 414px) and (device-height: 736px) and (-webkit-device-pixel-ratio: 3) and (orientation: portrait)"
-    />
-    <link
-      rel="apple-touch-startup-image"
-      href="https://yeemachine.github.io/k2021/splash/apple-splash-2208-1242.jpg"
-      media="(device-width: 414px) and (device-height: 736px) and (-webkit-device-pixel-ratio: 3) and (orientation: landscape)"
-    />
-    <link
-      rel="apple-touch-startup-image"
-      href="https://yeemachine.github.io/k2021/splash/apple-splash-750-1334.jpg"
-      media="(device-width: 375px) and (device-height: 667px) and (-webkit-device-pixel-ratio: 2) and (orientation: portrait)"
-    />
-    <link
-      rel="apple-touch-startup-image"
-      href="https://yeemachine.github.io/k2021/splash/apple-splash-1334-750.jpg"
-      media="(device-width: 375px) and (device-height: 667px) and (-webkit-device-pixel-ratio: 2) and (orientation: landscape)"
-    />
-    <link
-      rel="apple-touch-startup-image"
-      href="https://yeemachine.github.io/k2021/splash/apple-splash-640-1136.jpg"
-      media="(device-width: 320px) and (device-height: 568px) and (-webkit-device-pixel-ratio: 2) and (orientation: portrait)"
-    />
-    <link
-      rel="apple-touch-startup-image"
-      href="https://yeemachine.github.io/k2021/splash/apple-splash-1136-640.jpg"
-      media="(device-width: 320px) and (device-height: 568px) and (-webkit-device-pixel-ratio: 2) and (orientation: landscape)"
-    />
-    <!-- Google Tag Manager -->
-    <script>(function(w,d,s,l,i){w[l]=w[l]||[];w[l].push({'gtm.start':
-    new Date().getTime(),event:'gtm.js'});var f=d.getElementsByTagName(s)[0],
-    j=d.createElement(s),dl=l!='dataLayer'?'&l='+l:'';j.async=true;j.src=
-    'https://www.googletagmanager.com/gtm.js?id='+i+dl;f.parentNode.insertBefore(j,f);
-    })(window,document,'script','dataLayer','GTM-5V3VF28');</script>
-    <!-- End Google Tag Manager -->
     <!--
-      The bundle calls window.PSX.* at ~37 patched call sites, unguarded and on
+      Mediapipe, served from this origin instead of jsdelivr.
+
+      These three used to be CDN scripts, and `locateFile` inside the bundle
+      pulled the wasm, the packed assets and the tflite models from the same
+      place - tens of megabytes on every cold load. sw.js does not cache
+      cross-origin requests on purpose, so none of it was ever cached, and the
+      app could not start at all without a working internet connection. On a
+      Raspberry Pi that network round trip was the largest single cost of
+      opening the page.
+
+      `defer` rather than blocking the parser: deferred classic scripts run in
+      document order before the module bundle below, which is what needs the
+      Holistic / FaceMesh globals - so the ordering that mattered is kept and
+      the parse no longer waits.
+
+      Run `node tools/fetch-vendor.mjs` to populate docs/vendor/.
+    -->
+    <script defer src="./vendor/mediapipe/drawing_utils/drawing_utils.js"></script>
+    <script defer src="./vendor/mediapipe/holistic/holistic.js"></script>
+    <script defer src="./vendor/mediapipe/face_mesh/face_mesh.js"></script>
+    <link rel="shortcut icon" href="./vendor/icon/icon-circle.svg" />
+
+    <link rel="apple-touch-icon" href="./vendor/icon/apple-icon-180.png" />
+
+    <!--
+      The bundle calls window.PSX.* at 40 patched call sites, unguarded and on
       the hot path - the render loop, the bone rig, the tracking loop. If psx.js
       fails to load or throws while parsing, every one of those becomes a
       TypeError per frame and the app is simply dead.
@@ -232,6 +84,10 @@
         armGain: function () { return 1; },
         smooth: function (t) { return t; },
         pose: function () {},
+        // stock behaviour: holistic's own Right/Left labels, uncorrected. The
+        // swap fix lives in psx.js; the bundle uses this return value, so a
+        // missing hook here is a TypeError per tracked frame.
+        hands: function (h) { return h; },
         bg: function () {},
         // stock behaviour: the index the list rendered at, against the whole list
         bgDrop: function (list, idx) { var o = list.slice(); o.splice(idx, 1); return o; },
@@ -257,10 +113,6 @@
     <link rel="stylesheet" href="./assets/index.1b91a8e8.css">
   </head>
   <body>
-    <!-- Google Tag Manager (noscript) -->
-    <noscript><iframe src="https://www.googletagmanager.com/ns.html?id=GTM-5V3VF28"
-    height="0" width="0" style="display:none;visibility:hidden"></iframe></noscript>
-    <!-- End Google Tag Manager (noscript) -->
     <h1 class="notranslate">kalidoface</h1>
     
     <!--     <pwa-update></pwa-update> -->
