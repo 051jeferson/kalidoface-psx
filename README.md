@@ -737,6 +737,29 @@ what it is doing: `autoFps` is the ceiling in force, `trackHz` what the tracker 
 managing, `frameMs` the best frame interval it has learned, `throttling` whether
 it is currently holding anything back.
 
+**Run while hidden** is on by default and is what keeps the avatar alive during a
+stream. Chromium hands out no animation frames to a window it is not showing, and
+on Windows "not showing" includes a window that is merely **covered by another
+one** — so opening anything over the avatar freezes it mid-shot until the window
+is raised again. Timers are no way around that either: a hidden page has
+`setTimeout` clamped to once a second.
+
+The one clock that still runs on time is the audio thread — a running
+`AudioContext` has to be fed or its output glitches — so while the window is
+hidden this borrows it and runs the callbacks the animation frame would have run,
+tracking and render loops both, at the same caps as ever. Nothing of it exists
+while the window is on screen: the audio graph is suspended and the shim over
+`requestAnimationFrame` is a passthrough. `PSX.perf()` reports `hidden` and
+`onClock`, which is whether the borrowed clock is the one driving.
+
+Two limits worth knowing. It needs a user gesture to have happened at some point
+before the audio graph may start — the camera does not start without one either,
+so in practice it has — and if the browser refuses anyway, the frames are handed
+back and behaviour is what it was before. And a **minimised** window is still not
+capturable by OBS window capture, whatever this app does with its frames; keep the
+window covered rather than minimised, or point an OBS **browser source** at the
+URL, which renders offscreen and was never subject to any of this.
+
 The fixed caps below still apply on top of it, for anyone who would rather pick a
 number than have one picked:
 
@@ -852,7 +875,7 @@ and scoped class names, so they look native. Controls are split by what they do:
 - **Eyes** — Eyes shut at, live eye readout, Calibrate blink
 - **Emotion Detection** — Signal gain, Brow offset, Angry at, Sorrow at, Smile at, Emotion hold, live readout, Calibrate expressions, Vowel hold, Calibrate vowels
 - **Motion Calibration** — Calibration cues, Head / neck gain, Torso lean gain, Calibrate motion, and a **Fine tuning** disclosure holding Steadiness, Responsiveness, Reach, Reach up, Right arm, Left arm, Shoulder follow, Forearm twist, Face anchor, Prediction, Dropout hold and Head-tilt isolation
-- **Performance** — Auto throttle, Tracking rate, Render rate, Lite pose model, Low power preset
+- **Performance** — Auto throttle, Run while hidden, Tracking rate, Render rate, Lite pose model, Low power preset
 - **PSX Hands** — Driven fingers (`all fingers` / `thumb only` / `none`)
 - **Profile** — Export settings, Import settings, Reset PSX settings
 

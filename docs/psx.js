@@ -258,6 +258,12 @@
     // between a stutter and a slightly slower face while something else on the
     // machine is busy.
     perfAuto: true,
+    // Keep both loops running while the window is not on screen. Chromium
+    // hands out no animation frames to a window that is minimised or fully
+    // covered by another one, so the avatar freezes mid-stream and only
+    // catches up when the window is raised. On by default: being on camera
+    // while you are doing something else in front of it is the whole job.
+    keepAwake: true,
     // Mediapipe inferences per second. 0 = one per animation frame (stock),
     // which is where nearly all the CPU goes.
     //
@@ -5935,6 +5941,7 @@
     // --- performance ---
     'Performance': 'Desempenho',
     'Auto throttle': 'Ajuste automático',
+    'Run while hidden': 'Rodar em segundo plano',
     'Tracking rate': 'Taxa de rastreio',
     'Render rate': 'Taxa de render',
     'Iris / lip refinement': 'Refino de iris / labios',
@@ -5986,7 +5993,11 @@
     'note.adaptive': 'Um amortecimento fixo tem que escolher: o suficiente para assentar uma pose parada vira borracha num movimento rápido, e o suficiente para o movimento rápido deixa o tremor. Isto filtra forte quando você está parado e quase nada quando você se mexe. Firmeza é o quanto uma pose parada é filtrada - o passo de ficar parado na calibragem mede isso na sua própria câmera. Resposta é a rapidez com que ele solta quando você se mexe.',
     'note.perf': 'O app roda uma inferencia do Mediapipe a cada frame e renderiza a cada frame. A taxa de rastreio é onde vai quase toda a CPU. ' +
       'O ajuste automático larga taxa de rastreio sozinho enquanto a máquina não dá conta - OBS gravando, um render rodando - e devolve quando sobra folga. ' +
-      'Os limites fixos abaixo continuam valendo por cima dele.',
+      'Os limites fixos abaixo continuam valendo por cima dele. ' +
+      'Rodar em segundo plano mantém os dois loops vivos com a janela minimizada ou coberta ' +
+      'por outra: o Chromium para os animation frames de uma janela que não está mostrando, ' +
+      'que é de onde vem o avatar congelando no meio da live. Custa o que os limites deixarem, ' +
+      'e só enquanto nada está na tela.',
 
     // --- the app's own menu, drawn from data-text attributes ---
     'Start Face Tracking': 'Iniciar rastreio facial',
@@ -6102,7 +6113,11 @@
       'on every animation frame. The ' +
       'tracking rate is where nearly all the CPU goes. Auto throttle sheds that rate on ' +
       'its own while the machine cannot keep up - OBS recording, an export running - and ' +
-      'takes it back when the headroom returns. The fixed caps below still apply on top.'
+      'takes it back when the headroom returns. The fixed caps below still apply on top. ' +
+      'Run while hidden keeps both loops going while the window is minimised or covered by ' +
+      'another window: Chromium stops animation frames for a window it is not showing, which ' +
+      'is where the avatar freezing mid-stream comes from. It costs whatever the caps allow, ' +
+      'and only while nothing is on screen.'
   };
 
   function T(en) {
@@ -6374,9 +6389,177 @@
       autoFps: r2(autoFps),
       frameMs: r2(autoBest),
       trackHz: trackMs > 1 ? r2(1000 / trackMs) : null,
-      throttling: cfg.perfAuto && autoFps < AUTO_MAX
+      throttling: cfg.perfAuto && autoFps < AUTO_MAX,
+      keepAwake: cfg.keepAwake, hidden: !!document.hidden, onClock: awake
     };
   }
+
+  // ------------------------------------------------------- hidden windows
+
+  // Chromium hands out no animation frames to a window it is not showing, and
+  // on Windows "not showing" includes a window that is merely covered by
+  // another one - which during a stream is most of the time. Both loops here
+  // end in requestAnimationFrame, so the avatar freezes mid-shot and comes
+  // back only when the window is raised again.
+  //
+  // Timers are no way around it either: a hidden page has setTimeout clamped
+  // to once a second. The one clock that still runs on time is the audio
+  // thread, which has to be fed or the output glitches - so while the page is
+  // hidden we borrow it and run the callbacks the animation frame would have
+  // run. None of it exists while the page is visible: the graph is suspended
+  // and the shim below is a passthrough.
+
+  var rafNative = window.requestAnimationFrame;
+  var cafNative = window.cancelAnimationFrame;
+  var awake = false;
+  var awakeCtx = null, awakeNode = null;
+
+  // Callbacks handed to the native animation frame and not yet fired. Carrying
+  // those across the moment the window is hidden is the whole trick: each loop
+  // re-arms only from inside its own callback, so the one frame it already has
+  // in flight *is* the chain, and a chain dropped there never restarts.
+  // Knowing when one has fired needs a wrapper, and a closure per animation
+  // frame is an allocation in the hottest path there is - so the wrappers are
+  // built once and a callback takes a free slot.
+  var SLOTS = 8;
+  var slotFn = [], slotId = [], slotWrap = [];
+
+  function addSlot(i) {
+    slotFn.push(null);
+    slotId.push(0);
+    slotWrap.push(function (t) {
+      var fn = slotFn[i];
+      slotFn[i] = null;
+      if (fn) fn(t);
+    });
+  }
+  for (var slot = 0; slot < SLOTS; slot++) addSlot(slot);
+
+  // Two arrays swapped on every tick, so a callback that re-arms itself lands
+  // in the next tick instead of growing the one being drained - and neither
+  // array is ever reallocated.
+  var qA = [], qB = [], queue = qA, queueId = 0;
+
+  function awakeTick() {
+    if (!queue.length) return;
+    var due = queue;
+    queue = due === qA ? qB : qA;
+    queue.length = 0;
+    var t = now();
+    for (var i = 0; i < due.length; i += 2) {
+      var fn = due[i + 1];
+      due[i + 1] = null;
+      if (fn) fn(t);
+    }
+  }
+
+  function rafShim(fn) {
+    if (awake) {
+      // negative, so it can never collide with a real animation-frame id
+      var id = --queueId;
+      queue.push(id, fn);
+      return id;
+    }
+    for (var i = 0; i < SLOTS; i++) {
+      if (slotFn[i]) continue;
+      slotFn[i] = fn;
+      slotId[i] = rafNative.call(window, slotWrap[i]);
+      return slotId[i];
+    }
+    // More in flight than the loops ever hold at once. Hand it straight over:
+    // it will not survive the window being hidden, which is exactly what a
+    // one-shot did before any of this existed.
+    return rafNative.call(window, fn);
+  }
+
+  function cafShim(id) {
+    if (id < 0) {
+      for (var i = 0; i < queue.length; i += 2) {
+        if (queue[i] === id) { queue[i + 1] = null; return; }
+      }
+      return;
+    }
+    for (var j = 0; j < SLOTS; j++) {
+      if (slotId[j] === id) slotFn[j] = null;
+    }
+    return cafNative.call(window, id);
+  }
+
+  window.requestAnimationFrame = rafShim;
+  window.cancelAnimationFrame = cafShim;
+
+  // Moving the in-flight frames between the two clocks, in whichever direction
+  // the window just went.
+  function handOver(toClock) {
+    var i, fn;
+    if (toClock) {
+      for (i = 0; i < SLOTS; i++) {
+        if (!slotFn[i]) continue;
+        cafNative.call(window, slotId[i]);
+        queue.push(--queueId, slotFn[i]);
+        slotFn[i] = null;
+      }
+      return;
+    }
+    var due = queue;
+    queue = due === qA ? qB : qA;
+    queue.length = 0;
+    for (i = 0; i < due.length; i += 2) {
+      fn = due[i + 1];
+      due[i + 1] = null;
+      if (fn) rafShim(fn);
+    }
+  }
+
+  function awakeStart() {
+    if (awake || !cfg.keepAwake) return;
+    var AC = window.AudioContext || window.webkitAudioContext;
+    if (!AC) return;
+    try {
+      if (!awakeCtx) {
+        awakeCtx = new AC();
+        // 512 frames is ~11ms, finer than any rate cap in this panel, so the
+        // caps stay the thing that decides the rate. A ScriptProcessor rather
+        // than an AudioWorklet because a worklet is a second file to fetch and
+        // parse for a callback that does nothing but tick. It writes nothing
+        // into its output buffer, so what reaches the muted gain is silence.
+        awakeNode = awakeCtx.createScriptProcessor(512, 1, 1);
+        awakeNode.onaudioprocess = awakeTick;
+        var mute = awakeCtx.createGain();
+        mute.gain.value = 0;
+        awakeNode.connect(mute);
+        mute.connect(awakeCtx.destination);
+      }
+    } catch (e) {
+      log('no background clock available', e);
+      return;
+    }
+    awake = true;
+    handOver(true);
+    // resume() wants a user gesture to have happened at some point, and one
+    // has: the camera does not start without one. If it is refused anyway,
+    // give the frames back to the animation frame rather than sit on them -
+    // that is a face frozen until the window is raised, which is where this
+    // started, rather than a face frozen for good.
+    try {
+      var p = awakeCtx.resume();
+      if (p && p['catch']) {
+        p['catch'](function (e) { log('background clock refused', e); awakeStop(); });
+      }
+    } catch (e) { log('background clock refused', e); awakeStop(); }
+  }
+
+  function awakeStop() {
+    if (!awake) return;
+    awake = false;
+    handOver(false);
+    try { if (awakeCtx) awakeCtx.suspend(); } catch (e) {}
+  }
+
+  document.addEventListener('visibilitychange', function () {
+    if (document.hidden) awakeStart();
+    else awakeStop();
+  });
 
   // The tracking loop awaits its inference, so the gap between iterations is
   // inference time plus whatever we wait here. Measure from the start of the
@@ -6402,7 +6585,26 @@
     var t = now();
     var wait = Math.max(0, trackAt + (1000 / fps) - t);
     trackAt = t + wait;
+    // setTimeout is clamped to once a second on a hidden page, so a rate cap
+    // set through it would drop tracking to 1Hz exactly where the audio clock
+    // has just gone to the trouble of keeping it alive. On the clock the wait
+    // is counted off in ticks instead. One tracking loop exists, so one
+    // pending slot is all it can ever need - and it costs no closure.
+    if (awake) {
+      trackDue = t + wait;
+      trackFn = fn;
+      return rafShim(trackPump);
+    }
     return setTimeout(function () { requestAnimationFrame(fn); }, wait);
+  }
+
+  var trackDue = 0, trackFn = null;
+
+  function trackPump() {
+    if (now() < trackDue) { rafShim(trackPump); return; }
+    var fn = trackFn;
+    trackFn = null;
+    if (fn) fn();
   }
 
   var frameAt = 0;
@@ -7180,6 +7382,7 @@
     pfNote.style.cssText = 'width:100%;opacity:.5;font-size:12px;margin:0 0 4px;text-align:left';
     pf.appendChild(pfNote);
     addToggle(pf, 'perfAuto', T('Auto throttle'), STG);
+    addToggle(pf, 'keepAwake', T('Run while hidden'), STG);
     addRule(pf);
     addRange(pf, 'trackFps', T('Tracking rate'), 0, 60, 1, fpsLabel, STG);
     addRange(pf, 'renderFps', T('Render rate'), 0, 60, 1, fpsLabel, STG);
