@@ -35,6 +35,17 @@ that preference: choose **all fingers** under **PSX Hands** for pointing or a
 finger-to-lips gesture. Arm contact now uses head/torso proportions, disables
 prediction at contact and follows palm roll continuously through ±180°.
 Bent wrists preserve the detected palm orientation through forearm rotation.
+Hand association compares both wrist assignments together, retaining both
+detections when independent nearest-wrist decisions would discard one. Clear
+swaps are corrected; ambiguous crossings retain the detector's labels.
+Adaptive motion smoothing measures each wrist separately, including when only
+one is visible, so opposite gestures cannot cancel their measured speed.
+The depth calibration pose requires a straight elbow, as the sweep already
+does; a bent arm no longer produces a false depth gain. These checks run once
+per tracking result and do not increase detector complexity or tracking rate.
+Model measurements during motion calibration count each tracking result once,
+require visible arms and reject stale poses. A valid T-pose only authorizes
+the matching observation, so lowering the arms stops the span measurement.
 Visible hands beside the head also correct the pose detector's wrist position;
 this recovery fades out as the gesture moves away from the head.
 `PSX.armInfo()` reports `palmError` in degrees after the rotation for diagnosis.

@@ -19,13 +19,21 @@ export function runtime(saved = null, overrides = {}) {
     requestAnimationFrame: window.requestAnimationFrame });
   const expose = `window.motion = { followRoll, stableRoll, stablePalm, palmFrame, palmRollAngle, rigidPalmFrame, skinBoundsCenter, twistAngle, armLenOk, waistContact,
     faceWristOffset, faceContactDepth, imageBasis, contactReading, cfg, armLenSeen,
+    depthRatio, noteWristSpeed, sampleReach, sampleMotionLandmarks,
+    motionRun: function (key) {
+      calRun = { kind: 'motion', phase: 'hold', holdFrom: now() - 300,
+        i: 0, steps: [{ key: key }], acc: stepAccum(), out: {}, tpose: false };
+      return calRun;
+    },
+    motionSpeed: function () { return speedNow; },
+    resetSpeed: function () { speedNow = 0; },
     startMic, stopMic, micLevel, mic, driveVisemes, changeMicDevice, refreshMicDevices,
     sampleCalibration, captureStep, advanceCalibration, steps, snapshotSettings,
     micDevices: function () { return micDevices; },
     setOccluded: function (value) { faceOcc = value; },
     modelCount: function () { return models.length; }, expected: EXPECTED_HOOKS,
     frame: function (world, image, hand) {
-      poseLm = world; poseImg = image; poseHand = hand; poseSeq++; imgSeq++;
+      poseLm = world; poseImg = image; poseHand = hand; poseSeq++; imgSeq++; poseLmAt = now();
     }, image: function (image) { poseImg = image; imgSeq++; },
     getPose: function () { return poseLm; },
     setRun: function () { calRun = { kind: 'face', phase: 'wait' }; },

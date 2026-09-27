@@ -48,6 +48,107 @@ assert.ok(Math.abs(r.followRoll(rad(179), rad(-179), 0.5) - Math.PI) < 1e-10,
 assert.ok(Math.abs(r.followRoll(rad(-179), rad(179), 0.5) + Math.PI) < 1e-10);
 assert.equal(r.followRoll(undefined, 1, 0.5), 1);
 
+// A pair must be assigned as a pair, even when both detections are nearer
+// one wrist. Detector labels win ties; a clear reversal swaps both together.
+const handImage = pose();
+handImage[15] = p(0.3, 0.5); handImage[16] = p(0.7, 0.5);
+const rightHand = [p(0.45, 0.5)], leftHand = [p(0.49, 0.5)];
+let assigned = r.psx.hands({ Right: rightHand, Left: leftHand }, handImage);
+assert.equal(assigned.Right, rightHand);
+assert.equal(assigned.Left, leftHand, 'two visible hands must not lose one to iteration order');
+rightHand[0] = p(0.7, 0.5); leftHand[0] = p(0.3, 0.5);
+assigned = r.psx.hands({ Right: rightHand, Left: leftHand }, handImage);
+assert.equal(assigned.Right, leftHand);
+assert.equal(assigned.Left, rightHand);
+assert.equal(r.psx.hands(assigned, handImage).Right, leftHand, 'reapplying association is idempotent');
+rightHand[0] = leftHand[0] = p(0.5, 0.5);
+assert.equal(r.psx.hands({ Right: rightHand, Left: leftHand }, handImage).Right, rightHand);
+rightHand[0] = p(0.7, 0.5);
+assert.equal(r.psx.hands({ Right: rightHand, Left: null }, handImage).Left, rightHand);
+
+let motionTime = 1000;
+const moving = runtime(null, { window: { performance: { now: () => motionTime } } });
+const wrists = pose();
+wrists[15] = p(0.3, 0.5); wrists[16] = p(0.7, 0.5);
+moving.noteWristSpeed(wrists);
+motionTime += 100;
+wrists[15].x -= 0.1; wrists[16].x += 0.1;
+moving.noteWristSpeed(wrists);
+assert.ok(moving.motionSpeed() > 0.99, 'opposite wrist motion cannot cancel its speed');
+moving.resetSpeed();
+motionTime += 100;
+wrists[16].visibility = 0; wrists[15].x -= 0.1;
+moving.noteWristSpeed(wrists);
+assert.ok(moving.motionSpeed() > 0.99, 'one missing hand cannot hide motion of the other');
+moving.resetSpeed();
+motionTime += 100;
+wrists[16] = p(4, 0.5);
+moving.noteWristSpeed(wrists);
+assert.equal(moving.motionSpeed(), 0, 'reacquisition does not measure speed across a dropout');
+
+const depthWorld = pose();
+depthWorld[13] = p(0.3, 0.3, -0.2); depthWorld[15] = p(0.3, 0.3, -0.4);
+depthWorld[14] = p(0.95, 0.3); depthWorld[16] = p(1.2, 0.3);
+assert.ok(Math.abs(r.depthRatio(depthWorld, 0.5) - 1.25) < 1e-10,
+  'a straight arm at the lens measures depth compression');
+depthWorld[13] = p(0.5, 0.3, -0.2);
+assert.equal(r.depthRatio(depthWorld, 0.5), 0, 'a bent arm cannot calibrate depth');
+depthWorld[13] = depthWorld[11];
+assert.equal(r.depthRatio(depthWorld, 0.5), 0, 'collapsed arm segments cannot calibrate depth');
+
+let calTime = 1000, matrixReads = 0;
+const calibration = runtime(null, { window: { performance: { now: () => calTime } } });
+function calBone(x, y) {
+  const elements = Array(16).fill(0);
+  elements[12] = x; elements[13] = y;
+  return { matrixWorld: { elements }, updateWorldMatrix() { matrixReads++; } };
+}
+const calBones = {
+  head: calBone(0.5, 0.1), rightUpperArm: calBone(0.3, 0.3),
+  rightLowerArm: calBone(0.05, 0.3), rightHand: calBone(-0.2, 0.3),
+  leftUpperArm: calBone(0.7, 0.3), leftLowerArm: calBone(0.95, 0.3), leftHand: calBone(1.2, 0.3)
+};
+const calModel = {
+  humanoid: { getBoneNode: name => calBones[name] },
+  __psxArm: { ok: true, ru: calBones.rightUpperArm, lu: calBones.leftUpperArm }
+};
+const tWorld = pose();
+tWorld[13] = p(0.05, 0.3); tWorld[15] = p(-0.2, 0.3);
+tWorld[14] = p(0.95, 0.3); tWorld[16] = p(1.2, 0.3);
+const tRun = calibration.motionRun('tpose');
+calibration.frame(tWorld, tWorld, null);
+calibration.sampleMotionLandmarks(tWorld);
+calibration.sampleReach(calModel);
+assert.equal(tRun.acc.span.length, 1);
+const onceReads = matrixReads;
+for (let i = 0; i < 144; i++) calibration.sampleReach(calModel);
+assert.equal(tRun.acc.span.length, 1, 'renders cannot manufacture calibration observations');
+assert.equal(matrixReads, onceReads, 'repeated renders skip calibration skeleton traversal');
+tWorld[13] = p(0.3, 0.55); tWorld[15] = p(0.3, 0.8);
+calTime += 100;
+calibration.frame(tWorld, tWorld, null);
+calibration.sampleMotionLandmarks(tWorld);
+calibration.sampleReach(calModel);
+assert.equal(tRun.acc.span.length, 1, 'a previous T-pose cannot authorize lowered arms');
+
+const handsRun = calibration.motionRun('hands');
+for (let sample = 0; sample < 8; sample++) {
+  calTime += 100;
+  calibration.frame(tWorld, tWorld, null);
+  for (let render = 0; render < 14; render++) calibration.sampleReach(calModel);
+}
+assert.equal(handsRun.acc.reach.length, 8, '10 Hz tracking contributes 10 Hz observations at faster render rates');
+calTime += 100;
+tWorld[15].visibility = 0;
+calibration.frame(tWorld, tWorld, null);
+calibration.sampleReach(calModel);
+assert.equal(handsRun.acc.reach.length, 8, 'a held model with an unseen wrist cannot calibrate reach');
+tWorld[15].visibility = 1;
+calibration.frame(tWorld, tWorld, null);
+calTime += 600;
+calibration.sampleReach(calModel);
+assert.equal(handsRun.acc.reach.length, 8, 'stale landmarks cannot calibrate a held model');
+
 // Moving the forearm changes the bind-relative zero, not a stationary palm.
 // Old scalar smoothing would apply 9 degrees of this 90-degree compensation.
 assert.ok(Math.abs(r.palmRollAngle(p(1, 0), p(0, 1), p(0, 0, 1), p(0, 1), 0.1) - Math.PI / 2) < 1e-10);

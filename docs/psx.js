@@ -1719,7 +1719,7 @@
       brow: [], smile: [], y: [], x: [], eyeL: [], eyeR: [],
       // motion: model-space readings from the render tick, landmark-space ones
       // from the holistic result
-      reach: [], span: [], roll: [], torso: [], depth: [], alen: [], z: [],
+      reach: [], span: [], roll: [], torso: [], depth: [], alen: [], z: [], modelSeq: -1,
       // sweep: one depth ratio and one residual per locked arm per inference
       fit: newFit(),
       // mouth: one feature vector per sampled frame
@@ -4168,11 +4168,23 @@
     // the sweep is read off the landmarks, not off the rig - see sampleSweep
     if (step.fit) return;
     var key = step.key;
+    if (key !== 'tpose' && key !== 'rest' && key !== 'hands') return;
+    // A render is not a new observation. Count each accepted inference once,
+    // and never calibrate against a held rig after the detector lost an arm.
+    if (!poseLm || !poseTrusted || now() - poseLmAt > POSE_STALE_MS ||
+        poseLmAt < calRun.holdFrom + CAL_SETTLE || calRun.acc.modelSeq === poseSeq) return;
+    calRun.acc.modelSeq = poseSeq;
+    for (var side in ARM_LM) {
+      var idx = ARM_LM[side];
+      var sh = poseLm[idx.shoulder], el = poseLm[idx.elbow], wr = poseLm[idx.wrist];
+      if (!vis(sh) || !vis(el) || !vis(wr) ||
+          !worldPoint(sh) || !worldPoint(el) || !worldPoint(wr)) return;
+    }
     if (key === 'tpose') {
       // `tpose` is set by the landmark sampler and only while the arms are
       // actually out, so a model-space span is never taken from a pose the
       // person did not make
-      if (!calRun.tpose) return;
+      if (calRun.tpose !== poseSeq) return;
       var r = modelSpan(vrm);
       if (r != null && isFinite(r)) calRun.acc.span.push(r);
       return;
@@ -4208,6 +4220,10 @@
       var idx = ARM_LM[side];
       var sh = world[idx.shoulder], el = world[idx.elbow], wr = world[idx.wrist];
       if (!vis(sh) || !vis(el) || !vis(wr)) continue;
+      // A bent arm has no known shoulder-to-wrist length. Counting it as
+      // straight turns elbow flexion into a spurious depth correction.
+      var upperDir = vnorm(vsub(el, sh)), lowerDir = vnorm(vsub(wr, el));
+      if (!upperDir || !lowerDir || vdot(upperDir, lowerDir) < 0.995) continue;
       var d = vsub(wr, sh);
       var dx = vdot(d, ub.x), dy = vdot(d, ub.y), dz = vdot(d, ub.z);
       var plane = dx * dx + dy * dy;
@@ -4277,7 +4293,7 @@
         n++;
       }
       if (n < 2) return;
-      calRun.tpose = true;
+      calRun.tpose = poseSeq;
       a.alen.push(sum / n);
     } else if (key === 'depth') {
       var r = depthRatio(world, calRun.out.userArm);
@@ -4369,8 +4385,10 @@
   var speedNow = 0;
   var lastHead = null;
   var lastHeadAt = 0;
-  var lastWrist = null;
-  var lastWristAt = 0;
+  var wristSpeed = {
+    Right: { point: v3(0, 0, 0), at: 0, valid: false },
+    Left: { point: v3(0, 0, 0), at: 0, valid: false }
+  };
 
   // Rise instantly, fall over ~200 ms. A speed estimate that lagged its own
   // signal would filter hardest at the exact moment a movement ends, which is
@@ -4398,11 +4416,15 @@
   // are not - but both end up as "how fast is this moving", and the cutoff only
   // needs the larger of the two.
   function noteWristSpeed(lm) {
-    var r = lm[ARM_LM.Right.wrist], l = lm[ARM_LM.Left.wrist];
-    if (!vis(r) || !vis(l)) return;
-    var cur = vmid(r, l);
-    lastWristAt = speedOf(cur, lastWrist, lastWristAt);
-    lastWrist = cur;
+    // Opposite gestures cancel at the midpoint. Measure each wrist separately
+    // and break history on loss so reacquisition cannot invent a fast move.
+    for (var side in ARM_LM) {
+      var cur = lm[ARM_LM[side].wrist], state = wristSpeed[side];
+      if (!vis(cur) || !worldPoint(cur)) { state.valid = false; continue; }
+      state.at = speedOf(cur, state.valid ? state.point : null, state.at);
+      state.point.x = cur.x; state.point.y = cur.y; state.point.z = cur.z;
+      state.valid = true;
+    }
   }
 
   // Advanced once per rendered frame, not once per smoothed bone: the four call
@@ -4798,6 +4820,22 @@
 
   function placeHands(hands) {
     if (!hands) return null;
+    var right = hands.Right, left = hands.Left;
+    var rw = right && right[HAND_LM.wrist], lw = left && left[HAND_LM.wrist];
+    var pr = poseImg && poseImg[ARM_LM.Right.wrist];
+    var pl = poseImg && poseImg[ARM_LM.Left.wrist];
+    // Assign the pair together: independent nearest-wrist choices can send
+    // both detections to one arm and discard a valid hand. Keep detector
+    // labels when the total costs are tied or too close to distinguish.
+    if (rw && lw && vis(pr) && vis(pl)) {
+      var direct = imgDist(rw, pr) + imgDist(lw, pl);
+      var crossed = imgDist(rw, pl) + imgDist(lw, pr);
+      if (crossed * 1.44 < direct) {
+        handSwaps++;
+        return { Right: left, Left: right };
+      }
+      return { Right: right, Left: left };
+    }
     var want = { Right: null, Left: null };
     var moved = false;
     for (var side in ARM_LM) {
