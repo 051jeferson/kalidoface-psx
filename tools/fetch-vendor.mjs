@@ -89,12 +89,12 @@ const files = [
   ['font/w95/W95FA.otf', 'https://raw.githubusercontent.com/verkcuos/w95fa/main/W95FA.otf'],
   ...[
     'track', 'char', 'front', 'back', 'zoom',
-    'info', 'settings', 'effects', 'controls',
+    'settings', 'effects', 'controls',
   ].map((n) => [
     'icon/w95/' + n + '.png',
     'https://raw.githubusercontent.com/1j01/98/master/images/icons/' + {
       track: 'video-32x32', char: 'solitaire-32x32', front: 'paint-file-32x32',
-      back: 'desktop-32x32', zoom: 'find-file-32x32', info: 'help-32x32',
+      back: 'desktop-32x32', zoom: 'find-file-32x32',
       settings: 'settings-32x32', effects: 'themes-32x32', controls: 'task-32x32',
     }[n] + '.png',
   ]),

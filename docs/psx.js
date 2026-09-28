@@ -69,6 +69,11 @@
     // or the words without the tones, and two toggles for one answer is one
     // toggle too many.
     calCues: true,
+    // Where the desktop panel window was last dragged, {x,y} in viewport
+    // pixels. The position does not reach WebGL and is clamped against the
+    // live viewport on every apply, so a bogus or stale value can only land
+    // the window back on screen, never off it.
+    win: null,
 
     // --- the actual PS1 signatures ------------------------------------
     // The console had no floating point in its GPU: vertices were snapped to
@@ -448,6 +453,10 @@
   function sanitize(key, v) {
     var def = DEFAULTS[key];
     if (key === 'micMouth') return validMicMouth(v) ? v : null;
+    if (key === 'win') {
+      if (!v || typeof v !== 'object') return null;
+      return isNum(v.x) && isNum(v.y) ? { x: v.x, y: v.y } : null;
+    }
     if (key === 'mouth') {
       if (!v || typeof v !== 'object') return null;
       var keys = ['rest'].concat(VOWELS);
@@ -9974,9 +9983,10 @@
     '.subButton.selected{box-shadow:var(--w95-in) !important}',
     '.subButton.selected .solid{transform:translate(1px,1px)}',
     // dead buttons the tray restyle would otherwise reveal again: the fork
-    // removed both, and their display:none is inline, so it needs force back
-    '.subButton.pip,.menu-item.call{display:none !important}',
-    '.subButton.infoToggle .solid{background-image:url(vendor/icon/w95/info.png)}',
+    // removed all three, and the tray's own display:flex needs the force back.
+    // The info toggle opened upstream's tutorial cards - nothing this fork
+    // ships needs them, and the panel is unreachable without it.
+    '.subButton.pip,.menu-item.call,.subButton.infoToggle{display:none !important}',
     '.secondaryMenu button:nth-of-type(1) .solid{background-image:url(vendor/icon/w95/settings.png)}',
     '.secondaryMenu button:nth-of-type(2) .solid{background-image:url(vendor/icon/w95/effects.png)}',
     '.secondaryMenu button:nth-of-type(3) .solid{background-image:url(vendor/icon/w95/controls.png)}',
@@ -9993,11 +10003,39 @@
     'backdrop-filter:none !important;border:0 !important;padding:3px !important}',
     'container.subnav.hide #psx-w95-title{display:none}',
     'container.subnav section:empty,container.subnav .shape-overlays{display:none !important}',
+    // ---- the desktop window -------------------------------------------
+    // On a mouse the panel stops being a fixed column and becomes a free W95
+    // window: opened where it was last dragged (the position lives in the
+    // #psx-win-pos rule, not inline - Svelte rewrites the subnav's style
+    // attribute), content scrolls inside the frame, and H replaces the
+    // controls button. The app's own touch drawer - --container-x/y plus the
+    // snap-back transform transition - is pinned shut here; mobile keeps it.
+    '@media (hover: hover) and (pointer: fine){' +
+    'container.subnav{bottom:auto !important;top:56px !important;left:24px !important;' +
+    'width:312px !important;height:540px !important;max-height:calc(100vh - 88px) !important;' +
+    // translate(0,0), not none: the transform is what keeps the background
+    // panel's position:fixed tabs anchored to the window instead of the viewport
+    'transform:translate(0,0) !important;transition:none !important;overflow:hidden !important}',
+    'container.subnav:before{display:none !important}',
+    // the panel roots are absolute and height:100% inside the content, and
+    // they do the scrolling themselves. Making the content positioned gives
+    // them their containing block back at a window-sized box, minus the strip
+    // the background panel's tab row occupies at the bottom of the window
+    '.subnav .content{position:relative !important;height:calc(100% - 67px) !important;' +
+    'overflow-y:auto !important;overflow-x:hidden !important}',
+    // the drawer grip and the controls button are desktop-duplicated jobs:
+    // the title bar drags, H hides the HUD
+    '.secondaryMenu button:nth-of-type(3){display:none !important}' +
+    '}',
+    // the last of the tutorial-card system the info toggle used to open: a
+    // dismissible hint bubble that pops over the scene - capture noise here,
+    // on either pointer. Mounted in its own body-level container.
+    'container.svelte-1kc6ls6{display:none !important}',
     // title bar, filled in from JS so it can name the panel that is open
     '#psx-w95-title{height:20px;margin:0 0 3px;background:var(--w95-navy);color:#fff;' +
     'font-family:"W95FA",sans-serif;font-size:12px;font-weight:700;padding:3px 24px 3px 6px;' +
     'box-sizing:border-box;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;' +
-    'user-select:none;flex:0 0 auto}',
+    'user-select:none;flex:0 0 auto;cursor:move}',
     '.subnav-close{top:5px !important;right:5px !important;width:18px !important;' +
     'height:16px !important;border-radius:0 !important;background:var(--w95-face) !important;' +
     'border:0 !important;box-shadow:var(--w95-out) !important;display:flex !important;' +
@@ -10177,6 +10215,71 @@
     return T('Characters');
   }
 
+  // The desktop panel window. The title bar drags it; the position persists
+  // in cfg.win and is re-applied through a dedicated stylesheet rule because
+  // the bundle owns the subnav's inline style attribute and rewrites it.
+  var winPosCss = null;
+  var WIN_DESKTOP = '(hover: hover) and (pointer: fine)';
+
+  function w95IsDesktop() {
+    return !!(window.matchMedia && window.matchMedia(WIN_DESKTOP).matches);
+  }
+
+  function winPosRule() {
+    if (winPosCss && winPosCss.isConnected) return winPosCss;
+    winPosCss = document.createElement('style');
+    winPosCss.id = 'psx-win-pos';
+    document.head.appendChild(winPosCss);
+    return winPosCss;
+  }
+
+  function winPosText(x, y) {
+    return 'container.subnav{left:' + x + 'px !important;top:' + y + 'px !important}';
+  }
+
+  function applyWinPos() {
+    if (!w95IsDesktop() || !cfg.win) return;
+    var w = cfg.win;
+    // clamp against the live viewport so a stale position - smaller window,
+    // monitor change - lands the title bar back on screen instead of losing it
+    var x = clamp(Math.round(w.x), 8, Math.max(8, window.innerWidth - 72));
+    var y = clamp(Math.round(w.y), 8, Math.max(8, window.innerHeight - 48));
+    var t = winPosText(x, y);
+    if (winPosRule().textContent !== t) winPosRule().textContent = t;
+  }
+
+  function armWinDrag(bar, sub) {
+    if (bar.__psxDrag) return;
+    bar.__psxDrag = true;
+    bar.addEventListener('pointerdown', function (e) {
+      if (e.button !== 0 || !w95IsDesktop()) return;
+      var r = sub.getBoundingClientRect();
+      var sx = e.clientX, sy = e.clientY, ox = r.left, oy = r.top;
+      var w = r.width;
+      // data-dragging=true stands down the bundle's own interact.js drawer,
+      // which only attaches while the attribute reads false
+      sub.setAttribute('data-dragging', 'true');
+      e.preventDefault();
+      var move = function (ev) {
+        var x = clamp(ox + ev.clientX - sx, 8, Math.max(8, window.innerWidth - w - 8));
+        var y = clamp(oy + ev.clientY - sy, 8, Math.max(8, window.innerHeight - 48));
+        winPosRule().textContent = winPosText(x, y);
+      };
+      var up = function () {
+        window.removeEventListener('pointermove', move);
+        window.removeEventListener('pointerup', up);
+        window.removeEventListener('pointercancel', up);
+        sub.setAttribute('data-dragging', 'false');
+        var r2 = sub.getBoundingClientRect();
+        cfg.win = { x: Math.round(r2.left), y: Math.round(r2.top) };
+        save();
+      };
+      window.addEventListener('pointermove', move);
+      window.addEventListener('pointerup', up);
+      window.addEventListener('pointercancel', up);
+    });
+  }
+
   function syncW95Title() {
     var sub = document.querySelector('container.subnav');
     if (!sub || !sub.firstChild) return;
@@ -10190,6 +10293,11 @@
       }
     }
     var want = w95TitleText();
+    // window placement and drag do not wait for a panel to be open: a saved
+    // position has to apply while the window is still hidden, or the first
+    // open after a reload jumps the window back to its default spot
+    armWinDrag(bar, sub);
+    applyWinPos();
     if (!want) return;
     var pt = cfg.lang === 'pt' ? ({ 'Front': 'Frente', 'Background': 'Fundo', 'Characters': 'Personagens' })[want] : null;
     want = pt || want;
