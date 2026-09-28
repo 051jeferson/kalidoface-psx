@@ -192,6 +192,26 @@
     {
       "find": "locateFile:p=>`https://cdn.jsdelivr.net/npm/@mediapipe/holistic@0.5.1635989137/${p}`",
       "replace": "locateFile:p=>new URL(\"vendor/mediapipe/holistic/\"+p,document.baseURI).href"
+    },
+    {
+      "find": "Yt=[{id:0,name:\"Jeferson\",type:\"url\",url:\"vrm/Jeferson.vrm\",icon:\"vrm/Jeferson.png\",source:\"\",author:\"\",color:null}]];$e(vt,\"modelList\"",
+      "replace": "Yt=[{id:0,name:\"Jeferson\",type:\"url\",url:\"vrm/Jeferson.vrm\",icon:\"vrm/Jeferson.png\",source:\"\",author:\"\",color:null}];$e(vt,\"modelList\""
+    },
+    {
+      "find": "$e(Ft,\"bgURL\",Mn[0],Zn);et(Ft,\"bgURL\")",
+      "replace": "$e(Ft,\"bgURL\",window.PSX.bgDefault(),window.PSX.bgFix);et(Ft,\"bgURL\")"
+    },
+    {
+      "find": "$e(Ut,\"userModel\",{type:Yt[0].type,name:Yt[0].name,uploaded:Yt[0].uploaded,url:Yt[0].url}),et(Ut,\"userModel\")",
+      "replace": "$e(Ut,\"userModel\",{type:Yt[0].type,name:Yt[0].name,uploaded:Yt[0].uploaded,url:Yt[0].url},window.PSX.modelFix),et(Ut,\"userModel\")"
+    },
+    {
+      "find": "gi=[{type:\"color\",name:\"Transparent\",url:\"#00fc0100\"},{type:\"color\",name:\"White\",url:\"#ffffff\"},{type:\"color\",name:\"Chroma Green\",url:\"#00fc01\"},{type:\"color\",name:\"Chroma Blue\",url:\"#0033cc\"},{type:\"color\",name:\"Chroma Pink\",url:\"#ff00ff\"}]],Mn=[",
+      "replace": "gi=[{type:\"color\",name:\"Transparent\",url:\"#00fc0100\"},{type:\"color\",name:\"White\",url:\"#ffffff\"},{type:\"color\",name:\"Chroma Green\",url:\"#00fc01\"},{type:\"color\",name:\"Chroma Blue\",url:\"#0033cc\"},{type:\"color\",name:\"Chroma Pink\",url:\"#ff00ff\"}],Mn=["
+    },
+    {
+      "find": "Mn=[]];$e(al,\"bgList\"",
+      "replace": "Mn=[];$e(al,\"bgList\""
     }
   ],
   "vendorPatches": [

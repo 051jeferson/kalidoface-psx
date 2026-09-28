@@ -58,7 +58,7 @@
     <link rel="apple-touch-icon" href="./vendor/icon/apple-icon-180.png" />
 
     <!--
-      The bundle calls window.PSX.* at 40 patched call sites, unguarded and on
+      The bundle calls window.PSX.* at 43 patched call sites, unguarded and on
       the hot path - the render loop, the bone rig, the tracking loop. If psx.js
       fails to load or throws while parsing, every one of those becomes a
       TypeError per frame and the app is simply dead.
@@ -91,6 +91,12 @@
         bg: function () {},
         // stock behaviour: the index the list rendered at, against the whole list
         bgDrop: function (list, idx) { var o = list.slice(); o.splice(idx, 1); return o; },
+        // stock behaviour: upstream's own pano default. The patched bundle has
+        // no Mn to fall back on, so a failed psx.js ships the chroma green
+        // default and rewrites nothing - degraded, not broken.
+        bgDefault: function () { return { type: 'color', name: 'Chroma Green', url: '#00fc01', pano: false }; },
+        bgFix: function () {},
+        modelFix: function () {},
         // false = leave the arms to the stock Euler rig
         arm: function () { return false; },
         guide: function () { return true; },

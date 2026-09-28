@@ -55,9 +55,10 @@
   }
 
   var DEFAULTS = {
-    // render at 1 device pixel per CSS pixel and let CSS upscale with
-    // image-rendering:pixelated -> hard pixel edges instead of a 2x downsample
-    pixelRatio: 1,
+    // 0.25x is the shipped look: a quarter of the device pixels, CSS-upscaled
+    // with image-rendering:pixelated into hard PS1-sized edges. Raise it in the
+    // panel if a capture needs the extra resolution.
+    pixelRatio: 0.25,
     // 'en' | 'pt' - the panel language, the app's own labels, and the voice
     lang: localeLang(),
     // A calibration pose is held at arm's length from the screen, where the
@@ -73,7 +74,8 @@
     // an integer screen grid, which is where the characteristic wobble comes
     // from. Lower grid = coarser = wobblier.
     vertexSnap: true,
-    snapGrid: 160,
+    // coarser than upstream's default on purpose - the wobble is the look
+    snapGrid: 64,
     // 15-bit output, 5 bits per channel, with ordered dithering to hide the
     // banding. 32 levels per channel is the real thing.
     dither: true,
@@ -271,25 +273,25 @@
     // Mediapipe inferences per second. 0 = one per animation frame (stock),
     // which is where nearly all the CPU goes.
     //
-    // 24 rather than uncapped. Holistic never reaches a display rate anyway, so
+    // 20 rather than uncapped. Holistic never reaches a display rate anyway, so
     // the frames an uncapped tracker asks for are frames it cannot deliver -
-    // it just spends the whole CPU finding that out. 24 is above what the face
-    // needs to look alive and below what the machine was straining at.
-    trackFps: 24,
+    // it just spends the whole CPU finding that out. 20 is what the machine
+    // was actually achieving under the old 24 cap, so it is the honest floor.
+    trackFps: 20,
     // Rendered frames per second. 0 = display rate (stock).
     //
-    // 30, because this is a PSX fork: the era's own cadence was 20-30, so a cap
-    // here is the look rather than a concession to the machine. It halves GPU
-    // time on a 60Hz screen and nothing about the result is worse for it.
-    renderFps: 30,
+    // 20, because this is a PSX fork: the era's own cadence was 20-30, and the
+    // low end of it is where the pixelated look reads best. A cap here also
+    // halves GPU time on a 60Hz screen.
+    renderFps: 20,
     // Holistic modelComplexity 0 (lite) instead of 1.
     //
-    // Off by default, and it is the one performance setting that is a real
-    // trade rather than a free win. The arm retarget is built on pose landmark
-    // positions - which wrist a hand sits on, whether a palm is behind the
-    // skull, how long a forearm reads - and those are exactly what the lite
-    // network is worse at. The rate caps cost latency nobody sees; this costs
-    // accuracy in the one part of the fork that needed the most work.
+    // Off by default, and not on the panel - the lite network is worse at
+    // exactly what the arm retarget is built on: pose landmark positions,
+    // which wrist a hand sits on, whether a palm is behind the skull, how
+    // long a forearm reads. It is the one performance setting that is a real
+    // trade rather than a free win, so only the low-power preset reaches for
+    // it.
     poseLite: false,
 
     verbose: false
@@ -546,11 +548,15 @@
     voiceNoteEl.style.display = show ? '' : 'none';
   }
 
-  // Everything that makes this run on a small machine, in one place. Two of
-  // these are read once at startup, so the reload note appears with them.
+  // Everything that makes this run on a small machine, in one place. The
+  // shipped defaults already are the low-power profile - quarter render scale,
+  // 20fps both loops - so what is left for the button is the lite pose model,
+  // auto throttle, and pulling the three sliders back to the floor if a
+  // session raised them. Two of these are read once at startup, so the reload
+  // note appears with them.
   function applyLowPower() {
-    cfg.pixelRatio = 0.5;
-    cfg.renderFps = 30;
+    cfg.pixelRatio = 0.25;
+    cfg.renderFps = 20;
     cfg.trackFps = 20;
     cfg.poseLite = true;
     cfg.perfAuto = true;
@@ -6745,9 +6751,10 @@
       'instruções faladas ficam mudas - os bipes e o texto na tela continuam ' +
       'funcionando. No Raspberry Pi OS, instalar um motor de fala dá uma lista ' +
       'de vozes ao Chromium.',
-    'note.lowpower': 'Metade da escala de render, render a 30fps, rastreio a 20fps e o ' +
-      'modelo de pose leve - o que faz isto rodar numa máquina pequena, num lugar ' +
-      'só. As duas opções de modelo valem no próximo carregamento.',
+    'note.lowpower': 'Volta a escala de render, as taxas de render e rastreio para o ' +
+      'padrão e liga o modelo de pose leve e o throttle automático - o que faz ' +
+      'isto rodar numa máquina pequena, num lugar só. A opção de modelo vale no ' +
+      'próximo carregamento.',
     'Motion calibration done': 'Calibragem de movimento concluída',
     'It came out good.': 'Ficou boa.',
     'It came out poor - run it again.': 'Ficou ruim - rode de novo.',
@@ -6809,7 +6816,6 @@
     'Tracking rate': 'Taxa de rastreio',
     'Render rate': 'Taxa de render',
     'Iris / lip refinement': 'Refino de iris / labios',
-    'Lite pose model': 'Modelo de pose leve',
     'uncapped': 'sem limite',
 
     // --- hands / diagnostics ---
@@ -6937,9 +6943,10 @@
     'note.novoice': 'This browser has no speech voices installed, so the spoken ' +
       'prompts are silent - the beeps and the on-screen prompt still work. On ' +
       'Raspberry Pi OS, installing a speech engine gives Chromium a voice list.',
-    'note.lowpower': 'Half render scale, 30fps render, 20fps tracking and the lite ' +
-      'pose model - the settings that make this run on a small machine, in one ' +
-      'place. The two model options apply on reload.',
+    'note.lowpower': 'Returns the render scale and the render and tracking rates ' +
+      'to the default and switches on the lite pose model and auto throttle - ' +
+      'the settings that make this run on a small machine, in one place. The ' +
+      'model option applies on reload.',
     'note.eyes': 'One line: how shut an eye has to look before the shut cell takes ' +
       'over. Where that number falls is a property of your eyes, your glasses and ' +
       'where the camera sits, not of blinking, so it is worth measuring - a wide-open ' +
@@ -7031,7 +7038,8 @@
     face: 1, brow: 1, headGain: 1, bodyGain: 1, leanGain: 1, spineLean: 1, armGain: 1,
     smooth: 7, frame: 1, nextTrack: 1,
     mpOptions: 2, shadows: 1, shadowSize: 4, overlay: 3, overlayOpen: 1, gaze: 1,
-    pose: 1, hands: 1, arm: 1, guide: 1, bg: 1, bgDrop: 1
+    pose: 1, hands: 1, arm: 1, guide: 1, bg: 1, bgDrop: 1,
+    bgDefault: 1, bgFix: 1, modelFix: 1
   };
 
   function verify() {
@@ -8335,8 +8343,8 @@
     addRule(pf);
     addRange(pf, 'trackFps', T('Tracking rate'), 0, 60, 1, fpsLabel, STG);
     addRange(pf, 'renderFps', T('Render rate'), 0, 60, 1, fpsLabel, STG);
-    addRule(pf);
-    addToggle(pf, 'poseLite', T('Lite pose model'), STG);
+    // no lite-pose toggle: the retarget lives on landmark accuracy, so the
+    // lite model stays a low-power-preset decision, not a slider beside it
 
     // The settings that make this run on a Raspberry Pi are five controls in
     // two different tabs, two of which need a reload, and knowing which five is
@@ -8536,6 +8544,47 @@
     }
     // an index that does not land anywhere is not one worth guessing at
     return out;
+  }
+
+  // ------------------------------------------------- shipped default model
+  //
+  // The fork ships one avatar and one background, both same-origin: the VRM
+  // under vrm/, and chroma green. The app hydrates its model and background
+  // stores out of forage, and a profile saved by an older build can still
+  // hold a URL on yeemachine's host - a model or image this project no longer
+  // ships and should not reach for. The bundle calls these at the two hydrate
+  // sites: `bgDefault` is the fresh-profile background, and the two Fix
+  // revivers rewrite an off-origin http(s) selection in place before the
+  // store is set - which also persists the fix, so it happens once per
+  // browser. data: and blob: URLs are uploads and always pass.
+  function offOrigin(url) {
+    if (typeof url !== 'string' || !/^https?:/i.test(url)) return false;
+    try { return new URL(url, location.href).origin !== location.origin; }
+    catch (e) { return false; }
+  }
+
+  function bgDefault() {
+    return { type: 'color', name: 'Chroma green', url: '#00fc01', pano: false };
+  }
+
+  function bgFix(a) {
+    if (!a || typeof a !== 'object' || a.type !== 'img' || !offOrigin(a.url)) return;
+    a.type = 'color';
+    a.url = '#00fc01';
+    a.pano = false;
+    delete a.data;
+    delete a.name;
+    delete a.sea;
+    delete a.light;
+    delete a.thumbnail;
+  }
+
+  function modelFix(a) {
+    if (!a || typeof a !== 'object' || a.type !== 'url' || !offOrigin(a.url)) return;
+    a.url = 'vrm/Jeferson.vrm';
+    a.name = 'Jeferson';
+    delete a.icon;
+    delete a.date;
   }
 
   // The stored list is the source of truth. Reading the app's store instead
@@ -9134,6 +9183,9 @@
     mic: micInfo,
     bg: bg,
     bgDrop: bgDrop,
+    bgDefault: bgDefault,
+    bgFix: bgFix,
+    modelFix: modelFix,
     guide: guide,
 
     frame: frame,

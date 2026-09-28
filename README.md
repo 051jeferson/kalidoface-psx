@@ -131,6 +131,7 @@ touches the app's own source tree (this repo only ships the built bundle).
 | `PSX.shadows()` / `PSX.shadowSize()` | Shadow map enable and resolution |
 | `PSX.overlay(inst, opts)` | Queued subnav background animation |
 | `PSX.overlayOpen(inst)` | The state that animation is heading to |
+| `PSX.bgDefault()` / `PSX.bgFix(entry)` / `PSX.modelFix(entry)` | The shipped background (chroma green), and revivers that rewrite an off-origin stored background / model to the shipped default |
 
 ### The PS1 look
 
@@ -882,9 +883,9 @@ number than have one picked:
 
 | Knob | What it costs upstream |
 | --- | --- |
-| **Tracking rate** | One Holistic/FaceMesh inference per animation frame. This is where nearly all the CPU goes; 24–30fps is plenty for face tracking. **Defaults to 24** |
-| **Render rate** | One full render per animation frame, up to the display's refresh. Capping to 20–30 roughly halves GPU time on a 60Hz screen. **Defaults to 30**, because the era's own cadence was 20–30 — here the cap is the look, not a concession |
-| **Lite pose model** | Holistic `modelComplexity` 1. Dropping to 0 trades pose accuracy for a much cheaper network. **Off by default** — see below |
+| **Tracking rate** | One Holistic/FaceMesh inference per animation frame. This is where nearly all the CPU goes; 20–30fps is plenty for face tracking. **Defaults to 20** |
+| **Render rate** | One full render per animation frame, up to the display's refresh. Capping to 20–30 roughly halves GPU time on a 60Hz screen. **Defaults to 20** — the low end of the era's own cadence; the cap is the look, not a concession |
+| **Lite pose model** | Holistic `modelComplexity` 1. Dropping to 0 trades pose accuracy for a much cheaper network. **Not on the panel** — the arm retarget lives on landmark accuracy, so only the low-power preset reaches for it. See below |
 
 Three of upstream's costs are not options here, because this fork targets PSX-era
 models and nothing else:
@@ -898,16 +899,28 @@ models and nothing else:
 | **Affine mapping** | Always on where a material has a uv varying to rescale. Turning it off would not be a preference, it would be a different console |
 | **Upstream's replaced controls** | Pixelate, Outline, Water Animation, Light Cube Experiment, Light Colour, Light Position, Smile Detection, Enable Wink, Selfie / First Person Mode and **Call a friend** are hidden and pinned unconditionally — see below. An option to restore a control that costs performance or fights a PSX one would only be an option to make it worse |
 
-Stack these with **Render scale** in the Effects tab: at `0.5x` the renderer
-draws a quarter of the pixels, which is the single biggest GPU win and the
-reason PSX mode looks right in the first place.
+Stack these with **Render scale** in the Effects tab: it now ships at `0.25x`,
+which is a sixteenth of the pixels and the reason PSX mode looks right in the
+first place — raise it only if a capture needs the extra resolution.
 
 The Mediapipe options are read once at startup, so those apply on reload; the
 rate caps and the auto throttle take effect immediately.
 
-**Low power preset** sets all of it in one click — `0.5x` render scale, 30fps
-render, 20fps tracking and the lite pose model. Those are five controls across
-two tabs, two of which need a reload, and nothing in the panel said which five.
+**Low power preset** sets all of it in one click — it returns the render scale
+and both rates to the shipped defaults (`0.25x`, 20fps, 20fps) and switches on
+the lite pose model and auto throttle. Those are five controls across two tabs,
+two of which need a reload, and nothing in the panel said which five.
+
+**One avatar, one background.** The fork ships exactly one character —
+`docs/vrm/Jeferson.vrm`, same-origin like everything else — and one default
+background: chroma green, for keying the capture in OBS. Upstream's nine
+sample characters and its image/panorama backgrounds are gone, so nothing
+reaches for `yeemachine.github.io` any more. A profile saved by an older
+build can still hold one of those URLs in storage; at startup both stores are
+revived through `PSX.bgFix` / `PSX.modelFix`, which rewrite an off-origin
+selection to the shipped default in place — and persist the fix, so it happens
+once per browser. Uploads (`data:` / `blob:` URLs) and saved colours always
+pass through untouched.
 
 **Nothing loads from a CDN.** Mediapipe's wasm, packed assets and pose models
 came from jsdelivr on every cold load, and the three fonts and the icons from
@@ -992,7 +1005,7 @@ and scoped class names, so they look native. Controls are split by what they do:
 - **Eyes** — Eyes shut at, live eye readout, Calibrate blink
 - **Emotion Detection** — Signal gain, Brow offset, Angry at, Sorrow at, Smile at, Emotion hold, live readout, Calibrate expressions, Vowel hold, Calibrate vowels
 - **Motion Calibration** — Calibration cues, Head / neck gain, Torso lean gain, Calibrate motion, and a **Fine tuning** disclosure holding Steadiness, Responsiveness, Reach, Reach up, Right arm, Left arm, Shoulder follow, Forearm twist, Face anchor, Prediction, Dropout hold and Head-tilt isolation
-- **Performance** — Auto throttle, Run while hidden, Tracking rate, Render rate, Lite pose model, Low power preset
+- **Performance** — Auto throttle, Run while hidden, Tracking rate, Render rate, Low power preset (the lite pose model is preset-only, no toggle)
 - **PSX Hands** — Driven fingers (`all fingers` / `thumb only` / `none`)
 - **Profile** — Export settings, Import settings, Reset PSX settings
 

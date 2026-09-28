@@ -2,7 +2,9 @@
 
 Fork of [yeemachine/kalidoface-3d](https://github.com/yeemachine/kalidoface-3d) retuned for PSX / low-poly VRM models. Product behaviour lives in `README.md`. This file is for agents working the repo.
 
-There is **no app source tree**. `src/` is gitignored leftover from upstream Vite. The running app is the built static site in `docs/`. All fork behaviour is `docs/psx.js` plus 40 patched call sites in the minified bundle (48 find/replace pairs, since two of them only rewrite a URL).
+There is **no app source tree**. `src/` is gitignored leftover from upstream Vite. The running app is the built static site in `docs/`. All fork behaviour is `docs/psx.js` plus 43 patched call sites in the minified bundle (53 find/replace pairs, five of which only rewrite a URL or an asset list).
+
+The fork ships **one avatar** (`docs/vrm/Jeferson.vrm`, vendored, same-origin) and **one default background** (chroma green, `PSX.bgDefault`). Upstream's nine sample characters and its image/panorama backgrounds are cut from the bundle. A stored selection pointing off-origin is rewritten to the shipped default at hydrate by `PSX.bgFix` / `PSX.modelFix`; uploads (`data:`/`blob:`) pass through.
 
 ## Layout
 
@@ -11,6 +13,7 @@ docs/                 # the app. serve this directory
   index.html          # PSX stub, then psx.js, then the hashed bundle
   psx.js              # the compatibility layer (edit here)
   assets/index.*.js   # minified Kalidoface bundle. do not hand-edit
+  vrm/                # the shipped avatar and its picker icon
   vendor/             # third-party assets, served from this origin
     mediapipe/        #   holistic + face_mesh: wasm, packed assets, tflite
     font/             #   the three Kalidoface faces global.css asks for
@@ -65,6 +68,8 @@ Three things point at that directory and have to move together: the `<script>` t
 The bundle calls `window.PSX.*` at patched sites (renderer, shadows, SMAA, tracking rAF, face rig, overlay, …). Shader-level PS1 look (vertex snap, affine, dither) is injected in `onBeforeCompile` and needs no call site.
 
 Settings: `localStorage` key `kf3d.psx`. New keys need `DEFAULTS`, `SPEC` (if they reach WebGL or would brick the page), the Settings/Effects widget, and both `PT` / `EN` strings.
+
+Shipped defaults are the aggressive end of the performance range on purpose: `pixelRatio` 0.25, `snapGrid` 64, `trackFps` / `renderFps` 20. The low-power preset must never set a slider **above** those defaults - it returns them to the floor and adds `poseLite` + `perfAuto`. `poseLite` has no panel toggle: the arm retarget reads landmark positions, which is exactly what the lite network is worse at, so it is a preset decision, not a slider.
 
 ### Adding a bundle hook
 
