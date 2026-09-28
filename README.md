@@ -132,6 +132,7 @@ touches the app's own source tree (this repo only ships the built bundle).
 | `PSX.overlay(inst, opts)` | Queued subnav background animation |
 | `PSX.overlayOpen(inst)` | The state that animation is heading to |
 | `PSX.bgDefault()` / `PSX.bgFix(entry)` / `PSX.modelFix(entry)` | The shipped background (chroma green), and revivers that rewrite an off-origin stored background / model to the shipped default |
+| `PSX.front(stores)` / `PSX.frontFiles(files)` | Hands over the front-layer image store at its hydrate site and on panel mount; images dropped or picked become the foreground plate |
 
 ### The PS1 look
 
@@ -152,8 +153,8 @@ to carry `w` across. Affine is skipped on untextured materials, which have no uv
 varying to rescale, and the program cache key accounts for it so three does not
 reuse whichever variant it compiled first.
 
-Dithering applies to the avatar's materials, not to backgrounds or stickers —
-those are not ours to hook.
+Dithering applies to the avatar's materials, not to backgrounds or the front
+layer — those are not ours to hook.
 
 ### Texture-atlas face expressions
 
@@ -911,11 +912,12 @@ and both rates to the shipped defaults (`0.25x`, 20fps, 20fps) and switches on
 the lite pose model and auto throttle. Those are five controls across two tabs,
 two of which need a reload, and nothing in the panel said which five.
 
-**One avatar, one background.** The fork ships exactly one character —
+**One avatar.** The fork ships exactly one character —
 `docs/vrm/Jeferson.vrm`, same-origin like everything else — and one default
 background: chroma green, for keying the capture in OBS. Upstream's nine
-sample characters and its image/panorama backgrounds are gone, so nothing
-reaches for `yeemachine.github.io` any more. A profile saved by an older
+sample characters are gone, and so are its sample image/panorama backgrounds
+and its CDN sticker tiles, so nothing reaches for `yeemachine.github.io` any
+more. Your own background images and front plates are uploads, not samples. A profile saved by an older
 build can still hold one of those URLs in storage; at startup both stores are
 revived through `PSX.bgFix` / `PSX.modelFix`, which rewrite an off-origin
 selection to the shipped default in place — and persist the fix, so it happens
@@ -1033,19 +1035,46 @@ exported before you ran one does not have it, and the one already loaded is kept
 rather than wiped. Reload if the card says so
 — render scale and Mediapipe options still apply on startup.
 
-### Background colours
+### Back: colours and images
+
+The **Back** tab (upstream's Backgrounds) keeps the two presets a capture
+actually wants — chroma green and transparent — plus the picker's saved
+colours, and now the images that sit behind the avatar.
 
 The app ships five colour presets and an iro picker, but the picker keeps
 exactly one colour under `savedIro` — so there was nowhere to keep a second one
 and no way to drop one you were done with.
 
 **Save colour** puts the picker's current colour into the app's own uploaded-
-background list, which means it shows up as a swatch in the **2D** tab next to
-your uploaded images, applies when you click it there, is deleted by the same
-button an uploaded image has, and is persisted with everything else. Under the
-picker, clicking a saved swatch loads it back in to edit — **Save colour**
-becomes **Update colour** and replaces that swatch rather than adding a
-near-identical one — and **×** deletes it.
+background list, which means it shows up as a swatch in the tab's **Images**
+row next to your uploaded images, applies when you click it there, is deleted
+by the same button an uploaded image has, and is persisted with everything
+else. Under the picker, clicking a saved swatch loads it back in to edit —
+**Save colour** becomes **Update colour** and replaces that swatch rather than
+adding a near-identical one — and **×** deletes it.
+
+**Add image** uploads a picture behind the avatar — a pre-rendered scene, or a
+chroma that is not green — through the app's own upload handler, so it persists
+with everything else and survives a reload. The shipped **Back image** preset
+(`docs/art/back.png`) is one click away; deleting an image falls back to
+chroma green. Dropping an image file on the page while the Back tab is open
+uploads it too.
+
+### Front layer
+
+The **Front** tab replaces upstream's Stickers: a PNG drawn over the avatar,
+for foreground plates pre-rendered with the character left out — foliage, a
+window frame, a desk. It covers the viewport and follows no motion; the point
+is compositing in the capture, not pinning props to the person. It is a plain
+element above the canvas, so it costs no render time.
+
+Pick the shipped **Front image** preset (`docs/art/front.png`), upload your
+own, or drop a PNG anywhere on the page. **Opacity** fades it into the scene,
+**Show front** hides it without losing the selection, and **None** clears it.
+The choice survives a reload, and so do uploaded images.
+
+For OBS the plate needs a real alpha channel: an opaque PNG — including one
+with a black background — covers the capture outright.
 
 Deleting an uploaded background also got less exciting. The list is filtered by
 `pano` before it is drawn, but the delete button reported the index it was drawn

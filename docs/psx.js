@@ -257,6 +257,16 @@
     // along in an exported profile.
     colours: [],
 
+    // --- front layer ----------------------------------------------------
+    // The image drawn over the avatar - a pre-rendered foreground the capture
+    // composites against the green. Which image is selected is a name the
+    // library answers with, not a blob URL: those are minted fresh every boot,
+    // so the id is the length and tail of the image's own data, which the
+    // app's persisted list revives unchanged.
+    frontSel: '',
+    frontOn: true,
+    frontOpacity: 1,
+
     // --- performance --------------------------------------------------
     // Shed tracking rate on its own while the machine cannot keep up, and take
     // it back when it can. Independent of the fixed caps, and on by default:
@@ -353,7 +363,8 @@
     colorLevels: { one: [8, 16, 32, 64] },
     fingers: { one: ['all', 'thumb', 'none'] },
     signal: { one: ['calibrated', 'auto', 'raw'] },
-    lang: { one: ['en', 'pt'] }
+    lang: { one: ['en', 'pt'] },
+    frontOpacity: { min: 0, max: 1 }
   };
 
   var CAL_FIELDS = ['browRest', 'browDown', 'browUp', 'smileRest', 'smileMax'];
@@ -510,6 +521,7 @@
     mirrorColours();
     syncControls();
     injectBgColours();
+    applyFront();
     askReload();
     console.log('[psx] settings reset to defaults');
   }
@@ -730,6 +742,9 @@
   // --------------------------------------------------------------- textures
 
   var NearestFilter = 1003;
+  // THREE.DoubleSide. Quoted as a literal because the bundle keeps THREE
+  // internal - there is no global to read it from.
+  var DOUBLE_SIDE = 2;
 
   var TEXTURE_SLOTS = [
     'map', 'shadeTexture', 'emissiveMap', 'emissionMap',
@@ -6826,6 +6841,17 @@
     'none': 'nenhum',
     'Presets': 'Predefinidas',
     'Saved': 'Salvas',
+    'Images': 'Imagens',
+    'Add image': 'Adicionar imagem',
+    'Delete image': 'Apagar imagem',
+    'No images yet': 'Nenhuma imagem ainda',
+    'None': 'Nenhuma',
+    'Show front': 'Mostrar frente',
+    'Opacity': 'Opacidade',
+    'Front image': 'Imagem da frente',
+    'Back image': 'Imagem de fundo',
+    'Front': 'Frente',
+    'Back': 'Fundo',
     'saved colours': 'cores salvas',
     'Save colour': 'Salvar cor',
     'Update colour': 'Atualizar cor',
@@ -6834,6 +6860,8 @@
     'Transparent': 'Transparente',
     'No colours saved yet': 'Nenhuma cor salva ainda',
     'note.bgColour': 'O seletor guarda uma cor só, e não havia como manter uma segunda nem descartar uma que você não usa mais. Clique num quadrinho para aplicar a cor e carregá-la no seletor para editar; × apaga. O app nunca gravava a lista de fundos, então as cores salvas ficam junto com o resto dos ajustes - sobrevivem ao reload, e um perfil exportado leva elas junto.',
+    'note.front': 'A camada da frente é um desenho sobre o avatar - folhagem, moldura, o que vier pré-renderizado no PNG, com o fundo em alpha. Ela cobre a tela inteira e não acompanha o movimento; o objetivo é compor na captura, não colar adesivo no personagem.',
+    'note.back': 'A imagem de fundo fica atrás do avatar, no lugar da cor. Suba um cenário pré-renderizado com o personagem fora dele, ou um chroma diferente do verde - o que fizer sentido para a captura.',
     'Export settings': 'Exportar ajustes',
     'Import settings': 'Importar ajustes',
     'Settings imported': 'Ajustes importados',
@@ -6873,8 +6901,6 @@
     'Start Face Tracking': 'Iniciar rastreio facial',
     'Stop Face Tracking': 'Parar rastreio facial',
     'Characters': 'Personagens',
-    'Stickers': 'Adesivos',
-    'Backgrounds': 'Fundos',
     'Call a friend': 'Ligar para um amigo',
     'Accessories': 'Acessórios',
     'Picture-in-Picture': 'Picture-in-Picture',
@@ -6992,6 +7018,13 @@
       + 'its background list to storage, so saved colours are kept with the rest of '
       + 'the settings instead - they survive a reload, and an exported profile '
       + 'brings them with it.',
+    'note.front': 'The front layer is a drawing over the avatar - foliage, a frame, '
+      + 'whatever arrives pre-rendered in the PNG, background in alpha. It covers '
+      + 'the whole screen and follows no motion; it exists to composite in the '
+      + 'capture, not to sticker the character.',
+    'note.back': 'A background image sits behind the avatar, where a colour would '
+      + 'be. Upload a pre-rendered scene with the character left out of it, or a '
+      + 'chroma that is not green - whatever the capture calls for.',
     'note.mouth': 'Upstream reports five vowel weights that all rise together with '
       + 'the jaw, so one of them wins whatever you say and the mouth ends up with a '
       + 'single open shape. This records what your own face reads while you say each '
@@ -7039,7 +7072,7 @@
     smooth: 7, frame: 1, nextTrack: 1,
     mpOptions: 2, shadows: 1, shadowSize: 4, overlay: 3, overlayOpen: 1, gaze: 1,
     pose: 1, hands: 1, arm: 1, guide: 1, bg: 1, bgDrop: 1,
-    bgDefault: 1, bgFix: 1, modelFix: 1
+    bgDefault: 1, bgFix: 1, modelFix: 1, front: 2, frontFiles: 1
   };
 
   function verify() {
@@ -7559,6 +7592,16 @@
     vrm.__psxUvBinds = collectUvBinds(vrm, gltf);
     if (vrm.__psxUvBinds) log('driving', vrm.__psxUvBinds.length, 'material(s) via _MainTex_ST');
     applyTextureFilter(vrm);
+    // PS1-era clothes are often a single flat sheet - a hood is a plane, not a
+    // shell - and a one-sided material culls the inner face away, so the hood
+    // reads transparent from the angles where its back is showing. Rendering
+    // both sides costs the cull alone: a few hundred triangles a frame on a
+    // low-poly model, nothing a frame budget can measure.
+    eachMaterial(vrm, function (m) {
+      if (m.side === DOUBLE_SIDE) return;
+      m.side = DOUBLE_SIDE;
+      m.needsUpdate = true;
+    });
     eachMaterial(vrm, hookMaterial);
     syncShaderUniforms();
     scheduleInject();
@@ -8507,6 +8550,11 @@
     { url: '#00000000', name: 'Transparent' }
   ];
 
+  // Same-origin art shipped with the fork, like vrm/Jeferson.vrm. Relative
+  // paths on this origin, so bgFix passes them and the service worker caches
+  // them after the first load.
+  var BACK_PRESET = 'art/back.png';
+
   function isAlphaHex(url) { return String(url).length > 7; }
 
   var bgStores = null;
@@ -8544,6 +8592,55 @@
     }
     // an index that does not land anywhere is not one worth guessing at
     return out;
+  }
+
+  // The 2D image entries of the app's own background list - uploads made
+  // through the button below plus anything an older session left there. The
+  // app's tab that used to render this half of the list was cut, so this row
+  // is the only place they are visible from. Pano uploads are 3D and have
+  // their own (also cut) tab; they are not images behind the avatar.
+  function bgImages() {
+    if (!bgStores || !bgStores.list) return [];
+    var list = readStore(bgStores.list) || [];
+    var out = [];
+    for (var i = 0; i < list.length; i++) {
+      var it = list[i];
+      if (it && it.type === 'img' && !it.pano) out.push(it);
+    }
+    return out;
+  }
+
+  // One-shot file input for the upload button. The app's own handler does the
+  // reading, the list write and the persistence; this only hands it the files.
+  function pickBgFile() {
+    if (!bgStores || typeof bgStores.upload !== 'function') return;
+    var input = document.createElement('input');
+    input.type = 'file';
+    input.accept = 'image/*';
+    input.multiple = true;
+    input.addEventListener('change', function () {
+      if (input.files && input.files.length) bgStores.upload(Array.prototype.slice.call(input.files));
+    });
+    input.click();
+  }
+
+  function bgSetImage(item) {
+    if (!bgStores || !bgStores.current) return;
+    bgStores.current.set(item);
+    injectBgColours();
+  }
+
+  function bgDropImage(item) {
+    if (!bgStores || !bgStores.list) return;
+    var list = readStore(bgStores.list) || [];
+    var out = [];
+    for (var i = 0; i < list.length; i++) {
+      if (list[i] !== item) out.push(list[i]);
+    }
+    bgStores.list.set(out);
+    var cur = readStore(bgStores.current);
+    if (cur && cur.url && cur.url === item.url) bgSetImage({ type: 'color', url: '#00fc01' });
+    injectBgColours();
   }
 
   // ------------------------------------------------- shipped default model
@@ -8720,6 +8817,36 @@
     return box;
   }
 
+  // A background image tile is the same kind of thing as a colour swatch - a
+  // 44px rounded square with the selected ring - with the image itself as the
+  // fill and, for anything uploaded, the same × to delete.
+  function bgImageTile(item, title, on, pick, del) {
+    var box = el('div', '', '');
+    box.style.cssText = 'position:relative;width:44px;height:44px;flex:0 0 auto;';
+    var b = el('button', 'psx-bg-image', '');
+    b.type = 'button';
+    b.style.cssText = 'width:44px;height:44px;padding:0;border:0;border-radius:8px;' +
+      'cursor:pointer;transition:box-shadow .2s ease;background:#222;' +
+      'background-size:cover;background-position:center;background-image:url("' + item.url + '");' +
+      'box-shadow:0 0 0 1px rgba(0,0,0,.45)' + (on ? ',0 0 0 3px var(--lightBlue)' : '');
+    b.title = title;
+    b.setAttribute('aria-label', title);
+    b.setAttribute('aria-pressed', String(on));
+    b.addEventListener('click', pick);
+    box.appendChild(b);
+    if (!del) return box;
+    var x = el('button', '', '×');
+    x.type = 'button';
+    x.style.cssText = 'position:absolute;top:-8px;right:-8px;width:24px;height:24px;' +
+      'line-height:22px;padding:0;border:0;border-radius:12px;font-size:14px;' +
+      'font-weight:600;background:var(--lightRed);color:#fff;cursor:pointer;' +
+      'box-shadow:0 1px 3px rgba(0,0,0,.4)';
+    x.setAttribute('aria-label', T('Delete image') + ' ' + title);
+    x.addEventListener('click', function (e) { e.stopPropagation(); del(); });
+    box.appendChild(x);
+    return box;
+  }
+
   function bgLabel(text) {
     var h = el('div', '', text);
     h.style.cssText = 'color:#fff;font-size:11px;font-weight:600;letter-spacing:.04em;' +
@@ -8763,6 +8890,48 @@
     }
     wrap.appendChild(row);
 
+    // --- images behind the avatar -------------------------------------
+    // The shipped preset, the uploads, and the button that makes them. The
+    // upload runs through the app's own handler, so an entry lands in the
+    // app's list with its data-URL copy and comes back from storage with a
+    // fresh blob URL - persistence is upstream's, not rebuilt here.
+    var cur = readStore(bgStores.current);
+    var curUrl = cur && cur.url;
+
+    wrap.appendChild(bgLabel(T('Images')));
+    var note2 = el('div', '', T('note.back'));
+    note2.style.cssText = 'color:#ffffffb3;font-size:12px;margin:0 0 14px;line-height:1.5';
+    wrap.appendChild(note2);
+
+    var irow = el('div', '', '');
+    irow.style.cssText = 'display:flex;flex-wrap:wrap;gap:10px;margin:0 0 16px';
+    irow.appendChild(bgImageTile({ url: BACK_PRESET }, T('Back image'),
+      curUrl === BACK_PRESET,
+      function () { bgSetImage({ type: 'img', url: BACK_PRESET, pano: false, name: 'Back' }); }));
+    var imgs = bgImages();
+    for (var im = 0; im < imgs.length; im++) {
+      (function (item) {
+        irow.appendChild(bgImageTile(item, item.name || 'image',
+          curUrl === item.url,
+          function () { bgSetImage(item); },
+          function () { bgDropImage(item); }));
+      })(imgs[im]);
+    }
+    if (!imgs.length) {
+      var noimg = el('div', '', T('No images yet'));
+      noimg.style.cssText = 'color:#ffffff80;font-size:12px;line-height:44px';
+      irow.appendChild(noimg);
+    }
+    wrap.appendChild(irow);
+
+    if (bgStores.upload) {
+      var up = el('button', 'trigger ' + STG, T('Add image'));
+      up.style.cssText = 'width:100%;margin:0 0 16px;padding:12px;border-radius:20px;' +
+        'font-size:14px;font-weight:600;box-sizing:border-box';
+      up.addEventListener('click', function () { pickBgFile(); });
+      wrap.appendChild(up);
+    }
+
     // `.trigger` is the app's own button, but its 24px padding and 32px radius
     // are sized for the full-width Settings panel and swamp a card this
     // narrow, so both come down to the scale of the tab pills beside it.
@@ -8781,7 +8950,12 @@
     var cols = savedColours();
     var s = bgEditUrl || '-';
     for (var i = 0; i < cols.length; i++) s += '|' + cols[i].url;
-    return s;
+    // images in the list and which one is showing - both live in the app's
+    // stores, so a drop-upload or a delete lands here without a hook of its own
+    var imgs = bgImages();
+    for (var j = 0; j < imgs.length; j++) s += '|' + (imgs[j].url || '');
+    var cur = bgStores ? readStore(bgStores.current) : null;
+    return s + '|cur:' + ((cur && cur.url) || '');
   }
 
   function injectBgColours() {
@@ -8805,6 +8979,313 @@
       }
       if (next) next.focus();
     }
+  }
+
+  // ------------------------------------------------------------- front layer
+  //
+  // A pre-rendered foreground drawn over the avatar: a PNG with alpha that
+  // covers the viewport, so a capture composites character-then-scene without
+  // any of it being 3D. It replaces the sticker tab - stickers were small
+  // draggable images reaching upstream's CDN, which is the opposite of a
+  // foreground plate - and it is plain DOM above the canvas, so it costs no
+  // render time at all.
+  //
+  // The image library is the app's own sticker-file store, kept for free:
+  // persisted to forage on every change, and revived on boot by code that
+  // re-mints each blob URL from its stored data-URL copy. That revival is the
+  // bundle's, not this file's - which is also why a selection is stored as an
+  // id derived from the image data rather than a URL.
+  var FRONT_PRESET = 'art/front.png';
+
+  var frontStores = null;
+  var frontSub = null;
+  var frontCard = null;
+  var frontBox = null;
+  var frontImg = null;
+
+  // Called at the bundle's hydrate site - before any panel opens - and again
+  // on panel mount. Subscribing to the store means a revival that lands later
+  // (the hydrate read is async) still brings the selected layer back, and a
+  // deleted image takes its layer with it.
+  function front(stores) {
+    frontStores = stores;
+    if (!frontSub && stores && stores.files && typeof stores.files.subscribe === 'function') {
+      frontSub = stores.files.subscribe(function () { applyFront(); });
+    }
+    applyFront();
+  }
+
+  function frontLibrary() {
+    return (frontStores && readStore(frontStores.files)) || [];
+  }
+
+  function frontId(item) {
+    var d = item && item.data;
+    if (typeof d === 'string' && d.length) return d.length + ':' + d.slice(-24);
+    var u = item && item.url;
+    return typeof u === 'string' ? 'url:' + u : '';
+  }
+
+  function applyFront() {
+    // The regression harness runs this file against a document stub with no
+    // element factory. The layer is DOM-only and has nothing to restore there.
+    if (typeof document.createElement !== 'function') return;
+    if (!frontBox) {
+      frontBox = el('div', '', '');
+      frontBox.id = 'psx-front-layer';
+      // Above the canvas (z-index 1), under the menus (3 and up). The layer
+      // takes no pointer events, so panels stay clickable even when the
+      // image visibly covers them.
+      frontBox.style.cssText = 'position:fixed;left:0;top:0;width:100vw;height:100vh;' +
+        'z-index:2;pointer-events:none;overflow:hidden;margin:0;padding:0';
+      frontImg = document.createElement('img');
+      frontImg.alt = '';
+      frontImg.draggable = false;
+      frontImg.style.cssText = 'display:block;width:100%;height:100%;object-fit:cover;' +
+        'margin:0;padding:0;border:0';
+      frontBox.appendChild(frontImg);
+      (document.body || document.documentElement).appendChild(frontBox);
+    }
+    var want = cfg.frontOn ? cfg.frontSel : '';
+    if (!want) { frontBox.style.display = 'none'; return; }
+    var src = want === 'preset' ? FRONT_PRESET : '';
+    if (!src) {
+      var lib = frontLibrary();
+      for (var i = 0; i < lib.length; i++) {
+        if (frontId(lib[i]) === want) { src = lib[i].url; break; }
+      }
+    }
+    if (!src) { frontBox.style.display = 'none'; return; }
+    frontBox.style.display = '';
+    if (frontImg.getAttribute('src') !== src) frontImg.setAttribute('src', src);
+    frontImg.style.opacity = cfg.frontOpacity;
+  }
+
+  // Called from the patched bundle where stickers used to be created - which
+  // was both the picker's own input and a drop anywhere in the window. So
+  // dropping a PNG on the page dresses the front layer, the same gesture the
+  // app already had, pointed at the thing this fork wants it for.
+  function frontFiles(files) {
+    if (!frontStores || !files || !files.length) return;
+    var list = frontLibrary();
+    var added = null;
+    var queue = Array.prototype.slice.call(files);
+    var one = function () {
+      if (!queue.length) {
+        if (!added) return;
+        frontStores.files.set(list);
+        cfg.frontSel = frontId(added);
+        save();
+        applyFront();
+        injectFrontCard();
+        return;
+      }
+      var f = queue.shift();
+      if (!f || String(f.type || '').indexOf('image/') !== 0) {
+        console.warn('[psx] front layer needs an image, got', f && f.type);
+        return one();
+      }
+      var rd = new FileReader();
+      rd.onload = function () {
+        var item = { url: URL.createObjectURL(f), data: String(rd.result || ''),
+          type: 'img', default: 1, name: f.name };
+        list.unshift(item);
+        added = item;
+        one();
+      };
+      rd.onerror = function () { console.warn('[psx] could not read', f && f.name); one(); };
+      rd.readAsDataURL(f);
+    };
+    one();
+  }
+
+  function frontHost() {
+    return document.querySelector('.sticker-list');
+  }
+
+  // The old picker's nodes stay mounted - svelte holds their anchors, and
+  // removing them under a keyed each is how components throw - but they are
+  // covered up on every pass. With the CDN tile list cut this is usually the
+  // empty grid and the one dead upload row, and none of it can be reached.
+  function frontSignature() {
+    var lib = frontLibrary();
+    var s = (cfg.frontSel || '-') + '|' + frontCardHostStamp();
+    for (var i = 0; i < lib.length; i++) s += '|' + frontId(lib[i]);
+    return s;
+  }
+
+  function frontCardHostStamp() {
+    var host = frontHost();
+    return host ? String(host.childNodes.length) : 'none';
+  }
+
+  function frontTile(src, title, on, pick, del) {
+    var box = el('div', '', '');
+    box.style.cssText = 'position:relative;width:44px;height:44px;flex:0 0 auto;';
+    var b = el('button', 'psx-front-pick', '');
+    b.type = 'button';
+    b.style.cssText = 'width:44px;height:44px;padding:0;border:0;border-radius:8px;' +
+      'cursor:pointer;transition:box-shadow .2s ease;background:#222;' +
+      'background-size:cover;background-position:center;' +
+      (src ? 'background-image:url("' + src + '");' : '') +
+      'box-shadow:0 0 0 1px rgba(0,0,0,.45)' + (on ? ',0 0 0 3px var(--lightBlue)' : '');
+    b.title = title;
+    b.setAttribute('aria-label', title);
+    b.setAttribute('aria-pressed', String(on));
+    b.addEventListener('click', pick);
+    box.appendChild(b);
+    if (!del) return box;
+    var x = el('button', '', '×');
+    x.type = 'button';
+    x.style.cssText = 'position:absolute;top:-8px;right:-8px;width:24px;height:24px;' +
+      'line-height:22px;padding:0;border:0;border-radius:12px;font-size:14px;' +
+      'font-weight:600;background:var(--lightRed);color:#fff;cursor:pointer;' +
+      'box-shadow:0 1px 3px rgba(0,0,0,.4)';
+    x.setAttribute('aria-label', T('Delete image') + ' ' + title);
+    x.addEventListener('click', function (e) { e.stopPropagation(); del(); });
+    box.appendChild(x);
+    return box;
+  }
+
+  function frontPick(sel) {
+    cfg.frontSel = sel;
+    save();
+    applyFront();
+    injectFrontCard();
+  }
+
+  function frontDropItem(item) {
+    var lib = frontLibrary();
+    var out = [];
+    for (var i = 0; i < lib.length; i++) {
+      if (lib[i] !== item) out.push(lib[i]);
+    }
+    frontStores.files.set(out);
+    if (cfg.frontSel && cfg.frontSel === frontId(item)) {
+      cfg.frontSel = '';
+      save();
+      applyFront();
+    }
+    injectFrontCard();
+  }
+
+  function pickFrontFile() {
+    var input = document.createElement('input');
+    input.type = 'file';
+    input.accept = 'image/*';
+    input.multiple = true;
+    input.addEventListener('change', function () {
+      if (input.files && input.files.length) frontFiles(input.files);
+    });
+    input.click();
+  }
+
+  function buildFrontCard() {
+    var wrap = el('div', 'psx-injected', '');
+    wrap.style.cssText = 'width:100%;text-align:left;color:#fff;' +
+      'background:#ffffff10;border-radius:12px;padding:16px;box-sizing:border-box';
+
+    var note = el('div', '', T('note.front'));
+    note.style.cssText = 'color:#ffffffb3;font-size:12px;margin:0 0 14px;line-height:1.5';
+    wrap.appendChild(note);
+
+    wrap.appendChild(bgLabel(T('Presets')));
+    var fixed = el('div', '', '');
+    fixed.style.cssText = 'display:flex;flex-wrap:wrap;gap:10px;margin:0 0 16px';
+    fixed.appendChild(frontTile(FRONT_PRESET, T('Front image'),
+      cfg.frontSel === 'preset', function () { frontPick('preset'); }));
+    // the off switch lives on the tiles rather than as a state to explain:
+    // nothing selected is the same as the layer hidden
+    var none = frontTile('', T('None'), !cfg.frontSel, function () { frontPick(''); });
+    none.firstChild.style.cssText += CHECKER;
+    fixed.appendChild(none);
+    wrap.appendChild(fixed);
+
+    var lib = frontLibrary();
+    if (lib.length) {
+      wrap.appendChild(bgLabel(T('Saved')));
+      var row = el('div', '', '');
+      row.style.cssText = 'display:flex;flex-wrap:wrap;gap:10px;margin:0 0 16px';
+      for (var i = 0; i < lib.length; i++) {
+        (function (item) {
+          row.appendChild(frontTile(item.url, item.name || 'image',
+            cfg.frontSel === frontId(item),
+            function () { frontPick(frontId(item)); },
+            function () { frontDropItem(item); }));
+        })(lib[i]);
+      }
+      wrap.appendChild(row);
+    }
+
+    var up = el('button', 'trigger ' + STG, T('Add image'));
+    up.style.cssText = 'width:100%;margin:0 0 16px;padding:12px;border-radius:20px;' +
+      'font-size:14px;font-weight:600;box-sizing:border-box';
+    up.addEventListener('click', pickFrontFile);
+    wrap.appendChild(up);
+
+    var opts = el('div', '', '');
+    opts.style.cssText = 'display:flex;align-items:center;gap:12px;flex-wrap:wrap';
+    var show = el('label', '', '');
+    show.style.cssText = 'display:flex;align-items:center;gap:6px;color:#fff;font-size:13px;cursor:pointer';
+    var box = document.createElement('input');
+    box.type = 'checkbox';
+    box.checked = !!cfg.frontOn;
+    box.addEventListener('change', function () {
+      cfg.frontOn = box.checked;
+      save();
+      applyFront();
+    });
+    show.appendChild(box);
+    show.appendChild(document.createTextNode(T('Show front')));
+    opts.appendChild(show);
+
+    var op = el('label', '', '');
+    op.style.cssText = 'display:flex;align-items:center;gap:6px;color:#fff;font-size:13px;flex:1 1 140px';
+    op.appendChild(document.createTextNode(T('Opacity')));
+    var range = document.createElement('input');
+    range.type = 'range';
+    range.min = '0';
+    range.max = '1';
+    range.step = '0.05';
+    range.value = String(cfg.frontOpacity);
+    range.style.cssText = 'flex:1';
+    // the slider writes the layer live and the setting on release: a save per
+    // input tick is a storage write under a dragging cursor
+    range.addEventListener('input', function () {
+      cfg.frontOpacity = parseFloat(range.value);
+      applyFront();
+    });
+    range.addEventListener('change', function () {
+      cfg.frontOpacity = parseFloat(range.value);
+      save();
+    });
+    op.appendChild(range);
+    opts.appendChild(op);
+    wrap.appendChild(opts);
+    return wrap;
+  }
+
+  function injectFrontCard() {
+    var host = frontHost();
+    if (!host) { frontCard = null; return; }
+    // The panel this card sits in was the sticker picker; anything the app
+    // still renders into it gets covered here, on every pass, because a
+    // svelte update can put a node back.
+    var kids = host.children;
+    for (var i = 0; i < kids.length; i++) {
+      var k = kids[i];
+      if (k.nodeType === 1 && !k.__psxHidden && !isOurs(k)) {
+        k.style.display = 'none';
+        k.__psxHidden = true;
+      }
+    }
+    var sig = frontSignature();
+    if (frontCard && frontCard.parentNode === host && frontCard.__psxSig === sig) return;
+    if (frontCard && frontCard.parentNode) frontCard.parentNode.removeChild(frontCard);
+    frontCard = buildFrontCard();
+    frontCard.__psxSig = sig;
+    host.appendChild(frontCard);
+    applyFront();
   }
 
   function injectInto(c, build, keyed) {
@@ -8837,6 +9318,7 @@
     calBtn = calMotionBtn = calMouthBtn = calBlinkBtn = null;
     calCancelBtn = calMotionCancelBtn = calMouthCancelBtn = calBlinkCancelBtn = null;
     bgCard = null;
+    frontCard = null;
     lastInject = 0;
     translateTree(document.body || document.documentElement);
     tryInject();
@@ -8848,6 +9330,7 @@
     injectInto(effectsContainer(), buildEffects, false);
     injectInto(settingsContainer(), buildSettings, true);
     injectBgColours();
+    injectFrontCard();
   }
 
   function isOurs(n) {
@@ -9186,6 +9669,8 @@
     bgDefault: bgDefault,
     bgFix: bgFix,
     modelFix: modelFix,
+    front: front,
+    frontFiles: frontFiles,
     guide: guide,
 
     frame: frame,
@@ -9198,4 +9683,8 @@
     overlay: overlay,
     overlayOpen: overlayOpen
   };
+
+  // The front layer is capture framing, not a panel setting: restore it before
+  // anything is opened, or a reload mid-setup drops the foreground silently.
+  applyFront();
 })();

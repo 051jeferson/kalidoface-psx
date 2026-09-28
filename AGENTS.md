@@ -2,9 +2,9 @@
 
 Fork of [yeemachine/kalidoface-3d](https://github.com/yeemachine/kalidoface-3d) retuned for PSX / low-poly VRM models. Product behaviour lives in `README.md`. This file is for agents working the repo.
 
-There is **no app source tree**. `src/` is gitignored leftover from upstream Vite. The running app is the built static site in `docs/`. All fork behaviour is `docs/psx.js` plus 43 patched call sites in the minified bundle (53 find/replace pairs, five of which only rewrite a URL or an asset list).
+There is **no app source tree**. `src/` is gitignored leftover from upstream Vite. The running app is the built static site in `docs/`. All fork behaviour is `docs/psx.js` plus 45 patched call sites in the minified bundle (59 find/replace pairs, five of which only rewrite a URL or an asset list).
 
-The fork ships **one avatar** (`docs/vrm/Jeferson.vrm`, vendored, same-origin) and **one default background** (chroma green, `PSX.bgDefault`). Upstream's nine sample characters and its image/panorama backgrounds are cut from the bundle. A stored selection pointing off-origin is rewritten to the shipped default at hydrate by `PSX.bgFix` / `PSX.modelFix`; uploads (`data:`/`blob:`) pass through.
+The fork ships **one avatar** (`docs/vrm/Jeferson.vrm`, vendored, same-origin), **one default background** (chroma green, `PSX.bgDefault`) and **two art presets** (`docs/art/front.png` over the avatar, `docs/art/back.png` behind it). Upstream's nine sample characters and its image/panorama backgrounds are cut from the bundle. A stored selection pointing off-origin is rewritten to the shipped default at hydrate by `PSX.bgFix` / `PSX.modelFix`; uploads (`data:`/`blob:`) pass through.
 
 ## Layout
 
@@ -14,6 +14,7 @@ docs/                 # the app. serve this directory
   psx.js              # the compatibility layer (edit here)
   assets/index.*.js   # minified Kalidoface bundle. do not hand-edit
   vrm/                # the shipped avatar and its picker icon
+  art/                # the two shipped art presets (front/back plates)
   vendor/             # third-party assets, served from this origin
     mediapipe/        #   holistic + face_mesh: wasm, packed assets, tflite
     font/             #   the three Kalidoface faces global.css asks for
@@ -173,6 +174,9 @@ Never edit `docs/assets/index.*.js` by hand. After a Glitch/Vite rebuild that ch
 - Saved background colours are entries in the app's own uploaded-background list (`PSX.bg` captures its store when the Backgrounds panel mounts). A `{type:'color', url:'#rrggbb', pano:false, uploaded:<ms>}` entry gets the app's swatch, its delete button and its persistence for free - do not build a parallel PSX list. `pano:false` is what files it under the 2D tab.
 - The app's own delete button reports the index the item was **rendered** at, which is an index into the list after it has been filtered by `pano`. `PSX.bgDrop` re-walks that filter; deleting by the raw index removes the wrong background as soon as a 3D upload sits ahead of a 2D one.
 - The iro picker reads `savedIro` once, when it is constructed, and it is constructed when the Color tab mounts. To move it, drive its own hex field (`#picker .hex input`) with an `input` event - setting the store does nothing.
+- The **Stickers tab is the Front tab**. `PSX.frontFiles` dead-codes the sticker file handler, so both the old picker input and a drop anywhere on the page dress the front layer - a DOM overlay (`#psx-front-layer`, z-index 2, `pointer-events:none`) above the canvas and under the menus. `PSX.front({files})` fires twice: at the stickerList hydrate site (before any panel opens) and on panel mount; the hydrate one exists so a reloaded selection restores without the tab ever being opened. A selection is stored as `cfg.frontSel`, an id derived from the image data - blob URLs are reminted on every boot and name nothing. The library is the app's own sticker-file store, which forage persists and its reviver re-URLs; that revival is the bundle's, not ours. The old CDN tile array is cut in the bundle (`Si=[]`) and the picker's own nodes are covered per pass, never removed - svelte holds their anchors, and removing nodes under a keyed each throws.
+- **Back images** ride the app's own background list. The Backgrounds panel hook now also passes `upload` (upstream's own `Hs`), so **Add image** gets reading, list write and persistence for free; the card's Images row renders `type:'img'` entries from that same list, and the shipped preset is `art/back.png` set as `{type:'img',url,pano:false}`. Do not rebuild upload persistence in psx.js - the reviver that re-mints blob URLs from data URLs is upstream's.
+- Every material on the shipped model is **DoubleSide** (registered once in `registerModel`). PSX clothes are often a single flat sheet - a hood is a plane - and a one-sided material culls the inner face away, which read as transparency. It costs the cull alone on a low-poly mesh; do not make it a toggle.
 
 ## Do not
 

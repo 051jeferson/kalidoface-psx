@@ -143,7 +143,7 @@
     },
     {
       "find": "class oo extends pe{constructor(e){super();_e(this,e,ro,ao,me,{})}}",
-      "replace": "class oo extends pe{constructor(e){super();_e(this,e,ro,ao,me,{}),window.PSX.bg({list:al,current:Ft,saved:ei,tab:Tl})}}"
+      "replace": "class oo extends pe{constructor(e){super();_e(this,e,ro,ao,me,{}),window.PSX.bg({list:al,current:Ft,saved:ei,tab:Tl,upload:Hs})}}"
     },
     {
       "find": "const f=v=>{let g=i;g.splice(v,1),v>-1&&Ce(al,i=g,i)}",
@@ -212,6 +212,30 @@
     {
       "find": "Mn=[]];$e(al,\"bgList\"",
       "replace": "Mn=[];$e(al,\"bgList\""
+    },
+    {
+      "find": "const Ds=l=>{for(var e=0;e<l.length;e++){let t=_s(l[e]);",
+      "replace": "const Ds=l=>{window.PSX.frontFiles(l);return;for(var e=0;e<l.length;e++){let t=_s(l[e]);"
+    },
+    {
+      "find": "sticker:{en:\"Stickers\"",
+      "replace": "sticker:{en:\"Front\""
+    },
+    {
+      "find": "bg:{en:\"Backgrounds\"",
+      "replace": "bg:{en:\"Back\""
+    },
+    {
+      "find": "Si=[{url:ge+\"img/sticker/accessories/sunglass_normal.png\"",
+      "replace": "Si=[];const SiCut=[{url:ge+\"img/sticker/accessories/sunglass_normal.png\""
+    },
+    {
+      "find": "class ho extends pe{constructor(e){super();_e(this,e,mo,fo,me,{})}}",
+      "replace": "class ho extends pe{constructor(e){super();_e(this,e,mo,fo,me,{}),window.PSX.front({files:hl,list:ul})}}"
+    },
+    {
+      "find": "$e(hl,\"stickerList\",[],Zn);et(hl,\"stickerList\")",
+      "replace": "$e(hl,\"stickerList\",[],Zn);et(hl,\"stickerList\");window.PSX.front({files:hl})"
     }
   ],
   "vendorPatches": [

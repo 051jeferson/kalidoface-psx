@@ -58,7 +58,7 @@
     <link rel="apple-touch-icon" href="./vendor/icon/apple-icon-180.png" />
 
     <!--
-      The bundle calls window.PSX.* at 43 patched call sites, unguarded and on
+      The bundle calls window.PSX.* at 45 patched call sites, unguarded and on
       the hot path - the render loop, the bone rig, the tracking loop. If psx.js
       fails to load or throws while parsing, every one of those becomes a
       TypeError per frame and the app is simply dead.
@@ -97,6 +97,11 @@
         bgDefault: function () { return { type: 'color', name: 'Chroma Green', url: '#00fc01', pano: false }; },
         bgFix: function () {},
         modelFix: function () {},
+        // stock behaviour: the old sticker path. psx.js replaces both with the
+        // front layer; without it a dropped image does nothing, which is the
+        // honest degradation.
+        front: function () {},
+        frontFiles: function () {},
         // false = leave the arms to the stock Euler rig
         arm: function () { return false; },
         guide: function () { return true; },
