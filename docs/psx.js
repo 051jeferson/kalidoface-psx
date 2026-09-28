@@ -9929,7 +9929,7 @@
     // the face. Kalicon stays on its own glyphs - an <i class="kalicon"> spells
     // its icon name in W95FA otherwise, which reads as a word.
     'body{font-family:"W95FA","Pixelated MS Sans Serif","MS Sans Serif",sans-serif !important;' +
-    'font-size:14px}',
+    'font-size:14px;-webkit-font-smoothing:none}',
     'button,input,select,textarea,h1,h2,h3,h4,p,label,summary,strong,b,em,div,span,option{' +
     'font-family:inherit}',
     'i.kalicon{font-family:"Kalicon","Kalicon Variable" !important}',
@@ -10028,26 +10028,33 @@
     // scrollbars on the same window, one of them a horizontal track with
     // nothing in it. Exactly one scroller per window - the panel root - and
     // no transition: a W95 window opens instantly, it does not fade in
-    '.subnav .content{position:relative !important;height:calc(100% - 65px) !important;' +
+    '.subnav .content{position:relative !important;height:calc(100% - 61px) !important;' +
     'overflow:hidden !important;transition:none !important}',
     '.subnav .content > container{overflow-y:auto !important;overflow-x:hidden !important}',
+    // the panel roots run a Svelte JS fade on mount: it writes inline opacity
+    // per frame, so no transition rule can stop it. Only !important beats an
+    // inline style - the window opens instantly, like a W95 one
+    '.subnav .content > container{opacity:1 !important}',
     '.subnav .content ::-webkit-scrollbar:horizontal,' +
     '.subnav .content::-webkit-scrollbar:horizontal{display:none !important}',
     // the drawer grip and the controls button are desktop-duplicated jobs:
     // the title bar drags, H hides the HUD
-    '.secondaryMenu button:nth-of-type(3){display:none !important}' +
+    '.secondaryMenu button:nth-of-type(3){display:none !important}',
+    // a real W95 caption button is 16x14; the global 22x16 stays for fingers
+    'container.subnav .subnav-close{width:16px !important;height:14px !important}' +
     '}',
     // the last of the tutorial-card system the info toggle used to open: a
     // dismissible hint bubble that pops over the scene - capture noise here,
     // on either pointer. Mounted in its own body-level container.
     'container.svelte-1kc6ls6{display:none !important}',
-    // title bar, filled in from JS so it can name the panel that is open
     // title bar, filled in from JS so it can name the panel that is open.
-    // W95 chrome: 18px bar, 16px app icon left of the caption
-    '#psx-w95-title{height:18px;margin:0 0 3px;background:var(--w95-navy);color:#fff;' +
-    'font-family:"W95FA",sans-serif;font-size:12px;font-weight:700;padding:2px 26px 2px 3px;' +
+    // W95 chrome: 18px bar, 11px bold caption, 16px app icon, and the bar
+    // bleeds into the window padding to sit flush on the 2px frame - a W95
+    // caption touches the frame, no grey gap between them
+    '#psx-w95-title{height:18px;margin:-1px -1px 0;background:var(--w95-navy);color:#fff;' +
+    'font-family:"W95FA",sans-serif;font-size:11px;font-weight:700;padding:2px 21px 2px 3px;' +
     'box-sizing:border-box;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;' +
-    'user-select:none;flex:0 0 auto;cursor:move;display:flex;align-items:center;gap:4px}',
+    'user-select:none;flex:0 0 auto;cursor:move;display:flex;align-items:center;gap:3px}',
     '#psx-w95-title:before{content:"";flex:0 0 16px;width:16px;height:16px;' +
     'background:center/contain no-repeat url(vendor/icon/apple-icon-180.png);' +
     'image-rendering:pixelated}',
@@ -10069,7 +10076,8 @@
     '.subnav h4,.subnav p,.subnav label,.subnav summary{color:#000 !important}',
     '.subnav h4{font-size:13px !important;font-weight:700 !important}',
     '.subnav p{font-size:12px !important;line-height:1.45 !important}',
-    '.subnav .info{opacity:.65 !important}',
+    // W95 disabled text is flat #808080, not faded ink
+    '.subnav .info{opacity:1 !important;color:var(--w95-shadow) !important}',
 
     // settings/effects cards become etched group boxes
     '.subnav .setting{background:transparent !important;border:1px solid var(--w95-shadow);' +
@@ -10143,9 +10151,10 @@
     'left:3px !important;bottom:3px !important;width:calc(var(--container-w-d,360px) - 8px) !important;' +
     'padding:3px 6px !important;justify-content:flex-start !important}',
     '.subnav .tabs p{background:var(--w95-face) !important;color:#000 !important;' +
-    'box-shadow:var(--w95-out);border-radius:0 !important;padding:3px 12px !important;' +
+    'box-shadow:var(--w95-in);border-radius:0 !important;padding:3px 12px !important;' +
     'font-size:12px !important;font-weight:400 !important;cursor:pointer;margin:0}',
-    '.subnav .tabs p.selected{font-weight:700 !important;box-shadow:var(--w95-in)}',
+    // W95 tabs: the selected one pops forward, the rest sit sunken in the row
+    '.subnav .tabs p.selected{font-weight:700 !important;box-shadow:var(--w95-out)}',
 
     // the character panel: the model tile goes square with the same navy pick
     // ring as everything else; its selection plate is a :before circle
@@ -10183,18 +10192,22 @@
 
     // win95 scrollbars wherever a panel overflows. The panel roots scroll,
     // and the app's own chrome hides their scrollbars entirely; the display
-    // and sizing are forced back here for the same order reason as the sliders
+    // and sizing are forced back here for the same order reason as the sliders.
+    // Track is the 50% white/face dither W95 used (a 2px checker reads as the
+    // sparkle), thumb and buttons are bevelled face, arrows drawn as SVG.
     '.subnav ::-webkit-scrollbar{display:block !important;width:16px !important;height:16px !important}',
-    '.subnav ::-webkit-scrollbar-track{background:#dfdfdf !important;box-shadow:var(--w95-in) !important}',
+    '.subnav ::-webkit-scrollbar-track{background:repeating-conic-gradient(#fff 0% 25%,#c0c0c0 0% 50%) 50% / 2px 2px !important;box-shadow:none !important}',
     '.subnav ::-webkit-scrollbar-thumb{background:var(--w95-face) !important;box-shadow:var(--w95-out) !important}',
+    '.subnav ::-webkit-scrollbar-corner{background:var(--w95-face) !important}',
     '.subnav ::-webkit-scrollbar-button,.psx-zoom-card ::-webkit-scrollbar-button{' +
-    'display:block;width:16px;height:16px;background:var(--w95-face) var(--w95-out)}',
+    'display:block;width:16px;height:16px;background-color:var(--w95-face);' +
+    'background-position:center;background-repeat:no-repeat;box-shadow:var(--w95-out)}',
     '.subnav ::-webkit-scrollbar-button:single-button:vertical:decrement,' +
     '.psx-zoom-card ::-webkit-scrollbar-button:single-button:vertical:decrement{' +
-    'background:url("data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 width=%2716%27 height=%2716%27%3E%3Cpath d=%27M4 10l4-5 4 5z%27 fill=%27%23000%27/%3E%3C/svg%3E") center no-repeat}',
+    'background-image:url("data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 width=%277%27 height=%274%27%3E%3Cpath d=%27M3.5 0L7 4H0z%27 fill=%27%23000%27/%3E%3C/svg%3E")}',
     '.subnav ::-webkit-scrollbar-button:single-button:vertical:increment,' +
     '.psx-zoom-card ::-webkit-scrollbar-button:single-button:vertical:increment{' +
-    'background:url("data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 width=%2716%27 height=%2716%27%3E%3Cpath d=%27M4 6l4 5 4-5z%27 fill=%27%23000%27/%3E%3C/svg%3E") center no-repeat}',
+    'background-image:url("data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 width=%277%27 height=%274%27%3E%3Cpath d=%27M3.5 4L0 0h7z%27 fill=%27%23000%27/%3E%3C/svg%3E")}',
 
     // the boot title keeps its jelly face, but reads in the same family
     'h1{font-family:"W95FA",sans-serif !important}'
