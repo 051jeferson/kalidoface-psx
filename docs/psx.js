@@ -9985,8 +9985,14 @@
     // dead buttons the tray restyle would otherwise reveal again: the fork
     // removed all three, and the tray's own display:flex needs the force back.
     // The info toggle opened upstream's tutorial cards - nothing this fork
-    // ships needs them, and the panel is unreachable without it.
+    // ships needs them, and the panel is unreachable without it. Its old slot
+    // was the top of the right-hand button column, so the column moves up to
+    // start where it was.
     '.subButton.pip,.menu-item.call,.subButton.infoToggle{display:none !important}',
+    // the info button owned the top slot of this column (top:12 was where its
+    // own top:0+margin put it); the column starts there now, margin-free
+    '.secondaryMenu{top:12px !important}',
+    '.secondaryMenu .subButton:first-child{margin-top:0 !important}',
     '.secondaryMenu button:nth-of-type(1) .solid{background-image:url(vendor/icon/w95/settings.png)}',
     '.secondaryMenu button:nth-of-type(2) .solid{background-image:url(vendor/icon/w95/effects.png)}',
     '.secondaryMenu button:nth-of-type(3) .solid{background-image:url(vendor/icon/w95/controls.png)}',
@@ -9999,7 +10005,7 @@
     // tab is open (.hide otherwise). Paint the chrome on the open state only,
     // or an empty grey window sits on the scene at boot.
     'container.subnav:not(.hide){background:var(--w95-face) !important;border-radius:0 !important;' +
-    'box-shadow:var(--w95-win),2px 2px 0 rgba(0,0,0,.35) !important;' +
+    'box-shadow:var(--w95-win) !important;' +
     'backdrop-filter:none !important;border:0 !important;padding:3px !important}',
     'container.subnav.hide #psx-w95-title{display:none}',
     'container.subnav section:empty,container.subnav .shape-overlays{display:none !important}',
@@ -10017,12 +10023,16 @@
     // panel's position:fixed tabs anchored to the window instead of the viewport
     'transform:translate(0,0) !important;transition:none !important;overflow:hidden !important}',
     'container.subnav:before{display:none !important}',
-    // the panel roots are absolute and height:100% inside the content, and
-    // they do the scrolling themselves. Making the content positioned gives
-    // them their containing block back at a window-sized box, minus the strip
-    // the background panel's tab row occupies at the bottom of the window
-    '.subnav .content{position:relative !important;height:calc(100% - 67px) !important;' +
-    'overflow-y:auto !important;overflow-x:hidden !important}',
+    // the panel roots are absolute and height:100% inside the content. The
+    // content itself never scrolls: nested scrollers stacked three W95
+    // scrollbars on the same window, one of them a horizontal track with
+    // nothing in it. Exactly one scroller per window - the panel root - and
+    // no transition: a W95 window opens instantly, it does not fade in
+    '.subnav .content{position:relative !important;height:calc(100% - 65px) !important;' +
+    'overflow:hidden !important;transition:none !important}',
+    '.subnav .content > container{overflow-y:auto !important;overflow-x:hidden !important}',
+    '.subnav .content ::-webkit-scrollbar:horizontal,' +
+    '.subnav .content::-webkit-scrollbar:horizontal{display:none !important}',
     // the drawer grip and the controls button are desktop-duplicated jobs:
     // the title bar drags, H hides the HUD
     '.secondaryMenu button:nth-of-type(3){display:none !important}' +
@@ -10032,17 +10042,25 @@
     // on either pointer. Mounted in its own body-level container.
     'container.svelte-1kc6ls6{display:none !important}',
     // title bar, filled in from JS so it can name the panel that is open
-    '#psx-w95-title{height:20px;margin:0 0 3px;background:var(--w95-navy);color:#fff;' +
-    'font-family:"W95FA",sans-serif;font-size:12px;font-weight:700;padding:3px 24px 3px 6px;' +
+    // title bar, filled in from JS so it can name the panel that is open.
+    // W95 chrome: 18px bar, 16px app icon left of the caption
+    '#psx-w95-title{height:18px;margin:0 0 3px;background:var(--w95-navy);color:#fff;' +
+    'font-family:"W95FA",sans-serif;font-size:12px;font-weight:700;padding:2px 26px 2px 3px;' +
     'box-sizing:border-box;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;' +
-    'user-select:none;flex:0 0 auto;cursor:move}',
-    '.subnav-close{top:5px !important;right:5px !important;width:18px !important;' +
+    'user-select:none;flex:0 0 auto;cursor:move;display:flex;align-items:center;gap:4px}',
+    '#psx-w95-title:before{content:"";flex:0 0 16px;width:16px;height:16px;' +
+    'background:center/contain no-repeat url(vendor/icon/apple-icon-180.png);' +
+    'image-rendering:pixelated}',
+    '.subnav-close{top:2px !important;right:3px !important;width:22px !important;' +
     'height:16px !important;border-radius:0 !important;background:var(--w95-face) !important;' +
     'border:0 !important;box-shadow:var(--w95-out) !important;display:flex !important;' +
-    'align-items:center !important;justify-content:center !important;z-index:2}',
+    'align-items:center !important;justify-content:center !important;z-index:2;' +
+    'transition:none !important}',
     '.subnav-close:active{box-shadow:var(--w95-in) !important}',
     '.subnav-close .fill{display:none !important}',
-    '.subnav-close .solid{font-size:11px !important;color:#000 !important;width:auto;height:auto}',
+    // a real W95 close glyph: a thick black X, drawn rather than typed
+    '.subnav-close .solid{font-size:0 !important;width:100%;height:100%;' +
+    'background:center center/8px 7px no-repeat url("data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 width=%278%27 height=%277%27%3E%3Cpath d=%27M1 1l6 5M7 1l-6 5%27 stroke=%27%23000%27 stroke-width=%271.8%27/%3E%3C/svg%3E")}',
     '.subnav .content{color:#000 !important;padding:8px 6px 12px !important}',
     // the fork's cards were dressed for the old dark slate; black on gray here
     '.subnav .psx-injected,.subnav .psx-injected *{color:#000 !important}',
