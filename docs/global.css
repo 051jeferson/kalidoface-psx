@@ -27,6 +27,17 @@
   src: url("./vendor/font/kalidoface-variable.ttf") format("truetype");
 }
 
+/* W95FA: the Windows 95 UI face, redrawn to scale cleanly at UI sizes. The
+   Win95 HUD skin in psx.js sets it on everything the user reads. No bold face
+   is declared on purpose - titles get the browser's synthetic bold, which is
+   close to how the bitmap original doubled its strokes. */
+@font-face {
+  font-family: "W95FA";
+  font-display: swap;
+  src: url("./vendor/font/w95/w95fa.woff2") format("woff2"),
+    url("./vendor/font/w95/W95FA.otf") format("opentype");
+}
+
 @keyframes jiggle {
   0% {
     font-variation-settings: "wght" 100;

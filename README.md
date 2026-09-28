@@ -15,6 +15,18 @@
 > is what genuinely varies between models and machines: render scale, snap grid,
 > colour depth, tracking rates and per-model calibration.
 
+## A Windows 95 HUD
+
+The whole interface is dressed as Windows 95: beveled gray windows with navy
+title bars naming the open panel, a floating toolbar tray where the round menu
+cluster used to be, square beveled buttons with period icon rips, sunken white
+fields, group boxes, checkboxes in place of the old pill toggles and a Win95
+dialog for the calibration prompts. Text is set in W95FA — a scalable revival
+of the bitmap MS Sans Serif — in Portuguese or English, whichever the app is
+speaking. Like everything else in the fork it is not a setting; the font and
+icons ship in `docs/vendor/`, so the look costs no network round trip and
+survives offline.
+
 ## Run and verify
 
 With Node 18 or newer, no dependency installation is needed:
@@ -69,8 +81,7 @@ The optional `node tools/test-hand-rig.mjs <path-to-playwright/index.mjs>` check
 exercises both hands, bent wrists and different bind rotations with the bundled
 Three.js. It requires an existing Playwright installation and Chromium.
 
-The [September 2026 audit](AUDIT.md) records fixes, validation and remaining
-hardware/model checks. Offline use requires a previously loaded/uploaded VRM;
+Offline use requires a previously loaded/uploaded VRM;
 the upstream sample avatars and some gallery images still use remote URLs.
 
 ## What the PSX layer does

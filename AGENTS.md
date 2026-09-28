@@ -2,7 +2,7 @@
 
 Fork of [yeemachine/kalidoface-3d](https://github.com/yeemachine/kalidoface-3d) retuned for PSX / low-poly VRM models. Product behaviour lives in `README.md`. This file is for agents working the repo.
 
-There is **no app source tree**. `src/` is gitignored leftover from upstream Vite. The running app is the built static site in `docs/`. All fork behaviour is `docs/psx.js` plus 46 patched call sites in the minified bundle (60 find/replace pairs, five of which only rewrite a URL or an asset list).
+There is **no app source tree**. Upstream's Vite sources and build config are gone from the repo entirely. The running app is the built static site in `docs/`. All fork behaviour is `docs/psx.js` plus 46 patched call sites in the minified bundle (60 find/replace pairs, five of which only rewrite a URL or an asset list).
 
 The fork ships **one avatar** (`docs/vrm/Jeferson.vrm`, vendored, same-origin), **one default background** (chroma green, `PSX.bgDefault`) and **two art presets** (`docs/art/front.png` over the avatar, `docs/art/back.png` behind it). Upstream's nine sample characters and its image/panorama backgrounds are cut from the bundle. A stored selection pointing off-origin is rewritten to the shipped default at hydrate by `PSX.bgFix` / `PSX.modelFix`; uploads (`data:`/`blob:`) pass through.
 
@@ -18,13 +18,18 @@ docs/                 # the app. serve this directory
   vendor/             # third-party assets, served from this origin
     mediapipe/        #   holistic + face_mesh: wasm, packed assets, tflite
     font/             #   the three Kalidoface faces global.css asks for
+    font/w95/         #   W95FA, the HUD skin's UI face
     icon/             #   favicon and the two PWA icons
+    icon/w95/         #   the Win95 toolbar/panel icons the skin maps per button
 tools/
   patch.mjs           # applies / checks the hooks
   psx-patches.json    # find/replace pairs for those hooks
   fetch-vendor.mjs    # downloads docs/vendor/ from the CDNs it replaced
-index.html            # upstream Vite entry. not used; points at missing src/
 ```
+
+Upstream's Vite entry, build config, lint/format configs, yarn shrinkwrap and
+Glitch asset manifest were removed: nothing in the repo read them, the build
+script is `tools/check.mjs`, and the site is served straight out of `docs/`.
 
 ## Run locally
 
@@ -35,7 +40,7 @@ python -m http.server 5173 --bind 127.0.0.1 --directory docs
 # http://127.0.0.1:5173/
 ```
 
-`npm run dev` / `npm start` now run `tools/serve.mjs` (Node 18+, no dependencies), serving `docs/` on the same address. `npm test`, `npm run check` and `npm run build` run verification only. Do **not** invoke `vite` directly: root `index.html` imports the missing `./src/main.js`, and a Vite build would overwrite `docs/` and drop the patched bundle.
+`npm run dev` / `npm start` now run `tools/serve.mjs` (Node 18+, no dependencies), serving `docs/` on the same address. `npm test`, `npm run check` and `npm run build` run verification only.
 
 `node_modules` is not required to run or to edit `psx.js`.
 
@@ -178,6 +183,9 @@ Never edit `docs/assets/index.*.js` by hand. After a Glitch/Vite rebuild that ch
 - **Back images** ride the app's own background list. The Backgrounds panel hook now also passes `upload` (upstream's own `Hs`), so **Add image** gets reading, list write and persistence for free; the card's Images row renders `type:'img'` entries from that same list, and the shipped preset is `art/back.png` set as `{type:'img',url,pano:false}`. Do not rebuild upload persistence in psx.js - the reviver that re-mints blob URLs from data URLs is upstream's.
 - **Composition zoom** (`cfg.zoom`, percent) scales the whole shot - canvas and front layer by the same centre factor - so a plate composite keeps its registration. Three constraints: the transform goes on the canvas element, which does not exist when `setupRenderer` fires and whose style can be rewritten later, so `zoomTick` re-applies it from `frame()` whenever it is missing; a transform makes the canvas a stacking context that would cover `nav.menu` (z auto), which is why APP_CSS pins `nav.menu{z-index:3}` - that also keeps the cluster above the front plate's z-index 2. Below 100% the letterbox ring is mirrored from the current back via `bgCur`, which the hydrate reviver `bgFix` records and the panel subscription keeps current - the panel may never open, so the reviver is the only witness the hydrated back has. The button is injected into the free `--open4` cluster slot (the hidden friend-call one), before the call button, so the nth-child spread rules on the buttons before it stay untouched.
 - Every material on the shipped model is **DoubleSide** (registered once in `registerModel`). PSX clothes are often a single flat sheet - a hood is a plane - and a one-sided material culls the inner face away, which read as transparency. It costs the cull alone on a low-poly mesh; do not make it a toggle.
+- The HUD is dressed as **Windows 95** (`W95_CSS`, injected as `#psx-w95-css` next to `APP_CSS`). The bevel palette lives in `:root` as `--w95-*` custom properties; the face is W95FA (`docs/vendor/font/w95/`, declared in `global.css`); the buttons wear period icon rips (`docs/vendor/icon/w95/`, mapped per button class - the zoom one is painted onto its inline svg). Rules carry `!important` because the bundle injects its Svelte styles *after* this stylesheet and the fork's own cards still carry dark-theme colours inline; anything that sits outside the panels - the calibration HUD and the zoom card - is restyled where it is built instead, in plain inline CSS.
+- `syncW95Title()` inserts `#psx-w95-title` (the navy caption naming the open panel) as the subnav's first child on the inject pass, and identifies the panel by content (`.sticker-list`, `.bg-list`, the `FX`/`STG` scopes), never by a Svelte hash alone. The subnav is a fixed column the app keeps mounted for the whole page life with `.hide` when no tab is open - paint the window chrome on `:not(.hide)` only, or an empty grey window sits on the scene at boot.
+- `.subButton.pip` and `.menu-item.call` are dead buttons the fork removed; the tray's `display:flex !important` would reveal their inline `display:none`, so the skin re-hides them explicitly. The same force is why the app's own `::-webkit-scrollbar` hiding and slider thumb geometry needed `!important` pushback - the bundle's styles arrive last at equal specificity.
 
 ## Do not
 

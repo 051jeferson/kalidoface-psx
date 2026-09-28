@@ -2608,28 +2608,29 @@
     if (!body) return null;
     hudEl = el('div', 'psx-injected');
     hudEl.id = 'psx-cal-hud';
+    // a win95 dialog: bevelled gray window, navy caption strip, black text
     hudEl.style.cssText =
       'position:fixed;left:50%;top:6vh;transform:translateX(-50%);' +
       'z-index:2147483000;pointer-events:none;display:none;' +
-      'max-width:min(92vw,900px);padding:18px 28px;border-radius:14px;' +
-      'background:rgba(12,12,18,.82);box-shadow:0 8px 40px rgba(0,0,0,.55);' +
-      'text-align:center;color:#fff;line-height:1.25;' +
-      'font-family:inherit;text-shadow:0 2px 8px rgba(0,0,0,.9)';
+      'max-width:min(92vw,900px);padding:3px;border-radius:0;' +
+      'background:#c0c0c0;box-shadow:inset -1px -1px #0a0a0a,inset 1px 1px #dfdfdf,' +
+      'inset -2px -2px #808080,inset 2px 2px #fff,3px 3px 0 rgba(0,0,0,.35);' +
+      'text-align:left;color:#000;line-height:1.25;font-family:inherit;text-shadow:none';
 
     hudStep = el('div', null, '');
-    hudStep.style.cssText = 'font-size:14px;opacity:.6;letter-spacing:.16em;' +
-      'text-transform:uppercase;font-variant-numeric:tabular-nums';
+    hudStep.style.cssText = 'font-size:12px;color:#fff;background:#000080;font-weight:700;' +
+      'padding:3px 8px;letter-spacing:.04em;font-variant-numeric:tabular-nums';
 
     hudTitle = el('div', null, '');
     // clamped rather than fixed: this is read from across a room on a monitor
     // and from a foot away on a laptop, and the longest prompts are a sentence
-    hudTitle.style.cssText = 'font-size:clamp(24px,4.2vw,46px);font-weight:700;margin-top:6px';
+    hudTitle.style.cssText = 'font-size:clamp(24px,4.2vw,46px);font-weight:700;padding:14px 24px 0';
 
     hudHint = el('div', null, '');
-    hudHint.style.cssText = 'font-size:clamp(15px,2vw,22px);opacity:.85;margin-top:8px';
+    hudHint.style.cssText = 'font-size:clamp(15px,2vw,22px);opacity:.8;padding:8px 24px 0';
 
     hudLine = el('div', null, '');
-    hudLine.style.cssText = 'font-size:clamp(13px,1.5vw,17px);opacity:.6;margin-top:12px;' +
+    hudLine.style.cssText = 'font-size:clamp(13px,1.5vw,17px);opacity:.65;padding:12px 24px 16px;' +
       'font-variant-numeric:tabular-nums';
 
     hudEl.appendChild(hudStep);
@@ -9395,16 +9396,19 @@
 
   function buildZoomCard() {
     var wrap = el('div', 'psx-injected psx-zoom-card', '');
-    wrap.style.cssText = 'position:fixed;right:110px;bottom:78px;z-index:20;width:232px;' +
-      'color:#fff;background:#16161df2;border:1px solid #ffffff22;border-radius:14px;' +
-      'padding:14px 16px;box-sizing:border-box;text-align:left';
+    // a win95 window like the panels: gray face, navy caption, bevelled bits
+    wrap.style.cssText = 'position:fixed;right:14px;bottom:290px;z-index:20;width:232px;' +
+      'color:#000;background:#c0c0c0;border:0;border-radius:0;padding:3px;box-sizing:border-box;' +
+      'box-shadow:inset -1px -1px #0a0a0a,inset 1px 1px #dfdfdf,inset -2px -2px #808080,' +
+      'inset 2px 2px #fff,3px 3px 0 rgba(0,0,0,.35);text-align:left';
 
     var head = el('div', '', '');
-    head.style.cssText = 'display:flex;align-items:center;gap:8px;margin:0 0 10px';
+    head.style.cssText = 'display:flex;align-items:center;gap:8px;margin:0;' +
+      'background:#000080;padding:3px 6px';
     var title = el('strong', '', T('Zoom'));
-    title.style.cssText = 'font-size:14px;flex:1';
+    title.style.cssText = 'font-size:12px;flex:1;color:#fff';
     var val = el('span', '', zoomValue() + '%');
-    val.style.cssText = 'font-size:13px;color:#ffffffb3;font-variant-numeric:tabular-nums';
+    val.style.cssText = 'font-size:12px;color:#fff;font-variant-numeric:tabular-nums';
     head.appendChild(title);
     head.appendChild(val);
     wrap.appendChild(head);
@@ -9412,16 +9416,17 @@
     function stepBtn(txt, d, label, cls) {
       var b = el('button', cls, txt);
       b.type = 'button';
-      b.style.cssText = 'width:28px;height:28px;line-height:24px;padding:0;flex:0 0 auto;' +
-        'border-radius:14px;border:1px solid #ffffff33;background:#ffffff14;color:#fff;' +
-        'font-size:16px;cursor:pointer';
+      b.style.cssText = 'width:26px;height:22px;line-height:20px;padding:0;flex:0 0 auto;' +
+        'border-radius:0;border:0;background:#c0c0c0;color:#000;font-size:14px;cursor:pointer;' +
+        'box-shadow:inset -1px -1px #0a0a0a,inset 1px 1px #fff,inset -2px -2px #808080,' +
+        'inset 2px 2px #dfdfdf';
       b.setAttribute('aria-label', label);
       b.addEventListener('click', function () { setZoom(zoomValue() + d, true); });
       return b;
     }
 
     var row = el('div', '', '');
-    row.style.cssText = 'display:flex;align-items:center;gap:8px';
+    row.style.cssText = 'display:flex;align-items:center;gap:8px;padding:10px 8px 4px';
     var range = document.createElement('input');
     range.type = 'range';
     range.min = '50';
@@ -9439,8 +9444,8 @@
     wrap.appendChild(row);
 
     var reset = el('button', 'trigger ' + STG, T('Reset'));
-    reset.style.cssText = 'width:100%;margin-top:10px;padding:8px;border-radius:16px;' +
-      'font-size:13px;font-weight:600;box-sizing:border-box';
+    reset.style.cssText = 'width:calc(100% - 16px);margin:6px 8px 8px;padding:6px;' +
+      'border-radius:0;font-size:13px;font-weight:400;box-sizing:border-box';
     reset.addEventListener('click', function () { setZoom(100, true); });
     wrap.appendChild(reset);
     return wrap;
@@ -9634,6 +9639,7 @@
     injectBgColours();
     injectFrontCard();
     injectZoomButton();
+    syncW95Title();
   }
 
   function isOurs(n) {
@@ -9876,6 +9882,9 @@
   ].join('');
 
   function injectAppCss() {
+    // the regression harness runs this file against a document stub with no
+    // element factory; a stylesheet has nothing to do there anyway
+    if (typeof document.createElement !== 'function') return;
     if (document.getElementById('psx-app-css')) return;
     var head = document.head || document.documentElement;
     if (!head) return;
@@ -9885,8 +9894,315 @@
     head.appendChild(st);
   }
 
+  // ------------------------------------------------------------- W95 skin
+  //
+  // The HUD dressed as Windows 95: bevelled gray chrome, a navy title bar on
+  // every panel, the W95FA face (a scalable revival of the bitmap MS Sans
+  // Serif) and period icon rips out of docs/vendor/icon/w95/. Everything the
+  // user reads is restyled from here rather than patched in the bundle, for
+  // the same reason APP_CSS is a stylesheet: the bundle's class hashes change
+  // on every rebuild, these selectors do not.
+  //
+  // Two things need force. The app styles its own controls from Svelte-scoped
+  // rules, and the fork's cards carry their dark-theme colours inline from
+  // before the skin; a !important rule beats both without touching the JS.
+  // The exception is anything that sits outside the panels - the calibration
+  // HUD and the zoom card - whose inline styles are this fork's own and are
+  // rewritten where they are built.
+  var W95_CSS = [
+    // palette + the two bevels everything is built from
+    ':root{--w95-face:#c0c0c0;--w95-hilite:#fff;--w95-light:#dfdfdf;' +
+    '--w95-shadow:#808080;--w95-dark:#0a0a0a;--w95-navy:#000080;' +
+    '--w95-out:inset -1px -1px #0a0a0a,inset 1px 1px #fff,inset -2px -2px #808080,inset 2px 2px #dfdfdf;' +
+    '--w95-in:inset -1px -1px #fff,inset 1px 1px #0a0a0a,inset -2px -2px #dfdfdf,inset 2px 2px #808080;' +
+    '--w95-win:inset -1px -1px #0a0a0a,inset 1px 1px #dfdfdf,inset -2px -2px #808080,inset 2px 2px #fff}',
+
+    // the face. Kalicon stays on its own glyphs - an <i class="kalicon"> spells
+    // its icon name in W95FA otherwise, which reads as a word.
+    'body{font-family:"W95FA","Pixelated MS Sans Serif","MS Sans Serif",sans-serif !important;' +
+    'font-size:14px}',
+    'button,input,select,textarea,h1,h2,h3,h4,p,label,summary,strong,b,em,div,span,option{' +
+    'font-family:inherit}',
+    'i.kalicon{font-family:"Kalicon","Kalicon Variable" !important}',
+
+    // ---- free-camera cluster: a floating toolbar tray -----------------
+    'nav.menu{background:var(--w95-face) !important;border-radius:0 !important;' +
+    'box-shadow:var(--w95-win) !important;padding:4px !important;display:flex !important;' +
+    'flex-direction:column !important;gap:3px !important;width:auto !important;' +
+    'height:auto !important;left:auto !important;top:auto !important;right:14px !important;' +
+    'bottom:14px !important;backdrop-filter:none !important}',
+    'nav.menu>svg{display:none !important}',
+    '.menu-item{position:static !important;inset:auto !important;transform:none !important;' +
+    'width:44px !important;height:44px !important;margin:0 !important;border-radius:0 !important;' +
+    'background:var(--w95-face) !important;border:0 !important;box-shadow:var(--w95-out) !important;' +
+    'transition:none !important;display:flex !important;align-items:center !important;' +
+    'justify-content:center !important;overflow:visible !important}',
+    '.menu-item:hover{filter:none !important}',
+    '.menu-item:active,.menu-item.pressed{box-shadow:var(--w95-in) !important}',
+    '.menu-item.unavailable{opacity:.45 !important}',
+    '.menu-item .fill{display:none !important}',
+    '.menu-item .solid{font-size:0 !important;width:32px;height:32px;padding:0;margin:0;' +
+    'background:center/contain no-repeat;image-rendering:pixelated}',
+    '.menu-item.video .solid{background-image:url(vendor/icon/w95/track.png)}',
+    '.menu-item.char .solid{background-image:url(vendor/icon/w95/char.png)}',
+    '.menu-item.sticker .solid{background-image:url(vendor/icon/w95/front.png)}',
+    '.menu-item.bg .solid{background-image:url(vendor/icon/w95/back.png)}',
+    // the zoom glyph is an inline svg, not a ligature: square it off and give
+    // it the same icon the tray buttons wear
+    '.psx-zoom-btn .psx-zoom-ico{width:32px !important;height:32px !important;margin:0;' +
+    'background:url(vendor/icon/w95/zoom.png) center/contain no-repeat;image-rendering:pixelated}',
+    '.psx-zoom-btn .psx-zoom-ico circle,.psx-zoom-btn .psx-zoom-ico line{display:none}',
+    // win95 tooltips: opaque pale yellow, hard border
+    '.menu-item:before,.subButton:before,' +
+    '.upload label:after{background:#ffffe1 !important;color:#000 !important;' +
+    'border:1px solid #000 !important;border-radius:0 !important;box-shadow:1px 1px 0 #000;' +
+    'font-family:"W95FA",sans-serif !important;font-size:12px !important;font-weight:400 !important;' +
+    'padding:2px 6px !important;letter-spacing:0 !important}',
+    // drag-to-upload banner over a panel
+    'container.drop_zone:before{background:var(--w95-face) !important;color:#000 !important;' +
+    'border:2px dashed #000 !important;border-radius:0 !important;' +
+    'font-family:"W95FA",sans-serif !important}',
+
+    // ---- top-right column of panel buttons ----------------------------
+    '.subButton{width:36px !important;height:36px !important;border-radius:0 !important;' +
+    'background:var(--w95-face) !important;border:0 !important;box-shadow:var(--w95-out) !important;' +
+    'transition:none !important;display:flex !important;align-items:center !important;' +
+    'justify-content:center !important}',
+    '.subButton .fill{display:none !important}',
+    '.subButton .solid{font-size:0 !important;width:28px;height:28px;padding:0;margin:0;' +
+    'background:center/contain no-repeat;image-rendering:pixelated}',
+    '.subButton.selected{box-shadow:var(--w95-in) !important}',
+    '.subButton.selected .solid{transform:translate(1px,1px)}',
+    // dead buttons the tray restyle would otherwise reveal again: the fork
+    // removed both, and their display:none is inline, so it needs force back
+    '.subButton.pip,.menu-item.call{display:none !important}',
+    '.subButton.infoToggle .solid{background-image:url(vendor/icon/w95/info.png)}',
+    '.secondaryMenu button:nth-of-type(1) .solid{background-image:url(vendor/icon/w95/settings.png)}',
+    '.secondaryMenu button:nth-of-type(2) .solid{background-image:url(vendor/icon/w95/effects.png)}',
+    '.secondaryMenu button:nth-of-type(3) .solid{background-image:url(vendor/icon/w95/controls.png)}',
+    // the effects button's glyph is an svg inside the <i>
+    '.subButton .svgIcon svg{display:none}',
+
+    // ---- the panel window ---------------------------------------------
+    // The subnav is a fixed column the app keeps mounted for the page's whole
+    // life - it has no background of its own and only reads as a panel while a
+    // tab is open (.hide otherwise). Paint the chrome on the open state only,
+    // or an empty grey window sits on the scene at boot.
+    'container.subnav:not(.hide){background:var(--w95-face) !important;border-radius:0 !important;' +
+    'box-shadow:var(--w95-win),2px 2px 0 rgba(0,0,0,.35) !important;' +
+    'backdrop-filter:none !important;border:0 !important;padding:3px !important}',
+    'container.subnav.hide #psx-w95-title{display:none}',
+    'container.subnav section:empty,container.subnav .shape-overlays{display:none !important}',
+    // title bar, filled in from JS so it can name the panel that is open
+    '#psx-w95-title{height:20px;margin:0 0 3px;background:var(--w95-navy);color:#fff;' +
+    'font-family:"W95FA",sans-serif;font-size:12px;font-weight:700;padding:3px 24px 3px 6px;' +
+    'box-sizing:border-box;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;' +
+    'user-select:none;flex:0 0 auto}',
+    '.subnav-close{top:5px !important;right:5px !important;width:18px !important;' +
+    'height:16px !important;border-radius:0 !important;background:var(--w95-face) !important;' +
+    'border:0 !important;box-shadow:var(--w95-out) !important;display:flex !important;' +
+    'align-items:center !important;justify-content:center !important;z-index:2}',
+    '.subnav-close:active{box-shadow:var(--w95-in) !important}',
+    '.subnav-close .fill{display:none !important}',
+    '.subnav-close .solid{font-size:11px !important;color:#000 !important;width:auto;height:auto}',
+    '.subnav .content{color:#000 !important;padding:8px 6px 12px !important}',
+    // the fork's cards were dressed for the old dark slate; black on gray here
+    '.subnav .psx-injected,.subnav .psx-injected *{color:#000 !important}',
+    '.subnav .psx-injected{background:transparent !important;border:0 !important;' +
+    'border-radius:0 !important;box-shadow:none !important}',
+    '.subnav h4,.subnav p,.subnav label,.subnav summary{color:#000 !important}',
+    '.subnav h4{font-size:13px !important;font-weight:700 !important}',
+    '.subnav p{font-size:12px !important;line-height:1.45 !important}',
+    '.subnav .info{opacity:.65 !important}',
+
+    // settings/effects cards become etched group boxes
+    '.subnav .setting{background:transparent !important;border:1px solid var(--w95-shadow);' +
+    'box-shadow:1px 1px 0 var(--w95-hilite);border-radius:0 !important;padding:10px 12px !important;' +
+    'margin:0 0 12px !important}',
+    '.subnav hr{border:0;border-top:1px solid var(--w95-shadow);' +
+    'border-bottom:1px solid var(--w95-hilite);margin:10px 0 !important;opacity:1}',
+
+    // buttons
+    '.subnav .trigger,.psx-zoom-card button{background:var(--w95-face) !important;' +
+    'color:#000 !important;border:0 !important;border-radius:0 !important;' +
+    'box-shadow:var(--w95-out) !important;font-weight:400 !important;transition:none !important}',
+    '.subnav .trigger:active,.psx-zoom-card button:active{box-shadow:var(--w95-in) !important}',
+    '.subnav .trigger{padding:6px 12px !important;font-size:13px !important}',
+
+    // toggles become checkboxes: the track is the box, the knob goes away
+    '.subnav label[name] container,.subnav .track{overflow:visible !important;' +
+    'background:transparent !important;border-radius:0 !important;border:0 !important;' +
+    'box-shadow:none !important;transition:none !important;width:14px !important;' +
+    'min-width:14px !important;height:14px !important}',
+    '.subnav .track{background:#fff !important;box-shadow:var(--w95-in) !important}',
+    '.subnav .toggleButton{display:none !important}',
+    'label.toggled .track{background:#fff url("data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 width=%2710%27 height=%2710%27%3E%3Cpath d=%27M1 5l2.6 3L9 1.5%27 stroke=%27%23000%27 stroke-width=%272%27 fill=%27none%27/%3E%3C/svg%3E") 1px 1px/10px 10px no-repeat !important}',
+    '.subnav input[type="checkbox"]{-webkit-appearance:none;appearance:none;width:14px;height:14px;' +
+    'margin:0;background:#fff;box-shadow:var(--w95-in);border:0;border-radius:0;flex:0 0 auto}',
+    '.subnav input[type="checkbox"]:checked{background:#fff url("data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 width=%2710%27 height=%2710%27%3E%3Cpath d=%27M1 5l2.6 3L9 1.5%27 stroke=%27%23000%27 stroke-width=%272%27 fill=%27none%27/%3E%3C/svg%3E") 1px 1px/10px 10px no-repeat}',
+
+    // sliders: a sunken groove and a bevelled thumb, no coloured fill. The
+    // app's own thumb rule is injected after this stylesheet and matches at
+    // the same specificity, so every property here is forced.
+    '.subnav input[type="range"],.psx-zoom-card input[type="range"]{' +
+    '-webkit-appearance:none !important;appearance:none !important;' +
+    'background:transparent !important;height:20px !important;border-radius:0 !important;margin:0}',
+    '.subnav input[type="range"]::-webkit-slider-runnable-track,' +
+    '.psx-zoom-card input[type="range"]::-webkit-slider-runnable-track{height:4px !important;' +
+    'background:var(--w95-shadow) !important;box-shadow:1px 1px 0 var(--w95-hilite)}',
+    '.subnav input[type="range"]::-webkit-slider-thumb,' +
+    '.psx-zoom-card input[type="range"]::-webkit-slider-thumb{-webkit-appearance:none !important;' +
+    'width:12px !important;height:20px !important;margin-top:-8px !important;' +
+    'border:0 !important;border-radius:0 !important;background:var(--w95-face) !important;' +
+    'box-shadow:var(--w95-out) !important;cursor:pointer}',
+    '.subnav input[type="range"]::-moz-range-track,' +
+    '.psx-zoom-card input[type="range"]::-moz-range-track{height:4px;background:var(--w95-shadow)}',
+    '.subnav input[type="range"]::-moz-range-thumb,' +
+    '.psx-zoom-card input[type="range"]::-moz-range-thumb{width:12px;height:20px;border:0;' +
+    'border-radius:0;background:var(--w95-face);box-shadow:var(--w95-out)}',
+
+    // selects: a white sunken field; the app's own arrow recoloured black
+    '.subnav .select{background:transparent !important;border-radius:0 !important;padding:0 !important}',
+    '.subnav select{background:#fff !important;color:#000 !important;border:0 !important;' +
+    'border-radius:0 !important;box-shadow:var(--w95-in) !important;padding:4px 20px 4px 6px !important;' +
+    'font-size:13px !important;height:auto !important}',
+    '.subnav select option{background:#fff !important;color:#000 !important}',
+    '.subnav .select_arrow{border-left:5px solid transparent !important;' +
+    'border-right:5px solid transparent !important;border-top:6px solid #000 !important;' +
+    'background:none !important;box-shadow:none !important}',
+
+    // colour picker: square the iro widgets and sink them into the panel
+    '.subnav .IroBox,.subnav .IroSlider,.subnav .IroSliderGradient,' +
+    '.subnav .IroColorPicker div{border-radius:0 !important}',
+    '.subnav .IroBox{box-shadow:var(--w95-in) !important}',
+    '#picker .hex{background:#fff !important;border-radius:0 !important;box-shadow:var(--w95-in)}',
+    '#picker .hex input{background:transparent !important;color:#000 !important;' +
+    'font-family:"W95FA",sans-serif !important}',
+    '#picker .hex .prefix{color:var(--w95-shadow) !important}',
+
+    // tabs at the bottom of the background panel: pinned there by the app,
+    // so they keep the spot and become a Win95 tab row on gray
+    '.subnav .tabs{background:var(--w95-face) !important;color:#000 !important;' +
+    'border-radius:0 !important;border-top:1px solid var(--w95-hilite);' +
+    'left:3px !important;bottom:3px !important;width:calc(var(--container-w-d,360px) - 8px) !important;' +
+    'padding:3px 6px !important;justify-content:flex-start !important}',
+    '.subnav .tabs p{background:var(--w95-face) !important;color:#000 !important;' +
+    'box-shadow:var(--w95-out);border-radius:0 !important;padding:3px 12px !important;' +
+    'font-size:12px !important;font-weight:400 !important;cursor:pointer;margin:0}',
+    '.subnav .tabs p.selected{font-weight:700 !important;box-shadow:var(--w95-in)}',
+
+    // the character panel: the model tile goes square with the same navy pick
+    // ring as everything else; its selection plate is a :before circle
+    '.subnav .model{border-radius:0 !important;box-shadow:var(--w95-out) !important}',
+    '.subnav .model:before{display:none !important}',
+    '.subnav .model.selected{box-shadow:var(--w95-in),0 0 0 2px var(--w95-navy) !important}',
+    // stray glyphs left as icons (the upload/link pair on the character
+    // panel, the close cross) read in ink, not white
+    '.subnav i.kalicon.solid{color:#000 !important}',
+
+    // swatches and tiles: square, navy ring when picked, bevelled otherwise.
+    // Their app transition is left alone - reduced-motion users get the
+    // global 0.01ms clamp and the smoke test reads it back off these tiles
+    '.subnav .psx-colour-pick,.subnav .psx-bg-image,.subnav .psx-front-pick,' +
+    '.subnav .sticker-list img,.subnav .bg-list img,.subnav .trackingOption img{' +
+    'border-radius:0 !important}',
+    '.subnav .psx-colour-pick,.subnav .psx-bg-image,.subnav .psx-front-pick{' +
+    'box-shadow:var(--w95-out) !important;width:44px !important;height:44px !important}',
+    '.subnav .psx-colour-pick[aria-pressed="true"],' +
+    '.subnav .psx-bg-image[aria-pressed="true"],' +
+    '.subnav .psx-front-pick[aria-pressed="true"]{' +
+    'box-shadow:var(--w95-in),0 0 0 3px var(--w95-navy) !important}',
+    '.subnav .trackingOption{border:0 !important;border-radius:0 !important;' +
+    'background:transparent !important;box-shadow:var(--w95-out) !important;padding:4px !important}',
+    // the app paints selection as a scaled plate behind the card (:before);
+    // a Win95 selection is the navy inset instead
+    '.subnav .trackingOption:before{display:none !important}',
+    '.subnav .trackingOption.selected{box-shadow:var(--w95-in),0 0 0 2px var(--w95-navy) !important}',
+    // the little round delete buttons on uploaded tiles
+    '.subnav .psx-colour-pick ~ button,.subnav .psx-bg-image ~ button,' +
+    '.subnav .psx-front-pick ~ button{top:-7px !important;right:-7px !important;' +
+    'width:16px !important;height:16px !important;line-height:14px !important;' +
+    'border-radius:0 !important;font-size:11px !important;font-weight:400 !important;' +
+    'background:var(--w95-face) !important;color:#000 !important;box-shadow:var(--w95-out) !important}',
+
+    // win95 scrollbars wherever a panel overflows. The panel roots scroll,
+    // and the app's own chrome hides their scrollbars entirely; the display
+    // and sizing are forced back here for the same order reason as the sliders
+    '.subnav ::-webkit-scrollbar{display:block !important;width:16px !important;height:16px !important}',
+    '.subnav ::-webkit-scrollbar-track{background:#dfdfdf !important;box-shadow:var(--w95-in) !important}',
+    '.subnav ::-webkit-scrollbar-thumb{background:var(--w95-face) !important;box-shadow:var(--w95-out) !important}',
+    '.subnav ::-webkit-scrollbar-button,.psx-zoom-card ::-webkit-scrollbar-button{' +
+    'display:block;width:16px;height:16px;background:var(--w95-face) var(--w95-out)}',
+    '.subnav ::-webkit-scrollbar-button:single-button:vertical:decrement,' +
+    '.psx-zoom-card ::-webkit-scrollbar-button:single-button:vertical:decrement{' +
+    'background:url("data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 width=%2716%27 height=%2716%27%3E%3Cpath d=%27M4 10l4-5 4 5z%27 fill=%27%23000%27/%3E%3C/svg%3E") center no-repeat}',
+    '.subnav ::-webkit-scrollbar-button:single-button:vertical:increment,' +
+    '.psx-zoom-card ::-webkit-scrollbar-button:single-button:vertical:increment{' +
+    'background:url("data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 width=%2716%27 height=%2716%27%3E%3Cpath d=%27M4 6l4 5 4-5z%27 fill=%27%23000%27/%3E%3C/svg%3E") center no-repeat}',
+
+    // the boot title keeps its jelly face, but reads in the same family
+    'h1{font-family:"W95FA",sans-serif !important}'
+  ].join('');
+
+  function injectW95Css() {
+    if (typeof document.createElement !== 'function') return;
+    if (document.getElementById('psx-w95-css')) return;
+    var head = document.head || document.documentElement;
+    if (!head) return;
+    var st = document.createElement('style');
+    st.id = 'psx-w95-css';
+    st.textContent = W95_CSS;
+    head.appendChild(st);
+  }
+
+  // The panel window's title bar names the panel that is open. The subnav
+  // content keeps every panel mounted once opened, stacked absolutely, so the
+  // one on top is simply the last child - and its identity is read off its
+  // own content rather than a Svelte hash, which a rebuild would change. Runs
+  // on the throttled inject pass - reading a node and maybe writing a text
+  // node is nothing at that rate.
+  function w95TitleText() {
+    var content = document.querySelector('.subnav .content');
+    if (!content) return '';
+    var roots = content.children;
+    var root = null;
+    for (var i = 0; i < roots.length; i++) {
+      if (roots[i].nodeType === 1) root = roots[i];
+    }
+    if (!root) return '';
+    if (root.classList.contains(FX)) return T('Effects');
+    if (root.classList.contains(STG)) return T('Settings');
+    if (root.querySelector('.sticker-list')) return T('Front');
+    if (root.querySelector('.bg-list, #picker')) return T('Background');
+    return T('Characters');
+  }
+
+  function syncW95Title() {
+    var sub = document.querySelector('container.subnav');
+    if (!sub || !sub.firstChild) return;
+    var bar = sub.firstChild;
+    if (!bar.id || bar.id !== 'psx-w95-title') {
+      bar = document.getElementById('psx-w95-title');
+      if (!bar) {
+        bar = el('div', '', '');
+        bar.id = 'psx-w95-title';
+        sub.insertBefore(bar, sub.firstChild);
+      }
+    }
+    var want = w95TitleText();
+    if (!want) return;
+    var pt = cfg.lang === 'pt' ? ({ 'Front': 'Frente', 'Background': 'Fundo', 'Characters': 'Personagens' })[want] : null;
+    want = pt || want;
+    if (bar.textContent !== want) bar.textContent = want;
+  }
+
+
+  // these two lines stay adjacent and exactly as written: the regression
+  // harness strips them by string match before running the file against its
+  // document stub
   injectAppCss();
   applyDocLang();
+  injectW95Css();
 
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', startObserver);

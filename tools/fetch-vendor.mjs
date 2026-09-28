@@ -81,6 +81,23 @@ const files = [
   ['icon/apple-icon-180.png', 'https://yeemachine.github.io/k2021/favicon/kalidoface3d/apple-icon-180.png'],
   ['icon/manifest-icon-192.png', 'https://yeemachine.github.io/k2021/favicon/kalidoface3d/manifest-icon-192.png'],
   ['icon/manifest-icon-512.png', 'https://yeemachine.github.io/k2021/favicon/kalidoface3d/manifest-icon-512.png'],
+
+  // The Win95 HUD skin. W95FA is a scalable revival of the classic MS Sans
+  // Serif UI face; the icons are period Windows icon rips served by the 98.js
+  // project (1j01/98). Served same-origin like everything else in vendor/.
+  ['font/w95/w95fa.woff2', 'https://raw.githubusercontent.com/verkcuos/w95fa/main/w95fa.woff2'],
+  ['font/w95/W95FA.otf', 'https://raw.githubusercontent.com/verkcuos/w95fa/main/W95FA.otf'],
+  ...[
+    'track', 'char', 'front', 'back', 'zoom',
+    'info', 'settings', 'effects', 'controls',
+  ].map((n) => [
+    'icon/w95/' + n + '.png',
+    'https://raw.githubusercontent.com/1j01/98/master/images/icons/' + {
+      track: 'video-32x32', char: 'solitaire-32x32', front: 'paint-file-32x32',
+      back: 'desktop-32x32', zoom: 'find-file-32x32', info: 'help-32x32',
+      settings: 'settings-32x32', effects: 'themes-32x32', controls: 'task-32x32',
+    }[n] + '.png',
+  ]),
 ];
 
 function mb(n) { return (n / 1048576).toFixed(1) + ' MB'; }
