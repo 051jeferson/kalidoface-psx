@@ -6739,8 +6739,6 @@
     'get ready': 'prepare-se',
     'hold': 'segure',
     'Calibration cancelled.': 'Calibração cancelada.',
-    'HUD hidden': 'HUD oculta',
-    'Press H to show it again': 'Pressione H para mostrar de novo',
 
     // --- motion ---
     'Motion Calibration': 'Calibragem de movimento',
@@ -9487,8 +9485,9 @@
     var body = document.body;
     if (!body) return;
     var off = body.classList.toggle(HUD_OFF);
-    if (off) flashHud(T('HUD hidden'), T('Press H to show it again'));
-    else if (!calRun && hudEl && hudFlashAt) {
+    // no toast on hide: the point is a clean capture, and a message saying the
+    // HUD is gone would be in it
+    if (!off && !calRun && hudEl && hudFlashAt) {
       clearTimeout(hudFlashAt); hudFlashAt = null; hudEl.style.display = 'none';
     }
   }
