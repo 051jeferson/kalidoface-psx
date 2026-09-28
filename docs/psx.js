@@ -11,6 +11,7 @@
  *   PSX.smaa()                   - whether the SMAA EffectPass is added
  *   PSX.fingers()                - finger list used by the hand rig
  *   PSX.onModel(vrm, gltf)       - called once per loaded VRM
+ *   PSX.cam(controls)            - the orbit camera, after the load aims it at the head
  *   PSX.tick(vrm)                - called once per frame, after vrm.update()
  *   PSX.face(vrm, rig)           - the solved Kalidokit face, before it lands
  *   PSX.headGain() / bodyGain() / leanGain() / spineLean() / armGain()
@@ -274,6 +275,15 @@
     // whatever is behind it.
     zoom: 100,
 
+    // --- camera framing ---------------------------------------------------
+    // The orbit the mouse drag drives: azimuth, polar angle and distance of
+    // the camera around the model's head. null = nothing recorded, which
+    // leaves upstream's fresh framing alone. Recorded automatically once the
+    // drag settles; there is nothing to aim at by hand, so no panel control.
+    camYaw: null,
+    camPitch: null,
+    camDist: null,
+
     // --- performance --------------------------------------------------
     // Shed tracking rate on its own while the machine cannot keep up, and take
     // it back when it can. Independent of the fixed caps, and on by default:
@@ -369,6 +379,10 @@
     renderFps: { min: 0, max: 60 },
     colorLevels: { one: [8, 16, 32, 64] },
     zoom: { min: 50, max: 300 },
+    // the orbit controls' own limits: maxPolarAngle PI*.62, distance .25..10
+    camYaw: { min: -Math.PI, max: Math.PI },
+    camPitch: { min: 0.05, max: Math.PI * 0.62 },
+    camDist: { min: 0.25, max: 10 },
     fingers: { one: ['all', 'thumb', 'none'] },
     signal: { one: ['calibrated', 'auto', 'raw'] },
     lang: { one: ['en', 'pt'] },
@@ -467,6 +481,10 @@
       if (!isNum(v)) return def;
       return spec ? clamp(v, spec.min, spec.max) : v;
     }
+    // a null default with a range is a number nobody has measured yet - the
+    // camera framing. Its saved value arrives as a number, which the typeof
+    // check below would drop.
+    if (def === null && spec && isNum(v)) return clamp(v, spec.min, spec.max);
     return typeof v === typeof def ? v : def;
   }
 
@@ -6392,6 +6410,11 @@
     // the menu item's own "call" class rather than on its label: the label is
     // replaced by the live chat ID once a call connects.
     { find: '.menu-item.call', card: '.menu-item' },
+    // Pop the canvas out as a floating browser video. It costs a second copy
+    // of every frame, and the window shows the bare captureStream - no front
+    // plate, no composition zoom - so it can never stand in for the page
+    // capture this fork is built around.
+    { find: '.subButton.pip', card: '.subButton' },
     // Two toggles for one job: hide the preview, and hide the video inside
     // it. One remaining control drives both; this one is the spare.
     { heading: 'Hide Webcam Video', card: '.list' }
@@ -6913,7 +6936,6 @@
     'Characters': 'Personagens',
     'Call a friend': 'Ligar para um amigo',
     'Accessories': 'Acessórios',
-    'Picture-in-Picture': 'Picture-in-Picture',
     'Selfie Mode': 'Modo selfie',
     'First Person Mode': 'Modo primeira pessoa',
     'Flip Camera': 'Inverter câmera',
@@ -7082,7 +7104,7 @@
     smooth: 7, frame: 1, nextTrack: 1,
     mpOptions: 2, shadows: 1, shadowSize: 4, overlay: 3, overlayOpen: 1, gaze: 1,
     pose: 1, hands: 1, arm: 1, guide: 1, bg: 1, bgDrop: 1,
-    bgDefault: 1, bgFix: 1, modelFix: 1, front: 2, frontFiles: 1
+    bgDefault: 1, bgFix: 1, modelFix: 1, front: 2, frontFiles: 1, cam: 1
   };
 
   function verify() {
@@ -9424,6 +9446,93 @@
     return wrap;
   }
 
+  // --------------------------------------------------------- camera framing
+
+  // The orbit the drag drives, recorded once it settles and restored after the
+  // next model load re-aims the target at the head. Only the camera's angle
+  // and distance around the target are the shot: the target itself belongs to
+  // the model's head height, which changes between sessions and between
+  // models, so a pan offset is deliberately not recorded.
+  var camCtl = null;
+  var camSaveTimer = 0;
+  var camApplyTimer = 0;
+
+  function camRead() {
+    var cam = camCtl && camCtl.object;
+    var t = camCtl && camCtl.target;
+    if (!cam || !cam.position || !t) return null;
+    var dx = cam.position.x - t.x;
+    var dy = cam.position.y - t.y;
+    var dz = cam.position.z - t.z;
+    var dist = Math.sqrt(dx * dx + dy * dy + dz * dz);
+    if (!(dist > 0)) return null;
+    return {
+      yaw: Math.round(Math.atan2(dx, dz) * 1000) / 1000,
+      pitch: Math.round(Math.acos(Math.max(-1, Math.min(1, dy / dist))) * 1000) / 1000,
+      dist: Math.round(dist * 1000) / 1000
+    };
+  }
+
+  function camSaveNow() {
+    camSaveTimer = 0;
+    var r = camRead();
+    if (!r) return;
+    if (cfg.camYaw !== null && cfg.camPitch !== null && cfg.camDist !== null &&
+        Math.abs(r.yaw - cfg.camYaw) < 0.002 &&
+        Math.abs(r.pitch - cfg.camPitch) < 0.002 &&
+        Math.abs(r.dist - cfg.camDist) < 0.002) return;
+    cfg.camYaw = r.yaw;
+    cfg.camPitch = r.pitch;
+    cfg.camDist = r.dist;
+    save();
+    log('camera framing saved', r.yaw, r.pitch, r.dist);
+  }
+
+  function camQueueSave() {
+    if (camSaveTimer) clearTimeout(camSaveTimer);
+    camSaveTimer = setTimeout(camSaveNow, 600);
+  }
+
+  function camApply() {
+    camApplyTimer = 0;
+    var cam = camCtl && camCtl.object;
+    var t = camCtl && camCtl.target;
+    if (!cam || !cam.position || !t) return;
+    if (cfg.camYaw === null || cfg.camPitch === null || cfg.camDist === null) return;
+    var yaw = clamp(cfg.camYaw, SPEC.camYaw.min, SPEC.camYaw.max);
+    var pitch = clamp(cfg.camPitch, SPEC.camPitch.min, SPEC.camPitch.max);
+    var dist = clamp(cfg.camDist, SPEC.camDist.min, SPEC.camDist.max);
+    var h = Math.sin(pitch);
+    cam.position.set(
+      t.x + dist * h * Math.sin(yaw),
+      t.y + dist * Math.cos(pitch),
+      t.z + dist * h * Math.cos(yaw));
+    // the controls re-derive their angles from where the camera was left
+    if (camCtl.update) camCtl.update();
+    log('camera framing restored', cfg.camYaw, cfg.camPitch, cfg.camDist);
+  }
+
+  function cam(controls) {
+    if (!controls || !controls.target || !controls.object) return;
+    camCtl = controls;
+    if (!controls.__psxCamWired) {
+      controls.__psxCamWired = true;
+      // 'end' fires when a rotate, pan or wheel settles; the pointer and wheel
+      // fallbacks cover controls that never dispatch it. Both paths land in
+      // the same debounce, and a settle with nothing changed saves nothing.
+      if (controls.addEventListener) {
+        controls.addEventListener('end', camQueueSave);
+      } else {
+        document.addEventListener('pointerup', camQueueSave, true);
+        document.addEventListener('wheel', camQueueSave, { passive: true });
+      }
+    }
+    // upstream writes the camera again after this hook returns, so the
+    // restore runs once the whole load routine is done
+    if (camApplyTimer) clearTimeout(camApplyTimer);
+    camApplyTimer = setTimeout(camApply, 0);
+  }
+
   function toggleZoomCard(open) {
     if (!open && zoomCard) {
       if (zoomCard.parentNode) zoomCard.parentNode.removeChild(zoomCard);
@@ -9879,6 +9988,7 @@
     modelFix: modelFix,
     front: front,
     frontFiles: frontFiles,
+    cam: cam,
     guide: guide,
 
     frame: frame,

@@ -236,6 +236,10 @@
     {
       "find": "$e(hl,\"stickerList\",[],Zn);et(hl,\"stickerList\")",
       "replace": "$e(hl,\"stickerList\",[],Zn);et(hl,\"stickerList\");window.PSX.front({files:hl})"
+    },
+    {
+      "find": "Dt.target.y+=.025,Dt.update(),jt.position.y=",
+      "replace": "Dt.target.y+=.025,Dt.update(),window.PSX.cam(Dt,jt),jt.position.y="
     }
   ],
   "vendorPatches": [

@@ -58,7 +58,7 @@
     <link rel="apple-touch-icon" href="./vendor/icon/apple-icon-180.png" />
 
     <!--
-      The bundle calls window.PSX.* at 45 patched call sites, unguarded and on
+      The bundle calls window.PSX.* at 46 patched call sites, unguarded and on
       the hot path - the render loop, the bone rig, the tracking loop. If psx.js
       fails to load or throws while parsing, every one of those becomes a
       TypeError per frame and the app is simply dead.
@@ -102,6 +102,9 @@
         // honest degradation.
         front: function () {},
         frontFiles: function () {},
+        // stock behaviour: nothing watches the orbit camera. psx.js uses this
+        // to restore the saved framing after upstream aims the target.
+        cam: function () {},
         // false = leave the arms to the stock Euler rig
         arm: function () { return false; },
         guide: function () { return true; },

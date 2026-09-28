@@ -134,6 +134,7 @@ touches the app's own source tree (this repo only ships the built bundle).
 | `PSX.bgDefault()` / `PSX.bgFix(entry)` / `PSX.modelFix(entry)` | The shipped background (chroma green), and revivers that rewrite an off-origin stored background / model to the shipped default |
 | `PSX.front(stores)` / `PSX.frontFiles(files)` | Hands over the front-layer image store at its hydrate site and on panel mount; images dropped or picked become the foreground plate |
 | `PSX.bg(stores)` | Hands over the app's background stores on panel mount; the zoom's letterbox mirror follows the current back through it |
+| `PSX.cam(controls)` | The orbit camera after the model load aims it at the head; the framing records itself once a drag settles and restores on the next load |
 
 ### The PS1 look
 
@@ -1011,6 +1012,10 @@ and scoped class names, so they look native. Controls are split by what they do:
 - **Performance** — Auto throttle, Run while hidden, Tracking rate, Render rate, Low power preset (the lite pose model is preset-only, no toggle)
 - **PSX Hands** — Driven fingers (`all fingers` / `thumb only` / `none`)
 - **Profile** — Export settings, Import settings, Reset PSX settings
+
+The camera framing is not a card: the orbit you drag records itself once the drag
+settles, and the next page load puts the camera back where it was. Resetting the
+PSX settings returns the framing to stock on the next load.
 
 Press **H** to hide the whole HUD — the nav, the panels, the side buttons and
 the camera preview — for a clean capture, and **H** again to bring it back. A
