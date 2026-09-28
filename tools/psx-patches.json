@@ -1,259 +1,263 @@
 {
-  "bundle": "docs/assets/index.e2bec78d.js",
-  "patches": [
-    {
-      "find": ")),f.setOptions({maxNumFaces:1,r",
-      "replace": ")),f.setOptions(window.PSX.mpOptions({maxNumFaces:1,r"
-    },
-    {
-      "find": "gConfidence:.5}),f.onResults(p=>",
-      "replace": "gConfidence:.5})),f.onResults(p=>"
-    },
-    {
-      "find": ")),c.setOptions(n.holistic.model),c.onResults(lr",
-      "replace": ")),c.setOptions(window.PSX.mpOptions(n.holistic.model)),c.onResults(lr"
-    },
-    {
-      "find": ".detected=!0,a),requestAnimationFrame(C)}}return l.$$",
-      "replace": ".detected=!0,a),window.PSX.nextTrack(C)}}return l.$$"
-    },
-    {
-      "find": "i))),n.update(e)},Al=l=>{!l||(E(",
-      "replace": "i))),n.update(e),window.PSX.tick(n)},Al=l=>{!l||(E("
-    },
-    {
-      "find": "eturn;y.id=z.id,y.isUser=z.id===",
-      "replace": "eturn;y.id=z.id,window.PSX.onModel(y,g),y.isUser=z.id==="
-    },
-    {
-      "find": "w.mapSize.width=2048,M.shadow.mapSize.height=2048,M.shadow.camera",
-      "replace": "w.mapSize.width=window.PSX.shadowSize(),M.shadow.mapSize.height=window.PSX.shadowSize(),M.shadow.camera"
-    },
-    {
-      "find": "p),C.addPass(z),C.addPass(v),C.a",
-      "replace": "p),C.addPass(z),window.PSX.smaa()&&C.addPass(v),C.a"
-    },
-    {
-      "find": "=e;function m(){requestAnimationFrame(m),Ke=zi.getDelta()",
-      "replace": "=e;function m(){if(requestAnimationFrame(m),!window.PSX.frame())return;Ke=zi.getDelta()"
-    },
-    {
-      "find": "PI,Math.PI):0,c=1;o&&zt(o,{y:ae(e",
-      "replace": "PI,Math.PI):0,c=window.PSX.headGain();o&&zt(o,{y:ae(e"
-    },
-    {
-      "find": ",-.3,.3)*a},i?1:.04+Ke*4)},Ms=(l,e,t,n=!",
-      "replace": ",-.3,.3)*a},i?1:window.PSX.smooth(.04+Ke*4))},Ms=(l,e,t,n=!"
-    },
-    {
-      "find": "me.Spine);let c=.05;r&&zt(r,{x:ae(e",
-      "replace": "me.Spine);let c=window.PSX.bodyGain(),ps=window.PSX.leanGain();t.Spine&&(t.Spine.z=window.PSX.spineLean(t.Spine.z,e.head.z));r&&zt(r,{x:ae(e"
-    },
-    {
-      "find": "*2,-.3,.3)},i?1:.04+Ke*2),u&&zt(u,{x:ae(",
-      "replace": "*2,-.3,.3)},i?1:window.PSX.smooth(.04+Ke*2)),u&&zt(u,{x:ae("
-    },
-    {
-      "find": "*2,-.1,.1)},i?1:.04+Ke*2),o&&zt(o,{x:ae(",
-      "replace": "*2,-.1,.1)},i?1:window.PSX.smooth(.04+Ke*2)),o&&zt(o,{x:ae("
-    },
-    {
-      "find": "*2,-.3,.3)},i?1:.04+Ke*2)},Ps=(l,e,t=!1)",
-      "replace": "*2,-.3,.3)},i?1:window.PSX.smooth(.04+Ke*2))},Ps=(l,e,t=!1)"
-    },
-    {
-      "find": "upil.x,0,\"XYZ\"),l.lookAt.applyer.lookAt(u)},un=(l,e,t=\"Ri",
-      "replace": "upil.x,0,\"XYZ\"),window.PSX.gaze(l,u),window.PSX.face(l,e)},un=(l,e,t=\"Ri"
-    },
-    {
-      "find": "t\":n,r=i?-1:1,u=[\"Ring\",\"Index\",\"Little\",\"Thumb\",\"Middle\"],c=[\"Proximal\",\"",
-      "replace": "t\":n,r=i?-1:1,u=window.PSX.fingers(),c=[\"Proximal\",\""
-    },
-    {
-      "find": "ance\",antialias:!0,stencil:!0,alph",
-      "replace": "ance\",antialias:window.PSX.aa(),stencil:!0,alph"
-    },
-    {
-      "find": "ow.innerHeight),p.setPixelRatio(Math.max(2,window.devicePixelRatio)),p.shadowMap.enabled=!0;let z=null;cons",
-      "replace": "ow.innerHeight),window.PSX.setupRenderer(p),p.shadowMap.enabled=window.PSX.shadows();let z=null;cons"
-    },
-    {
-      "find": "w.mapSize.width=2048,g.shadow.mapSize.height=2048;const y=new ba(",
-      "replace": "w.mapSize.width=window.PSX.shadowSize(),g.shadow.mapSize.height=window.PSX.shadowSize();const y=new ba("
-    },
-    {
-      "find": "=0;const _=()=>{fl.isOpen?(!i||i===\"close\")&&b():fl.isOpen||w()},b=()=>{mn(i);let g=n.w<600;fl.animate({action:\"close\",",
-      "replace": "=0;const _=()=>{window.PSX.overlayOpen(fl)?(!i||i===\"close\")&&b():w()},b=()=>{mn(i);let g=n.w<600;window.PSX.overlay(fl,{action:\"close\","
-    },
-    {
-      "find": ">{let g=n.w<600;fl.animate({action:\"open\",a",
-      "replace": ">{let g=n.w<600;window.PSX.overlay(fl,{action:\"open\",a"
-    },
-    {
-      "find": "0);return}mn(p),fl.animate({action:\"close\",",
-      "replace": "0);return}mn(p),window.PSX.overlay(fl,{action:\"close\","
-    },
-    {
-      "find": "n.head.z=i.head.z,an.user.face.set({eye:i.eye",
-      "replace": "n.head.z=i.head.z,i.brow=window.PSX.brow(l,i.brow),n.brow=i.brow,n.eye=i.eye,an.user.face.set({eye:i.eye"
-    },
-    {
-      "find": "e.head.x>=-.4&&e.head.x<=.4&&e.head.y>=-.6&&e.head.y<=.6&&(t.eye=hs.stabilizeBlink(e.eye,e.head.y,{enableWink:E(de).face.enableWink,maxRot:.5}))",
-      "replace": "(t.brow=e.brow,t.eye=hs.stabilizeBlink(e.eye,e.head.y,{enableWink:E(de).face.enableWink,maxRot:.5}))"
-    },
-    {
-      "find": "o=n?-1:1;const r=l.humanoid.getBoneNode(Je.HumanoidBoneName[a+\"UpperArm\"])",
-      "replace": "o=n?-1:1,g=window.PSX.armGain();const r=l.humanoid.getBoneNode(Je.HumanoidBoneName[a+\"UpperArm\"])"
-    },
-    {
-      "find": "zt(r,{z:e[t+\"UpperArm\"].z*o,y:e[t+\"UpperArm\"].y*o,x:e[t+\"UpperArm\"].x},i?1:.04+Ke*4)",
-      "replace": "zt(r,{z:e[t+\"UpperArm\"].z*o*g,y:e[t+\"UpperArm\"].y*o*g,x:e[t+\"UpperArm\"].x*g},i?1:window.PSX.smooth(.04+Ke*4))"
-    },
-    {
-      "find": "zt(u,{z:e[t+\"LowerArm\"].z*o,y:e[t+\"LowerArm\"].y*o,x:e[t+\"LowerArm\"].x},i?1:.04+Ke*4)",
-      "replace": "zt(u,{z:e[t+\"LowerArm\"].z*o*g,y:e[t+\"LowerArm\"].y*o*g,x:e[t+\"LowerArm\"].x*g},i?1:window.PSX.smooth(.04+Ke*4))"
-    },
-    {
-      "find": "zt(c,{z:e[t+\"Hand\"].z*o,y:e[t+\"Hand\"].y*o,x:e[t+\"Hand\"].x},i?1:.04+Ke*6)",
-      "replace": "zt(c,{z:e[t+\"Hand\"].z*o*g,y:e[t+\"Hand\"].y*o*g,x:e[t+\"Hand\"].x*g},i?1:window.PSX.smooth(.04+Ke*6))"
-    },
-    {
-      "find": ",n){er.set(n);const o=E(V).user.tracking.Pose",
-      "replace": ",n){window.PSX.pose(n,t,i),er.set(n);const o=E(V).user.tracking.Pose"
-    },
-    {
-      "find": ",c=l.humanoid.getBoneNode(Je.HumanoidBoneName[a+\"Hand\"]);zt(r,{z:e[t+\"UpperArm\"]",
-      "replace": ",c=l.humanoid.getBoneNode(Je.HumanoidBoneName[a+\"Hand\"]);if(window.PSX.arm(l,e,t,n,i,r,u,c))return;zt(r,{z:e[t+\"UpperArm\"]"
-    },
-    {
-      "find": "function Xn(l,e=\"holistic\",t=null){switch(kl.width=",
-      "replace": "function Xn(l,e=\"holistic\",t=null){if(!window.PSX.guide(kl))return;switch(kl.width="
-    },
-    {
-      "find": "r&&zt(r,{x:ae(e.head.x*c,-.3,.3),z:E(de).holistic.enable?ae(t.Spine.z*c,-.7,.7)*a:ae(e.head.z*c,-.1,.1)*a,y:E(de).holistic.enable?ae(t.Spine.y*c*.2,-.7,.7)",
-      "replace": "r&&zt(r,{x:ae(e.head.x*c,-.3,.3),z:E(de).holistic.enable?ae(t.Spine.z*ps,-.7,.7)*a:ae(e.head.z*c,-.1,.1)*a,y:E(de).holistic.enable?ae(t.Spine.y*ps*.2,-.7,.7)"
-    },
-    {
-      "find": "u&&zt(u,{x:ae(e.head.x*c,-.3,.3),z:E(de).holistic.enable?ae(t.Spine.z*c,-.7,.7)*a:ae(e.head.z*c,-.3,.3)*a,y:E(de).holistic.enable?ae(t.Spine.y*c*.2,-.4,.4)",
-      "replace": "u&&zt(u,{x:ae(e.head.x*c,-.3,.3),z:E(de).holistic.enable?ae(t.Spine.z*ps,-.7,.7)*a:ae(e.head.z*c,-.3,.3)*a,y:E(de).holistic.enable?ae(t.Spine.y*ps*.2,-.4,.4)"
-    },
-    {
-      "find": "o&&zt(o,{x:ae(e.head.x*c,-.3,.3),z:E(de).holistic.enable?ae(t.Spine.z*c,-.7,.7)*a:ae(e.head.z*c,-.1,.1)*a,y:E(de).holistic.enable?ae(t.Spine.y*c*.2,-.4,.4)",
-      "replace": "o&&zt(o,{x:ae(e.head.x*c,-.3,.3),z:E(de).holistic.enable?ae(t.Spine.z*ps,-.7,.7)*a:ae(e.head.z*c,-.1,.1)*a,y:E(de).holistic.enable?ae(t.Spine.y*ps*.2,-.4,.4)"
-    },
-    {
-      "find": "class oo extends pe{constructor(e){super();_e(this,e,ro,ao,me,{})}}",
-      "replace": "class oo extends pe{constructor(e){super();_e(this,e,ro,ao,me,{}),window.PSX.bg({list:al,current:Ft,saved:ei,tab:Tl,upload:Hs})}}"
-    },
-    {
-      "find": "const f=v=>{let g=i;g.splice(v,1),v>-1&&Ce(al,i=g,i)}",
-      "replace": "const f=v=>{let g=window.PSX.bgDrop(i,v,u);Ce(al,i=g,i)}"
-    },
-    {
-      "find": "b=[\"2D\",\"3D\",\"Color\"],w=[];for(let k=0;k<3;k+=1)",
-      "replace": "b=[\"Color\"],w=[];for(let k=0;k<1;k+=1)"
-    },
-    {
-      "find": "b=[\"2D\",\"3D\",\"Color\"];let y;for(y=0;y<3;y+=1){",
-      "replace": "b=[\"Color\"];let y;for(y=0;y<1;y+=1){"
-    },
-    {
-      "find": "n=L(\"div\");for(let k=0;k<3;k+=1)w[k].c()",
-      "replace": "n=L(\"div\");for(let k=0;k<1;k+=1)w[k].c()"
-    },
-    {
-      "find": "d(e,t),d(t,n);for(let g=0;g<3;g+=1)w[g].m(n,null)",
-      "replace": "d(e,t),d(t,n);for(let g=0;g<1;g+=1)w[g].m(n,null)"
-    },
-    {
-      "find": "for(;y<3;y+=1)w[y].d(1)",
-      "replace": "for(;y<1;y+=1)w[y].d(1)"
-    },
-    {
-      "find": "const Tl=J(\"2D\")",
-      "replace": "const Tl=J(\"Color\")"
-    },
-    {
-      "find": "let at=(!l[5]||l[6])&&(!l[2]&&l[8].w<600||l[8].w>600)&&es(l);",
-      "replace": "let at=(!l[2]&&l[8].w<600||l[8].w>600)&&es(l);"
-    },
-    {
-      "find": "Qe.$set(bn),(!U[5]||U[6])&&(!U[2]&&U[8].w<600",
-      "replace": "Qe.$set(bn),(!U[2]&&U[8].w<600"
-    },
-    {
-      "find": "const i={Right:l.leftHandLandmarks||null,Left:l.rightHandLandmarks||null};",
-      "replace": "const i=window.PSX.hands({Right:l.leftHandLandmarks||null,Left:l.rightHandLandmarks||null},t);"
-    },
-    {
-      "find": "locateFile:p=>`https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh@0.4.1633559619/${p}`",
-      "replace": "locateFile:p=>new URL(\"vendor/mediapipe/face_mesh/\"+p,document.baseURI).href"
-    },
-    {
-      "find": "locateFile:p=>`https://cdn.jsdelivr.net/npm/@mediapipe/holistic@0.5.1635989137/${p}`",
-      "replace": "locateFile:p=>new URL(\"vendor/mediapipe/holistic/\"+p,document.baseURI).href"
-    },
-    {
-      "find": "Yt=[{id:0,name:\"Jeferson\",type:\"url\",url:\"vrm/Jeferson.vrm\",icon:\"vrm/Jeferson.png\",source:\"\",author:\"\",color:null}]];$e(vt,\"modelList\"",
-      "replace": "Yt=[{id:0,name:\"Jeferson\",type:\"url\",url:\"vrm/Jeferson.vrm\",icon:\"vrm/Jeferson.png\",source:\"\",author:\"\",color:null}];$e(vt,\"modelList\""
-    },
-    {
-      "find": "$e(Ft,\"bgURL\",Mn[0],Zn);et(Ft,\"bgURL\")",
-      "replace": "$e(Ft,\"bgURL\",window.PSX.bgDefault(),window.PSX.bgFix);et(Ft,\"bgURL\")"
-    },
-    {
-      "find": "$e(Ut,\"userModel\",{type:Yt[0].type,name:Yt[0].name,uploaded:Yt[0].uploaded,url:Yt[0].url}),et(Ut,\"userModel\")",
-      "replace": "$e(Ut,\"userModel\",{type:Yt[0].type,name:Yt[0].name,uploaded:Yt[0].uploaded,url:Yt[0].url},window.PSX.modelFix),et(Ut,\"userModel\")"
-    },
-    {
-      "find": "gi=[{type:\"color\",name:\"Transparent\",url:\"#00fc0100\"},{type:\"color\",name:\"White\",url:\"#ffffff\"},{type:\"color\",name:\"Chroma Green\",url:\"#00fc01\"},{type:\"color\",name:\"Chroma Blue\",url:\"#0033cc\"},{type:\"color\",name:\"Chroma Pink\",url:\"#ff00ff\"}]],Mn=[",
-      "replace": "gi=[{type:\"color\",name:\"Transparent\",url:\"#00fc0100\"},{type:\"color\",name:\"White\",url:\"#ffffff\"},{type:\"color\",name:\"Chroma Green\",url:\"#00fc01\"},{type:\"color\",name:\"Chroma Blue\",url:\"#0033cc\"},{type:\"color\",name:\"Chroma Pink\",url:\"#ff00ff\"}],Mn=["
-    },
-    {
-      "find": "Mn=[]];$e(al,\"bgList\"",
-      "replace": "Mn=[];$e(al,\"bgList\""
-    },
-    {
-      "find": "const Ds=l=>{for(var e=0;e<l.length;e++){let t=_s(l[e]);",
-      "replace": "const Ds=l=>{window.PSX.frontFiles(l);return;for(var e=0;e<l.length;e++){let t=_s(l[e]);"
-    },
-    {
-      "find": "sticker:{en:\"Stickers\"",
-      "replace": "sticker:{en:\"Front\""
-    },
-    {
-      "find": "bg:{en:\"Backgrounds\"",
-      "replace": "bg:{en:\"Back\""
-    },
-    {
-      "find": "Si=[{url:ge+\"img/sticker/accessories/sunglass_normal.png\"",
-      "replace": "Si=[];const SiCut=[{url:ge+\"img/sticker/accessories/sunglass_normal.png\""
-    },
-    {
-      "find": "class ho extends pe{constructor(e){super();_e(this,e,mo,fo,me,{})}}",
-      "replace": "class ho extends pe{constructor(e){super();_e(this,e,mo,fo,me,{}),window.PSX.front({files:hl,list:ul})}}"
-    },
-    {
-      "find": "$e(hl,\"stickerList\",[],Zn);et(hl,\"stickerList\")",
-      "replace": "$e(hl,\"stickerList\",[],Zn);et(hl,\"stickerList\");window.PSX.front({files:hl})"
-    },
-    {
-      "find": "Dt.target.y+=.025,Dt.update(),jt.position.y=",
-      "replace": "Dt.target.y+=.025,Dt.update(),window.PSX.cam(Dt,jt),jt.position.y="
-    }
-  ],
-  "vendorPatches": [
-    {
-      "find": "J4=n=>{if(n.length!==478)return 0;",
-      "replace": "J4=n=>{if(n.length<468)return 0;"
-    },
-    {
-      "find": "if(n.length!==478)return{l:1,r:1};const r=Rb(n,ls,{high:e,low:t})",
-      "replace": "if(n.length<468)return{l:1,r:1};const r=Rb(n,ls,{high:e,low:t})"
-    },
-    {
-      "find": "a=r/i-1;return(tr(a,o,s)-o)/(s-o)}",
-      "replace": "a=r/i-1;return a}"
-    }
-  ]
+ "bundle": "docs/assets/index.e2bec78d.js",
+ "patches": [
+  {
+   "find": ")),f.setOptions({maxNumFaces:1,r",
+   "replace": ")),f.setOptions(window.PSX.mpOptions({maxNumFaces:1,r"
+  },
+  {
+   "find": "gConfidence:.5}),f.onResults(p=>",
+   "replace": "gConfidence:.5})),f.onResults(p=>"
+  },
+  {
+   "find": ")),c.setOptions(n.holistic.model),c.onResults(lr",
+   "replace": ")),c.setOptions(window.PSX.mpOptions(n.holistic.model)),c.onResults(lr"
+  },
+  {
+   "find": ".detected=!0,a),requestAnimationFrame(C)}}return l.$$",
+   "replace": ".detected=!0,a),window.PSX.nextTrack(C)}}return l.$$"
+  },
+  {
+   "find": "i))),n.update(e)},Al=l=>{!l||(E(",
+   "replace": "i))),n.update(e),window.PSX.tick(n)},Al=l=>{!l||(E("
+  },
+  {
+   "find": "eturn;y.id=z.id,y.isUser=z.id===",
+   "replace": "eturn;y.id=z.id,window.PSX.onModel(y,g),y.isUser=z.id==="
+  },
+  {
+   "find": "w.mapSize.width=2048,M.shadow.mapSize.height=2048,M.shadow.camera",
+   "replace": "w.mapSize.width=window.PSX.shadowSize(),M.shadow.mapSize.height=window.PSX.shadowSize(),M.shadow.camera"
+  },
+  {
+   "find": "p),C.addPass(z),C.addPass(v),C.a",
+   "replace": "p),C.addPass(z),window.PSX.smaa()&&C.addPass(v),C.a"
+  },
+  {
+   "find": "=e;function m(){requestAnimationFrame(m),Ke=zi.getDelta()",
+   "replace": "=e;function m(){if(requestAnimationFrame(m),!window.PSX.frame())return;Ke=zi.getDelta()"
+  },
+  {
+   "find": "PI,Math.PI):0,c=1;o&&zt(o,{y:ae(e",
+   "replace": "PI,Math.PI):0,c=window.PSX.headGain();o&&zt(o,{y:ae(e"
+  },
+  {
+   "find": ",-.3,.3)*a},i?1:.04+Ke*4)},Ms=(l,e,t,n=!",
+   "replace": ",-.3,.3)*a},i?1:window.PSX.smooth(.04+Ke*4))},Ms=(l,e,t,n=!"
+  },
+  {
+   "find": "me.Spine);let c=.05;r&&zt(r,{x:ae(e",
+   "replace": "me.Spine);let c=window.PSX.bodyGain(),ps=window.PSX.leanGain();t.Spine&&(t.Spine.z=window.PSX.spineLean(t.Spine.z,e.head.z));r&&zt(r,{x:ae(e"
+  },
+  {
+   "find": "*2,-.3,.3)},i?1:.04+Ke*2),u&&zt(u,{x:ae(",
+   "replace": "*2,-.3,.3)},i?1:window.PSX.smooth(.04+Ke*2)),u&&zt(u,{x:ae("
+  },
+  {
+   "find": "*2,-.1,.1)},i?1:.04+Ke*2),o&&zt(o,{x:ae(",
+   "replace": "*2,-.1,.1)},i?1:window.PSX.smooth(.04+Ke*2)),o&&zt(o,{x:ae("
+  },
+  {
+   "find": "*2,-.3,.3)},i?1:.04+Ke*2)},Ps=(l,e,t=!1)",
+   "replace": "*2,-.3,.3)},i?1:window.PSX.smooth(.04+Ke*2))},Ps=(l,e,t=!1)"
+  },
+  {
+   "find": "upil.x,0,\"XYZ\"),l.lookAt.applyer.lookAt(u)},un=(l,e,t=\"Ri",
+   "replace": "upil.x,0,\"XYZ\"),window.PSX.gaze(l,u),window.PSX.face(l,e)},un=(l,e,t=\"Ri"
+  },
+  {
+   "find": "t\":n,r=i?-1:1,u=[\"Ring\",\"Index\",\"Little\",\"Thumb\",\"Middle\"],c=[\"Proximal\",\"",
+   "replace": "t\":n,r=i?-1:1,u=window.PSX.fingers(),c=[\"Proximal\",\""
+  },
+  {
+   "find": "ance\",antialias:!0,stencil:!0,alph",
+   "replace": "ance\",antialias:window.PSX.aa(),stencil:!0,alph"
+  },
+  {
+   "find": "ow.innerHeight),p.setPixelRatio(Math.max(2,window.devicePixelRatio)),p.shadowMap.enabled=!0;let z=null;cons",
+   "replace": "ow.innerHeight),window.PSX.setupRenderer(p),p.shadowMap.enabled=window.PSX.shadows();let z=null;cons"
+  },
+  {
+   "find": "w.mapSize.width=2048,g.shadow.mapSize.height=2048;const y=new ba(",
+   "replace": "w.mapSize.width=window.PSX.shadowSize(),g.shadow.mapSize.height=window.PSX.shadowSize();const y=new ba("
+  },
+  {
+   "find": "=0;const _=()=>{fl.isOpen?(!i||i===\"close\")&&b():fl.isOpen||w()},b=()=>{mn(i);let g=n.w<600;fl.animate({action:\"close\",",
+   "replace": "=0;const _=()=>{window.PSX.overlayOpen(fl)?(!i||i===\"close\")&&b():w()},b=()=>{mn(i);let g=n.w<600;window.PSX.overlay(fl,{action:\"close\","
+  },
+  {
+   "find": ">{let g=n.w<600;fl.animate({action:\"open\",a",
+   "replace": ">{let g=n.w<600;window.PSX.overlay(fl,{action:\"open\",a"
+  },
+  {
+   "find": "0);return}mn(p),fl.animate({action:\"close\",",
+   "replace": "0);return}mn(p),window.PSX.overlay(fl,{action:\"close\","
+  },
+  {
+   "find": "n.head.z=i.head.z,an.user.face.set({eye:i.eye",
+   "replace": "n.head.z=i.head.z,i.brow=window.PSX.brow(l,i.brow),n.brow=i.brow,n.eye=i.eye,an.user.face.set({eye:i.eye"
+  },
+  {
+   "find": "e.head.x>=-.4&&e.head.x<=.4&&e.head.y>=-.6&&e.head.y<=.6&&(t.eye=hs.stabilizeBlink(e.eye,e.head.y,{enableWink:E(de).face.enableWink,maxRot:.5}))",
+   "replace": "(t.brow=e.brow,t.eye=hs.stabilizeBlink(e.eye,e.head.y,{enableWink:E(de).face.enableWink,maxRot:.5}))"
+  },
+  {
+   "find": "o=n?-1:1;const r=l.humanoid.getBoneNode(Je.HumanoidBoneName[a+\"UpperArm\"])",
+   "replace": "o=n?-1:1,g=window.PSX.armGain();const r=l.humanoid.getBoneNode(Je.HumanoidBoneName[a+\"UpperArm\"])"
+  },
+  {
+   "find": "zt(r,{z:e[t+\"UpperArm\"].z*o,y:e[t+\"UpperArm\"].y*o,x:e[t+\"UpperArm\"].x},i?1:.04+Ke*4)",
+   "replace": "zt(r,{z:e[t+\"UpperArm\"].z*o*g,y:e[t+\"UpperArm\"].y*o*g,x:e[t+\"UpperArm\"].x*g},i?1:window.PSX.smooth(.04+Ke*4))"
+  },
+  {
+   "find": "zt(u,{z:e[t+\"LowerArm\"].z*o,y:e[t+\"LowerArm\"].y*o,x:e[t+\"LowerArm\"].x},i?1:.04+Ke*4)",
+   "replace": "zt(u,{z:e[t+\"LowerArm\"].z*o*g,y:e[t+\"LowerArm\"].y*o*g,x:e[t+\"LowerArm\"].x*g},i?1:window.PSX.smooth(.04+Ke*4))"
+  },
+  {
+   "find": "zt(c,{z:e[t+\"Hand\"].z*o,y:e[t+\"Hand\"].y*o,x:e[t+\"Hand\"].x},i?1:.04+Ke*6)",
+   "replace": "zt(c,{z:e[t+\"Hand\"].z*o*g,y:e[t+\"Hand\"].y*o*g,x:e[t+\"Hand\"].x*g},i?1:window.PSX.smooth(.04+Ke*6))"
+  },
+  {
+   "find": ",n){er.set(n);const o=E(V).user.tracking.Pose",
+   "replace": ",n){window.PSX.pose(n,t,i),er.set(n);const o=E(V).user.tracking.Pose"
+  },
+  {
+   "find": ",c=l.humanoid.getBoneNode(Je.HumanoidBoneName[a+\"Hand\"]);zt(r,{z:e[t+\"UpperArm\"]",
+   "replace": ",c=l.humanoid.getBoneNode(Je.HumanoidBoneName[a+\"Hand\"]);if(window.PSX.arm(l,e,t,n,i,r,u,c))return;zt(r,{z:e[t+\"UpperArm\"]"
+  },
+  {
+   "find": "function Xn(l,e=\"holistic\",t=null){switch(kl.width=",
+   "replace": "function Xn(l,e=\"holistic\",t=null){if(!window.PSX.guide(kl))return;switch(kl.width="
+  },
+  {
+   "find": "r&&zt(r,{x:ae(e.head.x*c,-.3,.3),z:E(de).holistic.enable?ae(t.Spine.z*c,-.7,.7)*a:ae(e.head.z*c,-.1,.1)*a,y:E(de).holistic.enable?ae(t.Spine.y*c*.2,-.7,.7)",
+   "replace": "r&&zt(r,{x:ae(e.head.x*c,-.3,.3),z:E(de).holistic.enable?ae(t.Spine.z*ps,-.7,.7)*a:ae(e.head.z*c,-.1,.1)*a,y:E(de).holistic.enable?ae(t.Spine.y*ps*.2,-.7,.7)"
+  },
+  {
+   "find": "u&&zt(u,{x:ae(e.head.x*c,-.3,.3),z:E(de).holistic.enable?ae(t.Spine.z*c,-.7,.7)*a:ae(e.head.z*c,-.3,.3)*a,y:E(de).holistic.enable?ae(t.Spine.y*c*.2,-.4,.4)",
+   "replace": "u&&zt(u,{x:ae(e.head.x*c,-.3,.3),z:E(de).holistic.enable?ae(t.Spine.z*ps,-.7,.7)*a:ae(e.head.z*c,-.3,.3)*a,y:E(de).holistic.enable?ae(t.Spine.y*ps*.2,-.4,.4)"
+  },
+  {
+   "find": "o&&zt(o,{x:ae(e.head.x*c,-.3,.3),z:E(de).holistic.enable?ae(t.Spine.z*c,-.7,.7)*a:ae(e.head.z*c,-.1,.1)*a,y:E(de).holistic.enable?ae(t.Spine.y*c*.2,-.4,.4)",
+   "replace": "o&&zt(o,{x:ae(e.head.x*c,-.3,.3),z:E(de).holistic.enable?ae(t.Spine.z*ps,-.7,.7)*a:ae(e.head.z*c,-.1,.1)*a,y:E(de).holistic.enable?ae(t.Spine.y*ps*.2,-.4,.4)"
+  },
+  {
+   "find": "class oo extends pe{constructor(e){super();_e(this,e,ro,ao,me,{})}}",
+   "replace": "class oo extends pe{constructor(e){super();_e(this,e,ro,ao,me,{}),window.PSX.bg({list:al,current:Ft,saved:ei,tab:Tl,upload:Hs})}}"
+  },
+  {
+   "find": "const f=v=>{let g=i;g.splice(v,1),v>-1&&Ce(al,i=g,i)}",
+   "replace": "const f=v=>{let g=window.PSX.bgDrop(i,v,u);Ce(al,i=g,i)}"
+  },
+  {
+   "find": "b=[\"2D\",\"3D\",\"Color\"],w=[];for(let k=0;k<3;k+=1)",
+   "replace": "b=[\"Color\"],w=[];for(let k=0;k<1;k+=1)"
+  },
+  {
+   "find": "b=[\"2D\",\"3D\",\"Color\"];let y;for(y=0;y<3;y+=1){",
+   "replace": "b=[\"Color\"];let y;for(y=0;y<1;y+=1){"
+  },
+  {
+   "find": "n=L(\"div\");for(let k=0;k<3;k+=1)w[k].c()",
+   "replace": "n=L(\"div\");for(let k=0;k<1;k+=1)w[k].c()"
+  },
+  {
+   "find": "d(e,t),d(t,n);for(let g=0;g<3;g+=1)w[g].m(n,null)",
+   "replace": "d(e,t),d(t,n);for(let g=0;g<1;g+=1)w[g].m(n,null)"
+  },
+  {
+   "find": "for(;y<3;y+=1)w[y].d(1)",
+   "replace": "for(;y<1;y+=1)w[y].d(1)"
+  },
+  {
+   "find": "const Tl=J(\"2D\")",
+   "replace": "const Tl=J(\"Color\")"
+  },
+  {
+   "find": "let at=(!l[5]||l[6])&&(!l[2]&&l[8].w<600||l[8].w>600)&&es(l);",
+   "replace": "let at=(!l[2]&&l[8].w<600||l[8].w>600)&&es(l);"
+  },
+  {
+   "find": "Qe.$set(bn),(!U[5]||U[6])&&(!U[2]&&U[8].w<600",
+   "replace": "Qe.$set(bn),(!U[2]&&U[8].w<600"
+  },
+  {
+   "find": "const i={Right:l.leftHandLandmarks||null,Left:l.rightHandLandmarks||null};",
+   "replace": "const i=window.PSX.hands({Right:l.leftHandLandmarks||null,Left:l.rightHandLandmarks||null},t);"
+  },
+  {
+   "find": "locateFile:p=>`https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh@0.4.1633559619/${p}`",
+   "replace": "locateFile:p=>new URL(\"vendor/mediapipe/face_mesh/\"+p,document.baseURI).href"
+  },
+  {
+   "find": "locateFile:p=>`https://cdn.jsdelivr.net/npm/@mediapipe/holistic@0.5.1635989137/${p}`",
+   "replace": "locateFile:p=>new URL(\"vendor/mediapipe/holistic/\"+p,document.baseURI).href"
+  },
+  {
+   "find": "Yt=[{id:0,name:\"Jeferson\",type:\"url\",url:\"vrm/Jeferson.vrm\",icon:\"vrm/Jeferson.png\",source:\"\",author:\"\",color:null}]];$e(vt,\"modelList\"",
+   "replace": "Yt=[{id:0,name:\"Jeferson\",type:\"url\",url:\"vrm/Jeferson.vrm\",icon:\"vrm/Jeferson.png\",source:\"\",author:\"\",color:null}];$e(vt,\"modelList\""
+  },
+  {
+   "find": "$e(Ft,\"bgURL\",Mn[0],Zn);et(Ft,\"bgURL\")",
+   "replace": "$e(Ft,\"bgURL\",window.PSX.bgDefault(),window.PSX.bgFix);et(Ft,\"bgURL\")"
+  },
+  {
+   "find": "$e(Ut,\"userModel\",{type:Yt[0].type,name:Yt[0].name,uploaded:Yt[0].uploaded,url:Yt[0].url}),et(Ut,\"userModel\")",
+   "replace": "$e(Ut,\"userModel\",{type:Yt[0].type,name:Yt[0].name,uploaded:Yt[0].uploaded,url:Yt[0].url},window.PSX.modelFix),et(Ut,\"userModel\")"
+  },
+  {
+   "find": "gi=[{type:\"color\",name:\"Transparent\",url:\"#00fc0100\"},{type:\"color\",name:\"White\",url:\"#ffffff\"},{type:\"color\",name:\"Chroma Green\",url:\"#00fc01\"},{type:\"color\",name:\"Chroma Blue\",url:\"#0033cc\"},{type:\"color\",name:\"Chroma Pink\",url:\"#ff00ff\"}]],Mn=[",
+   "replace": "gi=[{type:\"color\",name:\"Transparent\",url:\"#00fc0100\"},{type:\"color\",name:\"White\",url:\"#ffffff\"},{type:\"color\",name:\"Chroma Green\",url:\"#00fc01\"},{type:\"color\",name:\"Chroma Blue\",url:\"#0033cc\"},{type:\"color\",name:\"Chroma Pink\",url:\"#ff00ff\"}],Mn=["
+  },
+  {
+   "find": "Mn=[]];$e(al,\"bgList\"",
+   "replace": "Mn=[];$e(al,\"bgList\""
+  },
+  {
+   "find": "const Ds=l=>{for(var e=0;e<l.length;e++){let t=_s(l[e]);",
+   "replace": "const Ds=l=>{window.PSX.frontFiles(l);return;for(var e=0;e<l.length;e++){let t=_s(l[e]);"
+  },
+  {
+   "find": "sticker:{en:\"Stickers\"",
+   "replace": "sticker:{en:\"Front\""
+  },
+  {
+   "find": "bg:{en:\"Backgrounds\"",
+   "replace": "bg:{en:\"Back\""
+  },
+  {
+   "find": "Si=[{url:ge+\"img/sticker/accessories/sunglass_normal.png\"",
+   "replace": "Si=[];const SiCut=[{url:ge+\"img/sticker/accessories/sunglass_normal.png\""
+  },
+  {
+   "find": "class ho extends pe{constructor(e){super();_e(this,e,mo,fo,me,{})}}",
+   "replace": "class ho extends pe{constructor(e){super();_e(this,e,mo,fo,me,{}),window.PSX.front({files:hl,list:ul})}}"
+  },
+  {
+   "find": "$e(hl,\"stickerList\",[],Zn);et(hl,\"stickerList\")",
+   "replace": "$e(hl,\"stickerList\",[],Zn);et(hl,\"stickerList\");window.PSX.front({files:hl})"
+  },
+  {
+   "find": "Dt.target.y+=.025,Dt.update(),jt.position.y=",
+   "replace": "Dt.target.y+=.025,Dt.update(),window.PSX.cam(Dt,jt),jt.position.y="
+  },
+  {
+   "find": "else{let e=ae(1.15+(E(V).user.tracking.Face.head.width-.3)*-1.9,.2,24.5),t=ae((E(V).user.tracking.Face.head.position.x-.5)*.35,-1.5,1.5),n=ae((E(V).user.tracking.Face.head.position.y-.5)*.35,-1.5,1.5);l.position.lerp(new rl(t,n,e),.3)}",
+   "replace": "else{void 0}"
+  }
+ ],
+ "vendorPatches": [
+  {
+   "find": "J4=n=>{if(n.length!==478)return 0;",
+   "replace": "J4=n=>{if(n.length<468)return 0;"
+  },
+  {
+   "find": "if(n.length!==478)return{l:1,r:1};const r=Rb(n,ls,{high:e,low:t})",
+   "replace": "if(n.length<468)return{l:1,r:1};const r=Rb(n,ls,{high:e,low:t})"
+  },
+  {
+   "find": "a=r/i-1;return(tr(a,o,s)-o)/(s-o)}",
+   "replace": "a=r/i-1;return a}"
+  }
+ ]
 }
