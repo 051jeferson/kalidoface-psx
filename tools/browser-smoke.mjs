@@ -159,7 +159,10 @@ try {
   assert.equal(rigResult.palmRepeat.rollDeg, rigResult.palmBefore.rollDeg);
   assert.equal(rigResult.palmRecovered.rollRejected, false, 'a consistent new palm recovers');
   console.log('Bundled three.js IK:', JSON.stringify(rigResult));
-  await page.locator('[data-text="Settings"]').click();
+  // a fresh profile takes cfg.lang from navigator.languages, so on a pt-BR
+  // machine the app boots translated and the button says "Ajustes" - match
+  // either label
+  await page.locator('button.subButton[data-text="Settings"], button.subButton[data-text="Ajustes"]').click();
   const language = page.locator('select[name="psx-lang"]');
   await language.waitFor();
   await language.selectOption('1');
@@ -201,7 +204,9 @@ try {
   assert.equal(await page.evaluate(() => PSX.mic().state), 'off');
   assert.equal(await page.evaluate(() => testMicStreams.every(s => s.getTracks().every(t => t.readyState === 'ended'))), true,
     'disabling microphone stops its real browser track');
-  await page.locator('[data-text="Backgrounds"]').click();
+  // the fork relabelled this button when backgrounds became the Back layer
+  // (EN "Back", PT "Fundo") - go by its class, which the label swaps don't touch
+  await page.locator('button.menu-item.bg').click();
   const green = page.getByRole('button', { name: 'Chroma green', exact: true });
   await green.waitFor();
   await green.focus();

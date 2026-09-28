@@ -39,7 +39,12 @@ export function runtime(saved = null, overrides = {}) {
     setRun: function () { calRun = { kind: 'face', phase: 'wait' }; },
     getRun: function () { return calRun; }
   };`;
-  vm.runInContext(source.replace('  injectAppCss();\n  applyDocLang();', '')
+  // The boot lines are stripped so the stub never runs the stylesheet
+  // injectors or the language attribute pass - the document here has neither
+  // an element factory nor a real documentElement. Matched loosely over line
+  // endings: checkouts on both sides of core.autocrlf have to strip cleanly.
+  vm.runInContext(source
+    .replace(/  injectAppCss\(\);\r?\n  applyDocLang\(\);/, '')
     .replace(/\}\)\(\);\s*$/, `${expose}\n})();`), context);
   return { ...window.motion, psx: window.PSX };
 }
