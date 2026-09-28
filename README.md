@@ -133,6 +133,7 @@ touches the app's own source tree (this repo only ships the built bundle).
 | `PSX.overlayOpen(inst)` | The state that animation is heading to |
 | `PSX.bgDefault()` / `PSX.bgFix(entry)` / `PSX.modelFix(entry)` | The shipped background (chroma green), and revivers that rewrite an off-origin stored background / model to the shipped default |
 | `PSX.front(stores)` / `PSX.frontFiles(files)` | Hands over the front-layer image store at its hydrate site and on panel mount; images dropped or picked become the foreground plate |
+| `PSX.bg(stores)` | Hands over the app's background stores on panel mount; the zoom's letterbox mirror follows the current back through it |
 
 ### The PS1 look
 
@@ -1075,6 +1076,22 @@ The choice survives a reload, and so do uploaded images.
 
 For OBS the plate needs a real alpha channel: an opaque PNG — including one
 with a black background — covers the capture outright.
+
+### Zoom
+
+The magnifier button in the menu cluster — the slot the friend-call button kept
+dark — opens a small card with a zoom slider, ± buttons and **Reset**. It
+scales the whole composition: canvas and front layer by the same factor from
+the centre, so a front plate, the back and the avatar keep their registration
+at any magnification. This is not the free camera, which moved the character
+alone and let a plate composite drift apart.
+
+Below 100% the canvas stops covering the window; a colour back is mirrored
+onto the page behind it so the ring is the same colour (the transparent preset
+stays transparent), but the avatar itself still ends where the shot ends —
+there is no scene outside the camera to reveal. 100% is the reset.
+
+The setting persists like any other and hides with the HUD (**H**).
 
 Deleting an uploaded background also got less exciting. The list is filtered by
 `pano` before it is drawn, but the delete button reported the index it was drawn

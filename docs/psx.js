@@ -267,6 +267,13 @@
     frontOn: true,
     frontOpacity: 1,
 
+    // --- composition zoom -----------------------------------------------
+    // Scales the whole shot - canvas and front layer together - rather than
+    // the character alone, which is what the free camera did. Percent, 100 =
+    // off. Below 100 the canvas stops covering the window, so the edges show
+    // whatever is behind it.
+    zoom: 100,
+
     // --- performance --------------------------------------------------
     // Shed tracking rate on its own while the machine cannot keep up, and take
     // it back when it can. Independent of the fixed caps, and on by default:
@@ -361,6 +368,7 @@
     trackFps: { min: 0, max: 60 },
     renderFps: { min: 0, max: 60 },
     colorLevels: { one: [8, 16, 32, 64] },
+    zoom: { min: 50, max: 300 },
     fingers: { one: ['all', 'thumb', 'none'] },
     signal: { one: ['calibrated', 'auto', 'raw'] },
     lang: { one: ['en', 'pt'] },
@@ -522,6 +530,7 @@
     syncControls();
     injectBgColours();
     applyFront();
+    applyZoom();
     askReload();
     console.log('[psx] settings reset to defaults');
   }
@@ -6843,6 +6852,9 @@
     'Add image': 'Adicionar imagem',
     'Delete image': 'Apagar imagem',
     'No images yet': 'Nenhuma imagem ainda',
+    'Zoom in': 'Mais zoom',
+    'Zoom out': 'Menos zoom',
+    'Reset': 'Redefinir',
     'None': 'Nenhuma',
     'Show front': 'Mostrar frente',
     'Opacity': 'Opacidade',
@@ -7555,6 +7567,7 @@
     // only on frames that really render, so the smoothing dt is the interval
     // the bones are actually lerped over
     stepMotionClock();
+    zoomTick();
     return true;
   }
 
@@ -8560,9 +8573,23 @@
   // than piling up a near-identical colour every time one is nudged
   var bgEditUrl = null;
   var bgCard = null;
+  var bgSub = null;
+  // the current back, as far as this file has seen one: the hydrate reviver
+  // records what the app loaded, and the panel's subscription keeps it current
+  // from there. The zoom's letterbox mirror reads it - the panel may never
+  // have been opened, so the reviver is the only witness the hydrated choice
+  // has.
+  var bgCur = null;
 
   // called when the Backgrounds panel mounts, with the app's own stores
-  function bg(stores) { bgStores = stores; mirrorColours(); }
+  function bg(stores) {
+    bgStores = stores;
+    // the mirrored colour under a zoomed-out shot follows the current back
+    if (!bgSub && stores && stores.current && typeof stores.current.subscribe === 'function') {
+      bgSub = stores.current.subscribe(function (v) { bgCur = v; applyZoom(); });
+    }
+    mirrorColours();
+  }
 
   // Svelte stores only hand their value to a subscriber. Subscribing runs the
   // callback once, synchronously, before returning the unsubscriber.
@@ -8663,6 +8690,7 @@
   }
 
   function bgFix(a) {
+    bgCur = a;
     if (!a || typeof a !== 'object' || a.type !== 'img' || !offOrigin(a.url)) return;
     a.type = 'color';
     a.url = '#00fc01';
@@ -8672,6 +8700,7 @@
     delete a.sea;
     delete a.light;
     delete a.thumbnail;
+    applyZoom();
   }
 
   function modelFix(a) {
@@ -9286,6 +9315,172 @@
     applyFront();
   }
 
+  // ------------------------------------------------------ composition zoom
+  //
+  // The free camera moved the character alone, which lets a plate composite
+  // drift apart. Zoom scales the whole shot instead - the canvas and the front
+  // layer by the same factor, from the centre - so front plate, back and
+  // avatar keep their registration at any magnification. Below 100% the canvas
+  // no longer covers the window; a colour back is mirrored onto the body so
+  // the ring it would leave is the same colour, and the transparent preset
+  // keeps its transparency by not being mirrored over.
+  // The canvas is the renderer's - the first in the DOM, created by the
+  // bundle. It does not exist yet when setupRenderer fires, and its style can
+  // be rewritten wholesale later, so the transform is re-checked on rendered
+  // frames instead of being trusted to stick.
+  var zoomCanvas = null;
+
+  function applyZoom() {
+    if (typeof document.createElement !== 'function') return;
+    var z = clamp(cfg.zoom, 50, 300) / 100;
+    if (!zoomCanvas || !zoomCanvas.isConnected) zoomCanvas = document.querySelector('canvas');
+    if (zoomCanvas) zoomCanvas.style.transform = 'scale(' + z + ')';
+    if (frontBox) frontBox.style.transform = 'scale(' + z + ')';
+    var body = document.body;
+    if (!body) return;
+    // a fresh profile never hydrated a stored back - the shipped default is
+    // what is on screen
+    var cur = bgCur || (bgStores && bgStores.current ? readStore(bgStores.current) : null) || bgDefault();
+    var hex = cur && cur.type === 'color' && !isAlphaHex(cur.url) ? cur.url : '';
+    // an inline background would override the transparent preset's class, so
+    // it is set only while a ring could actually show
+    body.style.background = hex && z < 1 ? hex : '';
+  }
+
+  function zoomTick() {
+    if (typeof document.createElement !== 'function') return;
+    if (!zoomCanvas || !zoomCanvas.isConnected || zoomCanvas.style.transform === '') applyZoom();
+  }
+
+  var zoomCard = null;
+
+  function zoomValue() { return Math.round(clamp(cfg.zoom, 50, 300)); }
+
+  // live on input, saved on release - the same split the opacity slider uses
+  function setZoom(v, persist) {
+    cfg.zoom = clamp(Math.round(v), 50, 300);
+    applyZoom();
+    syncZoomCard();
+    if (persist) save();
+  }
+
+  function syncZoomCard() {
+    if (!zoomCard) return;
+    var range = zoomCard.__psxZoomRange, val = zoomCard.__psxZoomVal;
+    if (range) range.value = String(zoomValue());
+    if (val) val.textContent = zoomValue() + '%';
+  }
+
+  function buildZoomCard() {
+    var wrap = el('div', 'psx-injected psx-zoom-card', '');
+    wrap.style.cssText = 'position:fixed;right:110px;bottom:78px;z-index:20;width:232px;' +
+      'color:#fff;background:#16161df2;border:1px solid #ffffff22;border-radius:14px;' +
+      'padding:14px 16px;box-sizing:border-box;text-align:left';
+
+    var head = el('div', '', '');
+    head.style.cssText = 'display:flex;align-items:center;gap:8px;margin:0 0 10px';
+    var title = el('strong', '', T('Zoom'));
+    title.style.cssText = 'font-size:14px;flex:1';
+    var val = el('span', '', zoomValue() + '%');
+    val.style.cssText = 'font-size:13px;color:#ffffffb3;font-variant-numeric:tabular-nums';
+    head.appendChild(title);
+    head.appendChild(val);
+    wrap.appendChild(head);
+
+    function stepBtn(txt, d, label, cls) {
+      var b = el('button', cls, txt);
+      b.type = 'button';
+      b.style.cssText = 'width:28px;height:28px;line-height:24px;padding:0;flex:0 0 auto;' +
+        'border-radius:14px;border:1px solid #ffffff33;background:#ffffff14;color:#fff;' +
+        'font-size:16px;cursor:pointer';
+      b.setAttribute('aria-label', label);
+      b.addEventListener('click', function () { setZoom(zoomValue() + d, true); });
+      return b;
+    }
+
+    var row = el('div', '', '');
+    row.style.cssText = 'display:flex;align-items:center;gap:8px';
+    var range = document.createElement('input');
+    range.type = 'range';
+    range.min = '50';
+    range.max = '300';
+    range.step = '1';
+    range.value = String(zoomValue());
+    range.style.cssText = 'flex:1;min-width:0';
+    range.addEventListener('input', function () { setZoom(parseFloat(range.value), false); });
+    range.addEventListener('change', function () { setZoom(parseFloat(range.value), true); });
+    wrap.__psxZoomRange = range;
+    wrap.__psxZoomVal = val;
+    row.appendChild(stepBtn('\u2212', -10, T('Zoom out'), 'psx-zoom-minus'));
+    row.appendChild(range);
+    row.appendChild(stepBtn('+', 10, T('Zoom in'), 'psx-zoom-plus'));
+    wrap.appendChild(row);
+
+    var reset = el('button', 'trigger ' + STG, T('Reset'));
+    reset.style.cssText = 'width:100%;margin-top:10px;padding:8px;border-radius:16px;' +
+      'font-size:13px;font-weight:600;box-sizing:border-box';
+    reset.addEventListener('click', function () { setZoom(100, true); });
+    wrap.appendChild(reset);
+    return wrap;
+  }
+
+  function toggleZoomCard(open) {
+    if (!open && zoomCard) {
+      if (zoomCard.parentNode) zoomCard.parentNode.removeChild(zoomCard);
+      zoomCard = null;
+      return;
+    }
+    if (open && !zoomCard) {
+      zoomCard = buildZoomCard();
+      (document.body || document.documentElement).appendChild(zoomCard);
+    }
+  }
+
+  // The cluster's own fifth slot - the one the friend-call button was rendered
+  // into, hidden here - is free, and the cluster spreads its children onto
+  // fixed slots by nth-child. Taking the call button's place keeps the spread
+  // rules on the buttons before it untouched.
+  function injectZoomButton() {
+    var nav = document.querySelector('nav.menu');
+    if (!nav || nav.querySelector('.psx-zoom-btn')) return;
+    var b = el('button', 'menu-item no_highlights svelte-1ngro65 psx-zoom-btn', '');
+    b.type = 'button';
+    b.setAttribute('data-text', 'Zoom');
+    var fill = document.createElement('i');
+    fill.className = 'kalicon notranslate fill medium svelte-1ngro65';
+    fill.textContent = 'jellyfill3';
+    b.appendChild(fill);
+    // the icon font has no magnifier; the Effects button already mixes in an
+    // SVG, so this one does too
+    var NS = 'http://www.w3.org/2000/svg';
+    var ico = document.createElementNS(NS, 'svg');
+    ico.setAttribute('viewBox', '0 0 24 24');
+    ico.setAttribute('class', 'psx-zoom-ico');
+    ico.setAttribute('aria-hidden', 'true');
+    var glass = document.createElementNS(NS, 'circle');
+    glass.setAttribute('cx', '10.5');
+    glass.setAttribute('cy', '10.5');
+    glass.setAttribute('r', '6.25');
+    glass.setAttribute('fill', 'none');
+    var handle = document.createElementNS(NS, 'line');
+    handle.setAttribute('x1', '15.2');
+    handle.setAttribute('y1', '15.2');
+    handle.setAttribute('x2', '21');
+    handle.setAttribute('y2', '21');
+    // stroke set per element: an attribute on the <svg> would be inherited, but
+    // the fill blob next to it is a sibling, not a child
+    ico.setAttribute('stroke', '#fff');
+    ico.setAttribute('stroke-width', '2.3');
+    ico.setAttribute('stroke-linecap', 'round');
+    ico.appendChild(glass);
+    ico.appendChild(handle);
+    b.appendChild(ico);
+    b.addEventListener('click', function () { toggleZoomCard(!zoomCard); });
+    var call = nav.querySelector('.menu-item.call');
+    if (call && call.parentNode === nav) nav.insertBefore(b, call);
+    else nav.appendChild(b);
+  }
+
   function injectInto(c, build, keyed) {
     if (!c) return;
     // only the Settings side lists per-model expression cells, so it is the
@@ -9329,6 +9524,7 @@
     injectInto(settingsContainer(), buildSettings, true);
     injectBgColours();
     injectFrontCard();
+    injectZoomButton();
   }
 
   function isOurs(n) {
@@ -9500,7 +9696,10 @@
       return;
     }
     if (!calRun) {
-      if (e.key === 'Escape' && closePanel()) e.preventDefault();
+      if (e.key === 'Escape') {
+        if (zoomCard) { toggleZoomCard(false); e.preventDefault(); return; }
+        if (closePanel()) e.preventDefault();
+      }
       return;
     }
     if (e.key === 'Escape') {
@@ -9556,7 +9755,15 @@
     // overlay a run with no panel still needs.
     'body.psx-hud-off nav.menu,body.psx-hud-off container.subnav,' +
     'body.psx-hud-off .subButton,body.psx-hud-off .secondaryMenu{display:none !important}',
-    'body.psx-hud-off main>container:not(.scene),body.psx-hud-off #pip{visibility:hidden !important}'
+    'body.psx-hud-off main>container:not(.scene),body.psx-hud-off #pip,' +
+    'body.psx-hud-off .psx-zoom-card{visibility:hidden !important}',
+    // The scaled canvas and the front layer are stacking contexts at z-index 1
+    // and 2; the cluster has none of its own, so both would paint over it.
+    'nav.menu{z-index:3}',
+    // the zoom button's glyph: the icon font has no magnifier, so the button
+    // carries its own
+    '.psx-zoom-btn .psx-zoom-ico{position:relative;width:24px;height:24px;' +
+    'pointer-events:none}'
   ].join('');
 
   function injectAppCss() {
@@ -9593,6 +9800,7 @@
       cfg[k] = v;
       save();
       applyCanvasFilter();
+      if (k === 'zoom') applyZoom();
       refreshModels();
       syncControls();
     },
@@ -9602,6 +9810,7 @@
       renderer = r;
       applyPixelRatio();
       applyCanvasFilter();
+      applyZoom();
       return r;
     },
     // The console had no antialiasing of any kind, so neither does this.
@@ -9685,5 +9894,7 @@
 
   // The front layer is capture framing, not a panel setting: restore it before
   // anything is opened, or a reload mid-setup drops the foreground silently.
+  // The zoom rides with it - same reason, same window.
   applyFront();
+  applyZoom();
 })();
