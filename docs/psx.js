@@ -2623,7 +2623,7 @@
       'z-index:2147483000;pointer-events:none;display:none;' +
       'max-width:min(92vw,900px);padding:3px;border-radius:0;' +
       'background:#c0c0c0;box-shadow:inset -1px -1px #0a0a0a,inset 1px 1px #dfdfdf,' +
-      'inset -2px -2px #808080,inset 2px 2px #fff,3px 3px 0 rgba(0,0,0,.35);' +
+      'inset -2px -2px #808080,inset 2px 2px #fff;' +
       'text-align:left;color:#000;line-height:1.25;font-family:inherit;text-shadow:none';
 
     hudStep = el('div', null, '');
@@ -7014,6 +7014,7 @@
     'FULL BODY': 'CORPO INTEIRO',
 
     // --- the app's own hardcoded labels ---
+    'Color': 'Cor',
     'Light Color': 'Cor da luz',
     'Light Position X': 'Posição da luz X',
     'Light Position Y': 'Posição da luz Y',
@@ -10222,6 +10223,7 @@
     // stray glyphs left as icons (the upload/link pair on the character
     // panel, the close cross) read in ink, not white
     '.subnav i.kalicon.solid{color:#000 !important}',
+    '.subnav svg path{fill:#000 !important}',
 
     // swatches and tiles: square, navy ring when picked, bevelled otherwise.
     // Their app transition is left alone - reduced-motion users get the
@@ -10266,6 +10268,31 @@
     '.subnav ::-webkit-scrollbar-button:single-button:vertical:increment,' +
     '.psx-zoom-card ::-webkit-scrollbar-button:single-button:vertical:increment{' +
     'background-image:url("data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 width=%277%27 height=%274%27%3E%3Cpath d=%27M3.5 4L0 0h7z%27 fill=%27%23000%27/%3E%3C/svg%3E")}',
+
+    // ---- keyboard + state fidelity -------------------------------------
+    // Tab focus is the W95 dotted rectangle, not Chromium's modern blue glow.
+    'button:focus-visible,.subnav button:focus-visible,.psx-zoom-card button:focus-visible,' +
+    '.subnav .psx-front-pick:focus-visible,.subnav .psx-bg-image:focus-visible,' +
+    '.subnav .psx-colour-pick:focus-visible,.subnav .trackingOption:focus-visible,' +
+    '.subnav .model:focus-visible{outline:1px dotted #000;outline-offset:-4px}',
+    'container.subnav .subnav-close:focus-visible{outline-offset:-3px}',
+    '.subnav select:focus-visible,.subnav input:focus-visible{outline:1px dotted #000;outline-offset:1px}',
+    // disabled: flat shadow-gray ink with a white emboss, and the face never
+    // sinks on press
+    '.subnav button:disabled,.psx-zoom-card button:disabled{color:var(--w95-shadow) !important;' +
+    'text-shadow:1px 1px 0 var(--w95-hilite);cursor:default}',
+    '.subnav button:disabled:active,.psx-zoom-card button:disabled:active{box-shadow:var(--w95-out) !important}',
+    '.subnav select:disabled{color:var(--w95-shadow)}',
+    '.subnav input[type="checkbox"]:disabled{background:var(--w95-face)}',
+    // dormant until a radio ships: the W95 ring-and-dot
+    '.subnav input[type="radio"]{-webkit-appearance:none;appearance:none;width:14px;height:14px;' +
+    'margin:0;background:#fff;box-shadow:var(--w95-in);border:0;border-radius:50%;flex:0 0 auto}',
+    '.subnav input[type="radio"]:checked{background:radial-gradient(circle,#000 0 3px,#fff 3.5px)}',
+    // credit links on the character panel inherited white and vanished on the
+    // gray face; the W95 hyperlink navy reads
+    '.subnav a{color:var(--w95-navy) !important;text-decoration:underline}',
+    '.subnav ::selection{background:var(--w95-navy);color:#fff}',
+    '.subnav input{caret-color:#000}',
 
     // the boot title keeps its jelly face, but reads in the same family.
     // Its 1s opacity fade is killed: the splash now waits for tracking to

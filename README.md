@@ -21,7 +21,9 @@ The whole interface is dressed as Windows 95: beveled gray windows with navy
 title bars naming the open panel, a floating toolbar tray where the round menu
 cluster used to be, square beveled buttons with period icon rips, sunken white
 fields, group boxes, checkboxes in place of the old pill toggles and a Win95
-dialog for the calibration prompts. Text is set in W95FA — a scalable revival
+dialog for the calibration prompts. Keyboard focus draws the period dotted
+rectangle, disabled controls gray out with a white emboss, and text selection
+and hyperlinks take the navy of the chrome. Text is set in W95FA — a scalable revival
 of the bitmap MS Sans Serif — in Portuguese or English, whichever the app is
 speaking. Like everything else in the fork it is not a setting; the font and
 icons ship in `docs/vendor/`, so the look costs no network round trip and
