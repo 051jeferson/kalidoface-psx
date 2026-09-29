@@ -10161,6 +10161,7 @@
     injectBgColours();
     injectFrontCard();
     injectZoomButton();
+    watchSubnavChrome();
     syncW95Title();
   }
 
@@ -10518,13 +10519,16 @@
 
     // ---- the panel window ---------------------------------------------
     // The subnav is a fixed column the app keeps mounted for the page's whole
-    // life - it has no background of its own and only reads as a panel while a
-    // tab is open (.hide otherwise). Paint the chrome on the open state only,
-    // or an empty grey window sits on the scene at boot.
-    'container.subnav:not(.hide){background:var(--w95-face) !important;border-radius:0 !important;' +
+    // life - it has no background of its own and only reads as a panel while
+    // a tab has content (.psx-empty otherwise, flipped by the observer below).
+    // Paint the chrome on that, or an empty grey window sits on the scene at
+    // boot. NOT on :not(.hide): the app adds .hide the instant a close starts,
+    // but the content stays mounted through its ~200ms outro after that, and
+    // a hide-keyed face drops out from under the still-visible content.
+    'container.subnav:not(.psx-empty){background:var(--w95-face) !important;border-radius:0 !important;' +
     'box-shadow:var(--w95-win) !important;' +
     'backdrop-filter:none !important;border:0 !important;padding:3px !important}',
-    'container.subnav.hide #psx-w95-title{display:none}',
+    'container.subnav.psx-empty #psx-w95-title{display:none}',
     'container.subnav section:empty,container.subnav .shape-overlays{display:none !important}',
     // ---- the desktop window -------------------------------------------
     // On a mouse the panel stops being a fixed column and becomes a free W95
@@ -10889,10 +10893,52 @@
     });
   }
 
+  // Chrome keys on .psx-empty, not on the app's .hide: the app flips .hide the
+  // instant a close starts, but svelte's outro keeps the panel content mounted
+  // for ~200ms after that, and a hide-keyed window face dropped out from under
+  // the still-visible content. The observer flips the class only when the
+  // content root has actually emptied, so the window closes with its content
+  // in one frame and an empty grey window never sits on the scene at boot.
+  var subChromeObs = null;
+  var subContentObs = null;
+
+  function syncSubnavChrome() {
+    var sub = document.querySelector('container.subnav');
+    if (!sub) return;
+    var content = sub.querySelector('.content');
+    var empty = true;
+    var i;
+    for (i = 0; content && i < content.children.length; i++) {
+      if (content.children[i].nodeType === 1) { empty = false; break; }
+    }
+    // the content node itself can be replaced on a tab switch; follow it
+    if (subContentObs && subContentObs.__psxNode !== content) {
+      subContentObs.disconnect();
+      subContentObs = null;
+    }
+    if (content && !subContentObs) {
+      subContentObs = new MutationObserver(syncSubnavChrome);
+      subContentObs.__psxNode = content;
+      subContentObs.observe(content, { childList: true });
+    }
+    if (empty === sub.classList.contains('psx-empty')) return;
+    if (empty) sub.classList.add('psx-empty');
+    else sub.classList.remove('psx-empty');
+  }
+
+  function watchSubnavChrome() {
+    var sub = document.querySelector('container.subnav');
+    if (!sub) return;
+    if (!subChromeObs) {
+      subChromeObs = new MutationObserver(syncSubnavChrome);
+      subChromeObs.observe(sub, { attributes: true, attributeFilter: ['class'], childList: true });
+    }
+    syncSubnavChrome();
+  }
+
   function syncW95Title() {
     var sub = document.querySelector('container.subnav');
-    if (!sub || !sub.firstChild) return;
-    var bar = sub.firstChild;
+    if (!sub || !sub.firstChild) return;    var bar = sub.firstChild;
     if (!bar.id || bar.id !== 'psx-w95-title') {
       bar = document.getElementById('psx-w95-title');
       if (!bar) {
