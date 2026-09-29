@@ -290,11 +290,11 @@
     },
     {
       "find": "https://yeemachine.github.io/k2021/gif/fullbody.gif",
-      "replace": "data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7"
+      "replace": "vendor/gif/fullbody.gif"
     },
     {
       "find": "https://yeemachine.github.io/k2021/gif/face_eye.gif",
-      "replace": "data:image/gif,%47%49%46%38%39%61%01%00%01%00%80%00%00%00%00%00%ff%ff%ff%21%f9%04%01%00%00%00%00%2c%00%00%00%00%01%00%01%00%00%02%01%44%00%3b"
+      "replace": "vendor/gif/face_eye.gif"
     },
     {
       "find": "https://cdn.glitch.com/29e07830-2317-4b15-a044-135e73c7f840%2Fcharupload1clippedcropped.mp4?v=1625730916425",

@@ -106,6 +106,13 @@ const files = [
   ['icon/manifest-icon-192.png', 'https://yeemachine.github.io/k2021/favicon/kalidoface3d/manifest-icon-192.png'],
   ['icon/manifest-icon-512.png', 'https://yeemachine.github.io/k2021/favicon/kalidoface3d/manifest-icon-512.png'],
 
+  // The Face/Eye and Full Body tracking tiles in the camera panel wear these
+  // as their art - they are the tile's whole visible content, so a blank
+  // placeholder reads as a broken toggle. ~1.4 MB each; the bundle patches
+  // point at vendor/gif/ by relative path.
+  ['gif/face_eye.gif', 'https://yeemachine.github.io/k2021/gif/face_eye.gif'],
+  ['gif/fullbody.gif', 'https://yeemachine.github.io/k2021/gif/fullbody.gif'],
+
   // The Win95 HUD skin. W95FA is a scalable revival of the classic MS Sans
   // Serif UI face; the icons are period Windows icon rips served by the 98.js
   // project (1j01/98). Served same-origin like everything else in vendor/.

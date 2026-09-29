@@ -23,6 +23,7 @@ docs/                 # the app. serve this directory
     font/w95/         #   W95FA, the HUD skin's UI face
     icon/             #   favicon and the two PWA icons
     icon/w95/         #   the Win95 toolbar/panel icons the skin maps per button
+    gif/              #   the two tracking-tile demo gifs (camera panel art)
 tools/
   patch.mjs           # applies / checks the hooks
   psx-patches.json    # find/replace pairs for those hooks
@@ -65,7 +66,7 @@ Optional browser checks: `node tools/browser-smoke.mjs <path-to-playwright/index
 
 ## Vendored assets
 
-`docs/vendor/` is ~55 MB and is **committed**. Mediapipe's wasm, packed assets and tflite models used to come from jsdelivr on every cold load, and the fonts and icons from `yeemachine.github.io`; `sw.js` does not intercept cross-origin requests, so none of it was ever cached and the app could not start without a working internet connection. On a Raspberry Pi that was the largest single cost of opening the page.
+`docs/vendor/` is ~58 MB and is **committed**. Mediapipe's wasm, packed assets and tflite models used to come from jsdelivr on every cold load, and the fonts and icons from `yeemachine.github.io`; `sw.js` does not intercept cross-origin requests, so none of it was ever cached and the app could not start without a working internet connection. On a Raspberry Pi that was the largest single cost of opening the page.
 
 Three things point at that directory and have to move together: the `<script>` tags and icon links in `docs/index.html`, the `@font-face` rules in `docs/global.css`, and the two `locateFile` patches at the end of `tools/psx-patches.json`. A Mediapipe version bump changes all three plus the version constants in `tools/fetch-vendor.mjs`.
 
