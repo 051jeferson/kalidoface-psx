@@ -319,6 +319,10 @@
     {
       "find": "new js(_,{host:\"kalidoface-pair.glitch.me\"",
       "replace": "new class{constructor(){this.open=!1,this.disconnected=!1}on(){return this}once(){return this}off(){return this}removeAllListeners(){return this}emit(){}connect(){const e={open:!1,metadata:null,peer:null,dataChannel:null};return e.on=e.once=e.off=e.close=()=>e,e.send=()=>{},e}call(){return this.connect()}destroy(){this.open=!1,this.disconnected=!0}disconnect(){this.open=!1,this.disconnected=!0}get dataChannel(){return null}}(_,{host:\"kalidoface-pair.glitch.me\""
+    },
+    {
+      "find": "Cn=us(0,{duration:2e3,easing:le})",
+      "replace": "Cn=us(1,{duration:0,easing:le})"
     }
   ],
   "vendorPatches": [

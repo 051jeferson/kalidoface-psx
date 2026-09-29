@@ -10830,6 +10830,13 @@
   // the bundle owns the subnav's inline style attribute and rewrites it.
   var winPosCss = null;
   var WIN_DESKTOP = '(hover: hover) and (pointer: fine)';
+  // True between pointerdown and pointerup on the title bar. The inject pass
+  // runs every 250ms and calls applyWinPos, which re-applies the SAVED
+  // position - with tracking live the panels mutate every frame, so passes
+  // land mid-drag: the window snapped back while held (the glitch artifacts),
+  // and a pass between the last move and the release saved the snapped-back
+  // rect, so the window never stayed where it was dropped.
+  var winDragging = false;
 
   function w95IsDesktop() {
     return !!(window.matchMedia && window.matchMedia(WIN_DESKTOP).matches);
@@ -10848,7 +10855,7 @@
   }
 
   function applyWinPos() {
-    if (!w95IsDesktop() || !cfg.win) return;
+    if (winDragging || !w95IsDesktop() || !cfg.win) return;
     var w = cfg.win;
     // clamp against the live viewport so a stale position - smaller window,
     // monitor change - lands the title bar back on screen instead of losing it
@@ -10869,6 +10876,7 @@
       // data-dragging=true stands down the bundle's own interact.js drawer,
       // which only attaches while the attribute reads false
       sub.setAttribute('data-dragging', 'true');
+      winDragging = true;
       e.preventDefault();
       // capture the pointer: a release outside the viewport used to leave the
       // drag armed, and the window then chased the cursor - the close button
@@ -10884,6 +10892,7 @@
       var up = function () {
         if (done) return;
         done = true;
+        winDragging = false;
         try { bar.releasePointerCapture(e.pointerId); } catch (err) {}
         window.removeEventListener('pointermove', move);
         window.removeEventListener('pointerup', up);
