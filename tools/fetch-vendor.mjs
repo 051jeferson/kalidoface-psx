@@ -31,7 +31,20 @@ const check = process.argv.includes('--check');
 const HOLISTIC = '@mediapipe/holistic@0.5.1635989137';
 const FACEMESH = '@mediapipe/face_mesh@0.4.1633559619';
 const DRAWING = '@mediapipe/drawing_utils@0.3.1620248257';
+// The tasks-vision build behind the GPU tracking shim (docs/psx.js, "tracker
+// shim"). A version bump changes these paths and nothing else - the shim
+// reads the models by name from vendor/mediapipe/tasks/.
+//
+// Only the SIMD wasm pair is vendored, and pose_landmarker_heavy is not
+// vendored at all, for the same reason the legacy heavy tflite is not:
+// nothing above complexity 1 is ever asked for. A browser old enough to miss
+// wasm SIMD is better served by the legacy holistic tracker - which ships
+// its own nosimd files and is the pipeline that machine was tuned by - and
+// the shim probes SIMD before reaching for tasks-vision.
+const TASKS = '@mediapipe/tasks-vision@1.0.1';
 const cdn = (pkg, file) => `https://cdn.jsdelivr.net/npm/${pkg}/${file}`;
+const tasksModel = (name) =>
+  `https://storage.googleapis.com/mediapipe-models/${name}/float16/1/${name.split('/').pop()}.task`;
 
 // pose_landmark_heavy.tflite is deliberately absent: it is 27 MB and only
 // modelComplexity 2 asks for it. This fork sends 0 (Lite pose model) or 1.
@@ -67,6 +80,17 @@ const files = [
   ].map((f) => ['mediapipe/face_mesh/' + f, cdn(FACEMESH, f)]),
 
   ['mediapipe/drawing_utils/drawing_utils.js', cdn(DRAWING, 'drawing_utils.js')],
+
+  // tasks-vision: the GPU tracking shim's runtime and models. The .task
+  // files are MediaPipe's float16 releases; face_landmarker bundles the
+  // blendshape head the shim does not wire up yet.
+  ['mediapipe/tasks/vision_bundle.js', cdn(TASKS, 'vision_bundle.js')],
+  ['mediapipe/tasks/wasm/vision_wasm_internal.js', cdn(TASKS, 'wasm/vision_wasm_internal.js')],
+  ['mediapipe/tasks/wasm/vision_wasm_internal.wasm', cdn(TASKS, 'wasm/vision_wasm_internal.wasm')],
+  ['mediapipe/tasks/face_landmarker.task', tasksModel('face_landmarker/face_landmarker')],
+  ['mediapipe/tasks/pose_landmarker_lite.task', tasksModel('pose_landmarker/pose_landmarker_lite')],
+  ['mediapipe/tasks/pose_landmarker_full.task', tasksModel('pose_landmarker/pose_landmarker_full')],
+  ['mediapipe/tasks/hand_landmarker.task', tasksModel('hand_landmarker/hand_landmarker')],
 
   // The three faces global.css asks for. Same host as the favicons, and the
   // icon font is the one that matters: without it every menu glyph renders as

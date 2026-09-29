@@ -53,6 +53,16 @@
     <script defer src="./vendor/mediapipe/drawing_utils/drawing_utils.js"></script>
     <script defer src="./vendor/mediapipe/holistic/holistic.js"></script>
     <script defer src="./vendor/mediapipe/face_mesh/face_mesh.js"></script>
+    <!--
+      The tasks-vision build (GPU tracking) plus the glue that offers it to
+      psx.js. Deferred classic scripts run in document order, so Vision exists
+      by the time psx-tasks.js runs, and the shim installs before the module
+      bundle below constructs its trackers. Anything here failing to load
+      leaves the legacy globals above untouched and the app on the legacy
+      tracker - degraded, not broken.
+    -->
+    <script defer src="./vendor/mediapipe/tasks/vision_bundle.js"></script>
+    <script defer src="./psx-tasks.js"></script>
     <link rel="shortcut icon" href="./vendor/icon/icon-circle.svg" />
 
     <link rel="apple-touch-icon" href="./vendor/icon/apple-icon-180.png" />

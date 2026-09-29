@@ -296,6 +296,12 @@
     // between a stutter and a slightly slower face while something else on the
     // machine is busy.
     perfAuto: true,
+    // Run the camera models on the GPU through the newer tasks-vision
+    // pipeline, instead of the legacy holistic graph on the CPU wasm. Off is
+    // the CPU delegate of the same pipeline, not the legacy graph - that one
+    // is the automatic last resort when a machine refuses both, and it is
+    // what runs anyway when tasks-vision could not be set up at all.
+    gpu: true,
     // Keep both loops running while the window is not on screen. Chromium
     // hands out no animation frames to a window that is minimised or fully
     // covered by another one, so the avatar freezes mid-stream and only
@@ -680,6 +686,9 @@
     resetCalibration();
     applyCanvasFilter();
     refreshModels();
+    // an imported gpu flag is live like the panel toggle - a no-op when the
+    // tracker already runs what the file asked for
+    syncTrackerBackend();
     // rebuildPanels drops every injected card and re-runs the injection pass,
     // which redraws the swatches on its own; the syncControls path does not.
     mirrorColours();
@@ -6924,6 +6933,7 @@
     // --- performance ---
     'Performance': 'Desempenho',
     'Auto throttle': 'Ajuste automático',
+    'GPU tracking': 'Rastreamento por GPU',
     'Run while hidden': 'Rodar em segundo plano',
     'Tracking rate': 'Taxa de rastreio',
     'Render rate': 'Taxa de render',
@@ -6995,7 +7005,10 @@
       'Rodar em segundo plano mantém os dois loops vivos com a janela minimizada ou coberta ' +
       'por outra: o Chromium para os animation frames de uma janela que não está mostrando, ' +
       'que é de onde vem o avatar congelando no meio da live. Custa o que os limites deixarem, ' +
-      'e só enquanto nada está na tela.',
+      'e só enquanto nada está na tela. O rastreamento por GPU roda os modelos da câmera no ' +
+      'chip gráfico pelo pipeline novo (tasks-vision); desligado mantém eles na CPU. Uma ' +
+      'máquina que recusar o modo escolhido desce um degrau - GPU, CPU, rastreador original - ' +
+      'em vez de perder o rastreio.',
 
     // --- the app's own menu, drawn from data-text attributes ---
     'Start Face Tracking': 'Iniciar rastreio facial',
@@ -7146,7 +7159,10 @@
       'Run while hidden keeps both loops going while the window is minimised or covered by ' +
       'another window: Chromium stops animation frames for a window it is not showing, which ' +
       'is where the avatar freezing mid-stream comes from. It costs whatever the caps allow, ' +
-      'and only while nothing is on screen.'
+      'and only while nothing is on screen. GPU tracking runs the camera models on the ' +
+      'graphics chip through the newer tasks-vision pipeline; off keeps them on the CPU. ' +
+      'A machine that refuses the chosen one is handed down a step - GPU to CPU to the ' +
+      'original tracker - rather than losing tracking.'
   };
 
   function T(en) {
@@ -7335,6 +7351,414 @@
     return opts;
   }
 
+  // ------------------------------------------------------------- tracker shim
+  //
+  // The bundle does `new Holistic(...)` / `new FaceMesh(...)` against the
+  // globals the legacy vendor scripts define. When the tasks-vision build is
+  // present, this section replaces those globals with shims that run the same
+  // jobs on the newer pipeline - PoseLandmarker, FaceLandmarker and
+  // HandLandmarker, GPU delegate by default - and hand the results back in
+  // the exact shape the legacy solutions used. Nothing else in the bundle
+  // changes: same options in through mpOptions, same results out to the
+  // tracking callback.
+  //
+  // The shape is read off the bundle, not off any documentation, and the
+  // names are load-bearing:
+  //  - the pose WORLD landmarks are read from `results.ea`, upstream's own
+  //    field for them - not `poseWorldLandmarks`;
+  //  - `poseLandmarks` is the image-space set, and the guide overlay draws
+  //    `faceLandmarks[468]`, so the face has to stay a 478-point mesh;
+  //  - a hand the legacy build did not see is an ABSENT field, not an empty
+  //    array - the overlay guards on that, and empty arrays would feed
+  //    truthy values into a solve on nothing.
+  //
+  // Hands are labelled by which pose wrist each hand sits on, in the image -
+  // the same ground truth holistic built its own labels on, so the bundle's
+  // crossed Right/Left map and this layer's hands() correction see exactly
+  // what they always saw. The hand detector's own Left/Right assumes a
+  // mirrored feed (its documented swap rule), so it is only the fallback for
+  // a frame without a usable pose.
+  //
+  // Fallback is a chain, not a switch: the requested delegate, then the CPU
+  // delegate for a refused GPU, then the legacy classes themselves - kept
+  // from install time, because they are the pipeline that already worked on
+  // this machine. `send` never rejects: the bundle awaits it in its tracking
+  // loop, and a rejected send would take the loop down with it.
+
+  var TV = null;                // the tasks-vision namespace once installed
+  var TV_ACTIVE = 'legacy';     // what the running tracker actually is
+  var tvLive = [];              // every shim instance the bundle holds
+  var tvLegacyHolistic = null;  // the classes as the legacy scripts left them
+  var tvLegacyFace = null;
+  var TV_BASE = 'vendor/mediapipe/tasks/';
+  var TV_MODELS = {
+    face: 'face_landmarker.task',
+    hand: 'hand_landmarker.task',
+    pose0: 'pose_landmarker_lite.task',   // modelComplexity 0
+    pose1: 'pose_landmarker_full.task'    // modelComplexity 1
+  };
+  // the standard wasm SIMD probe. tasks-vision only ships a SIMD build here
+  // (see tools/fetch-vendor.mjs): a browser old enough to miss it gets the
+  // legacy tracker, which keeps its own nosimd build.
+  var TV_SIMD = null;
+  try {
+    TV_SIMD = new Uint8Array([0, 97, 115, 109, 1, 0, 0, 0, 1, 5, 1, 96, 0, 1, 123,
+      3, 2, 1, 0, 10, 10, 1, 8, 0, 65, 0, 253, 15, 253, 98, 11]);
+  } catch (e) {}
+
+  function tvSimd() {
+    try {
+      return !!TV_SIMD && typeof WebAssembly !== 'undefined' && WebAssembly.validate(TV_SIMD);
+    } catch (e) { return false; }
+  }
+
+  function tvUrl(rel) { return new URL(TV_BASE + rel, document.baseURI).href; }
+
+  function tvMsg(e) {
+    return e && (e.message || e.statusText) ? (e.message || e.statusText) : String(e);
+  }
+
+  // tasks-vision spells the confidence options per task and has a presence
+  // option legacy never exposed; one detection-confidence number covers what
+  // the bundle sends.
+  function tvConf(v) { return v == null ? 0.5 : v; }
+
+  function closeTasks(t) {
+    if (!t) return;
+    try { if (t.pose) t.pose.close(); } catch (e) {}
+    try { if (t.face) t.face.close(); } catch (e) {}
+    try { if (t.hand) t.hand.close(); } catch (e) {}
+  }
+
+  // Called by psx-tasks.js, after the legacy globals exist and before the
+  // bundle runs. Every rejection here leaves the globals untouched.
+  function tasksReady(vision) {
+    if (TV || !vision || !tvSimd()) return;
+    if (typeof window.Holistic !== 'function' || typeof window.FaceMesh !== 'function') return;
+    if (!vision.FilesetResolver || !vision.PoseLandmarker ||
+        !vision.FaceLandmarker || !vision.HandLandmarker) return;
+    TV = vision;
+    tvLegacyHolistic = window.Holistic;
+    tvLegacyFace = window.FaceMesh;
+    window.Holistic = function (opts) { return new TvTracker(opts, true); };
+    window.FaceMesh = function (opts) { return new TvTracker(opts, false); };
+    log('tracking shim installed - tasks-vision, ' + (cfg.gpu ? 'GPU' : 'CPU') + ' delegate');
+  }
+
+  // One shim instance plays the role of one legacy solution instance: the
+  // same constructor argument, the same setOptions / onResults / send /
+  // initialize / close surface. Init starts at setOptions the way the legacy
+  // graph did, so the face-only path never loads the body models.
+  function TvTracker(opts, full) {
+    var self = this;
+    this.__psxKind = full ? 'holistic' : 'facemesh';
+    this.__psxBackend = null;     // the delegate this instance last built on
+    var locate = opts && typeof opts.locateFile === 'function' ? opts.locateFile : null;
+    var o = {};                   // the merged legacy options
+    var cb = null;
+    var bridge = null;            // feeds cb from a legacy fallback instance
+    var want = cfg.gpu ? 'GPU' : 'CPU';   // the delegate this instance asks for
+    var live = null;              // { pose?, face, hand? } - per instance role
+    var ready = null;             // the start promise, once started
+    var inner = null;             // the legacy instance, once fallen back
+    var attempt = 0;              // which rebuild owns the instance
+    var stamp = 0;                // monotonic detectForVideo timestamps
+    var fails = 0;                // consecutive dead frames on one delegate
+    var gotOpts = false;          // anything arrived through setOptions yet
+    var warned = {};              // one warn per fault, not one per frame
+    tvLive.push(this);
+
+    function warnOnce(key, msg) {
+      if (warned[key]) return;
+      warned[key] = true;
+      console.warn('[psx tracker] ' + msg);
+    }
+
+    function ensure() {
+      if (inner) return Promise.resolve();
+      if (!ready) ready = start();
+      return ready;
+    }
+
+    function build(fs, delegate, mine) {
+      var det = tvConf(o.minDetectionConfidence);
+      var trk = tvConf(o.minTrackingConfidence);
+      var next = {}, jobs = [];
+      // each job lands its task in `next` the moment it arrives, so a
+      // sibling that rejects cannot orphan the ones that did arrive - the
+      // catch closes exactly what was built
+      if (full) {
+        jobs.push(TV.PoseLandmarker.createFromOptions(fs, {
+          baseOptions: {
+            modelAssetPath: tvUrl(o.modelComplexity === 0 ? TV_MODELS.pose0 : TV_MODELS.pose1),
+            delegate: delegate
+          },
+          runningMode: 'VIDEO', numPoses: 1,
+          minPoseDetectionConfidence: det, minPosePresenceConfidence: det,
+          minPoseTrackingConfidence: trk,
+          outputSegmentationMasks: false
+        }).then(function (t) { next.pose = t; return t; }));
+      }
+      jobs.push(TV.FaceLandmarker.createFromOptions(fs, {
+        baseOptions: { modelAssetPath: tvUrl(TV_MODELS.face), delegate: delegate },
+        runningMode: 'VIDEO', numFaces: 1,
+        minFaceDetectionConfidence: det, minFacePresenceConfidence: det,
+        minFaceTrackingConfidence: trk,
+        outputFaceBlendshapes: false, outputFacialTransformationMatrixes: false
+      }).then(function (t) { next.face = t; return t; }));
+      if (full) {
+        jobs.push(TV.HandLandmarker.createFromOptions(fs, {
+          baseOptions: { modelAssetPath: tvUrl(TV_MODELS.hand), delegate: delegate },
+          runningMode: 'VIDEO', numHands: 2,
+          minHandDetectionConfidence: det, minHandPresenceConfidence: det,
+          minHandTrackingConfidence: trk
+        }).then(function (t) { next.hand = t; return t; }));
+      }
+      return Promise.all(jobs).then(function () {
+        // a rebuild that lost the attempt while it ran drops itself whole -
+        // it must not replace `live` under the attempt that owns the
+        // instance now
+        if (mine !== attempt) { closeTasks(next); return self; }
+        // only a fully built set replaces the old one - a half-failed
+        // rebuild must not leave a task mix of two delegates
+        closeTasks(live);
+        live = next;
+        fails = 0;
+        self.__psxBackend = delegate;
+        return self;
+      }).catch(function (e) {
+        closeTasks(next);
+        throw e;
+      });
+    }
+
+    function start() {
+      // `tried` is the delegate this attempt began with, read once: a toggle
+      // mid-init must not re-route this chain's fallback decision - the
+      // fresh attempt the toggle starts answers for the new choice
+      var mine = ++attempt;
+      var tried = want;
+      return TV.FilesetResolver.forVisionTasks(tvUrl('wasm')).then(function (fs) {
+        return build(fs, tried, mine).catch(function (e) {
+          // A refused GPU delegate (old driver, blacklisted adapter, headless
+          // GL) is worth one retry on the CPU delegate. A CPU failure is the
+          // choice the toggle made - that goes to legacy, not to a GPU the
+          // user turned down.
+          if (tried !== 'GPU') throw e;
+          warnOnce('gpu', 'GPU delegate failed (' + tvMsg(e) + ') - CPU delegate next');
+          return build(fs, 'CPU', mine);
+        });
+      }).catch(function (e) {
+        // a toggle while this chain ran has started a newer attempt - it
+        // owns the instance now, and this chain falling to legacy would
+        // poison it
+        if (mine !== attempt) return undefined;
+        return legacyStart(e);
+      });
+    }
+
+    // The new pipeline is no good on this machine at all: rebuild this
+    // instance as a thin proxy over the legacy class, replaying whatever has
+    // already been set. The bundle keeps its reference to the shim either
+    // way - restoring window.Holistic would not reach it.
+    function legacyStart(e, mine) {
+      // a stale chain (a toggle started a newer attempt) must not claim the
+      // instance; direct calls - the dead-frame counter - pass no token
+      if (mine !== undefined && mine !== attempt) return undefined;
+      warnOnce('legacy', 'tasks-vision unavailable (' + tvMsg(e) + ') - the legacy tracker takes over');
+      TV_ACTIVE = 'legacy';
+      self.__psxBackend = null;
+      var Ctor = full ? tvLegacyHolistic : tvLegacyFace;
+      inner = new Ctor(locate ? { locateFile: locate } : undefined);
+      if (gotOpts) inner.setOptions(o);
+      if (cb) {
+        bridge = function (r) { if (cb) cb(r); };
+        inner.onResults(bridge);
+      }
+      // no eager initialize here: the legacy solutions load their graph on
+      // the first send, and two of these graphs loading at once collide on
+      // their shared asset plumbing - one of them then fetches the other's
+      // packed assets through the wrong locateFile and 404s. The bundle
+      // never ran two legacy graphs at once either, so lazy is the proven
+      // pattern.
+      return undefined;
+    }
+
+    this.setOptions = function (next) {
+      var k;
+      if (inner) return inner.setOptions(next);
+      if (next) { gotOpts = true; for (k in next) o[k] = next[k]; }
+      if (!ready) ready = start();
+      return ready;
+    };
+
+    this.onResults = function (fn) {
+      if (inner) return inner.onResults(bridge);
+      cb = fn || null;
+    };
+
+    this.initialize = function () {
+      if (inner) return inner.initialize ? inner.initialize() : Promise.resolve();
+      return ensure();
+    };
+
+    this.send = function (frame) {
+      // a fallen instance is served without touching the init promise - it
+      // may be holding the rejection that triggered the fall
+      if (inner) {
+        return Promise.resolve().then(function () { return inner.send(frame); })
+          .catch(function (e) { warnOnce('frame', 'tracking frame failed: ' + tvMsg(e)); });
+      }
+      return ensure().then(function () {
+        if (inner) return inner.send(frame);
+        if (!live || !cb) return;
+        var img = frame && frame.image !== undefined ? frame.image : frame;
+        // a video element with no metadata yet cannot be fed to the tasks
+        if (!img || (!img.videoWidth && !img.width)) return;
+        var t = now();
+        stamp = t > stamp ? Math.floor(t) : stamp + 1;
+        if (full) tvHolisticFrame(img, stamp, live, cb);
+        else tvFaceFrame(img, stamp, live.face, cb);
+        fails = 0;
+      }).catch(function (e) {
+        // A dead frame must not take the bundle's tracking loop down. A GPU
+        // that failed once at inference time is switched once, here, to the
+        // CPU delegate; a CPU that keeps failing is the legacy tracker's
+        // problem, after roughly a second and a half of dead frames.
+        if (!inner && live && want === 'GPU' && !warned.gpuFrame) {
+          warned.gpuFrame = true;
+          warnOnce('gpuFrame', 'GPU inference failed (' + tvMsg(e) + ') - CPU delegate next');
+          closeTasks(live); live = null; ready = null; want = 'CPU';
+          ensure().catch(function () {});
+          return;
+        }
+        if (!inner && live && ++fails >= 30) {
+          try { legacyStart(e); } catch (e2) { warnOnce('legacy', 'legacy tracker failed too: ' + tvMsg(e2)); }
+        } else {
+          warnOnce('frame', 'tracking frame failed: ' + tvMsg(e));
+        }
+      });
+    };
+
+    this.close = function () {
+      var i = tvLive.indexOf(self);
+      if (i >= 0) tvLive.splice(i, 1);
+      attempt++;                    // nothing may rebuild into a closed instance
+      if (inner) { if (inner.close) inner.close(); return; }
+      closeTasks(live);
+      live = null;
+    };
+
+    // The panel's GPU toggle, mid-session. A legacy-fallen instance stays
+    // legacy until a reload: tasks-vision already refused this machine once.
+    this.__psxApplyGpu = function () {
+      var w = cfg.gpu ? 'GPU' : 'CPU';
+      if (inner || !ready || want === w) return;
+      want = w;
+      closeTasks(live);
+      live = null;
+      attempt++;                    // an in-flight build no longer owns this
+      ready = null;                 // the next send rebuilds on the new delegate
+    };
+  }
+
+  // The holistic result, built to the names the bundle reads.
+  function tvHolisticFrame(img, t, tasks, cb) {
+    var res = { image: img };
+    var pose = tasks.pose.detectForVideo(img, t);
+    var pImg = pose && pose.landmarks && pose.landmarks[0];
+    var pWorld = pose && pose.worldLandmarks && pose.worldLandmarks[0];
+    if (pImg) {
+      // Kalidokit and the sanity gates read .visibility off both sets;
+      // legacy's world landmarks carried it, so copy it across if a build
+      // ever omits it on the world set.
+      if (pWorld && pWorld[0] && pWorld[0].visibility == null) {
+        for (var i = 0; i < pWorld.length; i++) {
+          pWorld[i].visibility = pImg[i] ? pImg[i].visibility : 1;
+        }
+      }
+      res.poseLandmarks = pImg;
+      if (pWorld) res.ea = pWorld;
+    }
+    var face = tasks.face.detectForVideo(img, t);
+    var fl = face && face.faceLandmarks && face.faceLandmarks[0];
+    if (fl) res.faceLandmarks = fl;
+    var hand = tasks.hand.detectForVideo(img, t);
+    if (hand && hand.landmarks && hand.landmarks.length) {
+      var sides = tvAssignHands(hand, pImg);
+      if (sides.l) res.leftHandLandmarks = sides.l;
+      if (sides.r) res.rightHandLandmarks = sides.r;
+    }
+    cb(res);
+  }
+
+  function tvFaceFrame(img, t, face, cb) {
+    var r = face.detectForVideo(img, t);
+    var fl = r && r.faceLandmarks && r.faceLandmarks[0];
+    cb({ image: img, multiFaceLandmarks: fl ? [fl] : [] });
+  }
+
+  // positive = this hand sits on the pose's left wrist. Wrists 15/16 are in
+  // the same image space the hand landmarks are.
+  function tvWristMargin(p, poseImg) {
+    var dl = (p.x - poseImg[15].x) * (p.x - poseImg[15].x) +
+             (p.y - poseImg[15].y) * (p.y - poseImg[15].y);
+    var dr = (p.x - poseImg[16].x) * (p.x - poseImg[16].x) +
+             (p.y - poseImg[16].y) * (p.y - poseImg[16].y);
+    return dr - dl;
+  }
+
+  function tvAssignHands(hand, poseImg) {
+    var lms = hand.landmarks, out = { l: null, r: null }, i, label;
+    var wrists = poseImg && poseImg.length > 16 &&
+      isNum(poseImg[15] && poseImg[15].x) && isNum(poseImg[16] && poseImg[16].x);
+    if (wrists && lms.length === 2) {
+      // nearest-wrist assignment; when both hands prefer the same wrist,
+      // the one with the clearer margin takes it
+      if (tvWristMargin(lms[0][0], poseImg) >= tvWristMargin(lms[1][0], poseImg)) {
+        out.l = lms[0]; out.r = lms[1];
+      } else {
+        out.l = lms[1]; out.r = lms[0];
+      }
+    } else if (wrists && lms.length === 1) {
+      if (tvWristMargin(lms[0][0], poseImg) >= 0) out.l = lms[0];
+      else out.r = lms[0];
+    } else {
+      // no usable pose: the detector's own label, swapped per its
+      // documented rule that it assumes a mirrored feed
+      var hnd = hand.handedness || hand.handednesses;
+      for (i = 0; i < lms.length; i++) {
+        label = hnd && hnd[i] && hnd[i][0] && hnd[i][0].categoryName;
+        if (label === 'Left') out.r = lms[i];
+        else if (label === 'Right') out.l = lms[i];
+      }
+    }
+    return out;
+  }
+
+  function syncTrackerBackend() {
+    for (var i = 0; i < tvLive.length; i++) {
+      try { tvLive[i].__psxApplyGpu(); } catch (e) {}
+    }
+  }
+
+  // What the tracker is actually running, for the console and the perf
+  // readout: the toggle chooses GPU or CPU, the fallback chain decides what
+  // the machine really got. The full (holistic) instance is the tracker
+  // people mean - a face-only instance falling to legacy must not relabel it.
+  function trackerInfo() {
+    var full = null;
+    for (var i = 0; i < tvLive.length; i++) {
+      if (tvLive[i].__psxKind === 'holistic') full = tvLive[i];
+    }
+    var active = TV_ACTIVE;
+    if (full) active = full.__psxBackend ? (full.__psxBackend === 'GPU' ? 'gpu' : 'cpu') : 'legacy';
+    return {
+      installed: !!TV, active: active, want: cfg.gpu ? 'gpu' : 'cpu',
+      simd: tvSimd(), instances: tvLive.length
+    };
+  }
+
   // ---------------------------------------------------------- auto throttle
   //
   // This runs beside OBS, and beside whatever else is on the machine. That
@@ -7421,6 +7845,7 @@
       frameMs: r2(autoBest),
       trackHz: trackMs > 1 ? r2(1000 / trackMs) : null,
       throttling: cfg.perfAuto && autoFps < AUTO_MAX,
+      tracker: trackerInfo().active, want: cfg.gpu ? 'gpu' : 'cpu',
       keepAwake: cfg.keepAwake, hidden: !!document.hidden, onClock: awake
     };
   }
@@ -8021,6 +8446,7 @@
     // Turning the cues off hides the "this machine has no voice" note with
     // them: it is an explanation of a switch that is now off.
     if (key === 'calCues') syncVoiceNote();
+    if (key === 'gpu') syncTrackerBackend();
     if (REBUILDS[key]) { applyDocLang(); rebuildPanels(); }
     if (LATCH_KEYS[key]) refreshModels();
   }
@@ -8502,6 +8928,9 @@
     var pfNote = el('div', STG, T('note.perf'));
     pfNote.style.cssText = 'width:100%;opacity:.5;font-size:12px;margin:0 0 4px;text-align:left';
     pf.appendChild(pfNote);
+    // the pipeline the camera models run on - the one lever here that moves
+    // work off the CPU entirely, so it goes ahead of the rate caps
+    addToggle(pf, 'gpu', T('GPU tracking'), STG);
     addToggle(pf, 'perfAuto', T('Auto throttle'), STG);
     addToggle(pf, 'keepAwake', T('Run while hidden'), STG);
     addRule(pf);
@@ -10526,6 +10955,7 @@
       save();
       applyCanvasFilter();
       if (k === 'zoom') applyZoom();
+      if (k === 'gpu') syncTrackerBackend();
       refreshModels();
       syncControls();
     },
@@ -10613,6 +11043,8 @@
     nextTrack: nextTrack,
     frameGate: frameGate,
     mpOptions: mpOptions,
+    tasksReady: tasksReady,
+    trackerInfo: trackerInfo,
     shadows: shadows,
     shadowSize: shadowSize,
     gaze: gaze,

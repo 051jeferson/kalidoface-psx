@@ -12,11 +12,13 @@ The fork ships **one avatar** (`docs/vrm/Jeferson.vrm`, vendored, same-origin), 
 docs/                 # the app. serve this directory
   index.html          # PSX stub, then psx.js, then the hashed bundle
   psx.js              # the compatibility layer (edit here)
+  psx-tasks.js        # glue: hands the tasks-vision build to PSX.tasksReady
   assets/index.*.js   # minified Kalidoface bundle. do not hand-edit
   vrm/                # the shipped avatar and its picker icon
   art/                # the two shipped art presets (front/back plates)
   vendor/             # third-party assets, served from this origin
     mediapipe/        #   holistic + face_mesh: wasm, packed assets, tflite
+    mediapipe/tasks/  #   tasks-vision build, wasm (SIMD only) and the four .task models
     font/             #   the three Kalidoface faces global.css asks for
     font/w95/         #   W95FA, the HUD skin's UI face
     icon/             #   favicon and the two PWA icons
@@ -69,9 +71,20 @@ Three things point at that directory and have to move together: the `<script>` t
 
 `pose_landmark_heavy.tflite` is deliberately not vendored: it is 27 MB and only `modelComplexity: 2` requests it, which `mpOptions` clamps away to 0 or 1. Restoring a control that can ask for complexity 2 means fetching it too.
 
+`mediapipe/tasks/` is the **tasks-vision** build (`@mediapipe/tasks-vision@1.0.1`) behind the tracker shim in `psx.js`. Only the **SIMD** wasm pair is vendored: a browser old enough to miss wasm SIMD gets the legacy holistic tracker, which keeps its own plain-wasm build and is the pipeline that machine was tuned by — the shim probes SIMD before reaching for tasks-vision. The four `.task` models are MediaPipe's float16 releases; `pose_landmarker_full` is the complexity-1 pose the app ships, `pose_landmarker_lite` the complexity-0 one.
+
 ## Architecture
 
 `docs/index.html` defines a stub `window.PSX` (stock Kalidoface behaviour) so a 404/parse error in `psx.js` does not TypeError the render loop. `psx.js` then replaces it.
+
+**The tracker shim** (in `psx.js`, installed by `psx-tasks.js`) replaces `window.Holistic` / `window.FaceMesh` with tasks-vision-backed instances running PoseLandmarker / FaceLandmarker / HandLandmarker, GPU delegate by default (`cfg.gpu`, a panel toggle that applies live). The contract that must not drift, all read off the bundle rather than off docs:
+
+- Deferred classic scripts run in document order: legacy globals, then `vendor/mediapipe/tasks/vision_bundle.js` (defines `window.Vision`), then `psx-tasks.js` (calls `PSX.tasksReady(window.Vision)`), then the module bundle constructs its trackers. `tasksReady` is not a bundle hook — no patch pair, no `EXPECTED_HOOKS` entry, no stub entry; the glue guards on it, so a dead psx.js leaves the legacy globals untouched.
+- The bundle reads the pose **world** landmarks from `results.ea` (upstream's own field name, not `poseWorldLandmarks`), image landmarks from `results.poseLandmarks`, and the guide overlay draws `faceLandmarks[468]` — the face has to stay 478 points.
+- A hand the legacy build did not see is an **absent field**, not an empty array; empty arrays would feed truthy values into a solve on nothing.
+- Hands are labelled by which pose wrist each hand sits on in the image (landmarks 15/16), the ground truth holistic's own labelling was built on; the detector's Left/Right assumes a mirrored feed and is only the no-pose fallback.
+- Fallback is a chain: requested delegate, then the CPU delegate for a refused GPU, then the legacy classes captured at install time. A legacy-fallen instance stays legacy until reload. `send` never rejects — the bundle awaits it in its tracking loop. The legacy instance is **not** eagerly initialized: two legacy graphs loading at once collide on their shared asset plumbing and one fetches the other's packed assets through the wrong locateFile.
+- What actually runs is `PSX.perf().tracker` / `PSX.trackerInfo()` (`gpu` / `cpu` / `legacy`). The end-to-end probe is `.audit/tasks-shim-test.mjs`.
 
 The bundle calls `window.PSX.*` at patched sites (renderer, shadows, SMAA, tracking rAF, face rig, overlay, …). Shader-level PS1 look (vertex snap, affine, dither) is injected in `onBeforeCompile` and needs no call site.
 

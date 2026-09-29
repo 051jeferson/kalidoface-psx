@@ -894,6 +894,26 @@ capturable by OBS window capture, whatever this app does with its frames; keep t
 window covered rather than minimised, or point an OBS **browser source** at the
 URL, which renders offscreen and was never subject to any of this.
 
+**GPU tracking** is on by default and moves the camera models off the CPU
+entirely: the same Holistic/FaceMesh jobs the bundle always ran go through the
+newer `tasks-vision` pipeline — PoseLandmarker, FaceLandmarker, HandLandmarker —
+on a WebGL delegate instead of the CPU's wasm. The bundle never changed: it
+still constructs `new Holistic` / `new FaceMesh` against the same globals, and
+the shim answers in the legacy solutions' exact result shape (the pose world
+landmarks under upstream's own `ea` field name included), so every sanity gate,
+wizard and readout downstream behaves as it always did. Hands are labelled by
+which pose wrist they sit on, which is the same ground truth holistic's own
+labelling was built on. Turning the toggle off keeps the new pipeline but on the
+CPU delegate rather than switching back to the legacy graph — and the fallback
+is a chain, not a switch: the chosen delegate, then the other one for a refused
+GPU, then the original legacy tracker, which is the pipeline that already
+worked on that machine. What actually ended up running is `PSX.perf().tracker`
+(`gpu` / `cpu` / `legacy`); `PSX.trackerInfo()` has the whole picture. The
+toggle takes effect immediately — the one performance control here that moves
+work between chips rather than turning something down. Only the wasm **SIMD**
+build is vendored, so a browser old enough to miss SIMD stays on the legacy
+tracker, which keeps its own plain-wasm build.
+
 The fixed caps below still apply on top of it, for anyone who would rather pick a
 number than have one picked:
 
@@ -919,8 +939,9 @@ Stack these with **Render scale** in the Effects tab: it now ships at `0.25x`,
 which is a sixteenth of the pixels and the reason PSX mode looks right in the
 first place — raise it only if a capture needs the extra resolution.
 
-The Mediapipe options are read once at startup, so those apply on reload; the
-rate caps and the auto throttle take effect immediately.
+The Mediapipe model options are read once at startup, so those apply on reload;
+the rate caps, the auto throttle and the GPU/CPU tracking toggle take effect
+immediately.
 
 **Low power preset** sets all of it in one click — it returns the render scale
 and both rates to the shipped defaults (`0.25x`, 20fps, 20fps) and switches on
