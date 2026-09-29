@@ -7015,6 +7015,7 @@
 
     // --- the app's own hardcoded labels ---
     'Color': 'Cor',
+    'Close': 'Fechar',
     'Light Color': 'Cor da luz',
     'Light Position X': 'Posição da luz X',
     'Light Position Y': 'Posição da luz Y',
@@ -9464,21 +9465,40 @@
 
   function buildZoomCard() {
     var wrap = el('div', 'psx-injected psx-zoom-card', '');
-    // a win95 window like the panels: gray face, navy caption, bevelled bits
+    // a win95 window like the panels: gray face, navy caption, bevelled bits.
+    // No drop shadow - W95 windows had none
     wrap.style.cssText = 'position:fixed;right:14px;bottom:290px;z-index:20;width:232px;' +
       'color:#000;background:#c0c0c0;border:0;border-radius:0;padding:3px;box-sizing:border-box;' +
       'box-shadow:inset -1px -1px #0a0a0a,inset 1px 1px #dfdfdf,inset -2px -2px #808080,' +
-      'inset 2px 2px #fff,3px 3px 0 rgba(0,0,0,.35);text-align:left';
+      'inset 2px 2px #fff;text-align:left';
 
+    // the caption the panels wear: 18px navy bar flush on the frame, 16px app
+    // icon, and the same 16x14 close glyph, so the card reads as one more
+    // window and not a widget with its own idea of chrome
     var head = el('div', '', '');
-    head.style.cssText = 'display:flex;align-items:center;gap:8px;margin:0;' +
-      'background:#000080;padding:3px 6px';
+    head.style.cssText = 'position:relative;display:flex;align-items:center;gap:3px;height:18px;' +
+      'margin:-1px -1px 0;background:#000080;padding:2px 21px 2px 3px;box-sizing:border-box;overflow:hidden';
+    var ico = el('span', '', '');
+    ico.style.cssText = 'flex:0 0 16px;width:16px;height:16px;' +
+      'background:center/contain no-repeat url(vendor/icon/apple-icon-180.png);image-rendering:pixelated';
     var title = el('strong', '', T('Zoom'));
-    title.style.cssText = 'font-size:12px;flex:1;color:#fff';
+    title.style.cssText = 'font-size:11px;font-weight:700;flex:1;color:#fff;overflow:hidden;' +
+      'white-space:nowrap;text-overflow:ellipsis';
     var val = el('span', '', zoomValue() + '%');
-    val.style.cssText = 'font-size:12px;color:#fff;font-variant-numeric:tabular-nums';
+    val.style.cssText = 'font-size:11px;color:#fff;font-variant-numeric:tabular-nums';
+    var close = el('button', 'psx-zoom-close', '');
+    close.type = 'button';
+    close.setAttribute('aria-label', T('Close'));
+    close.style.cssText = 'position:absolute;top:2px;right:3px;width:16px;height:14px;padding:0;' +
+      'border-radius:0;border:0;background-color:#c0c0c0;cursor:pointer;' +
+      'box-shadow:inset -1px -1px #0a0a0a,inset 1px 1px #fff,inset -2px -2px #808080,inset 2px 2px #dfdfdf;' +
+      'background-image:url("data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 width=%278%27 height=%277%27%3E%3Cpath d=%27M1 1l6 5M7 1l-6 5%27 stroke=%27%23000%27 stroke-width=%271.8%27/%3E%3C/svg%3E");' +
+      'background-position:center;background-repeat:no-repeat;background-size:8px 7px';
+    close.addEventListener('click', function () { toggleZoomCard(false); });
+    head.appendChild(ico);
     head.appendChild(title);
     head.appendChild(val);
+    head.appendChild(close);
     wrap.appendChild(head);
 
     function stepBtn(txt, d, label, cls) {
@@ -10150,13 +10170,24 @@
     'color:#000 !important;border:0 !important;border-radius:0 !important;' +
     'box-shadow:var(--w95-out) !important;font-weight:400 !important;transition:none !important}',
     '.subnav .trigger:active,.psx-zoom-card button:active{box-shadow:var(--w95-in) !important}',
-    '.subnav .trigger{padding:6px 12px !important;font-size:13px !important}',
+    '.subnav .trigger{padding:6px 12px !important;font-size:13px !important;margin:4px 0 !important}',
+    // the zoom caption's close glyph. The card-button rule above is a
+    // background shorthand at !important and would wipe any inline glyph, so
+    // the image rides here instead
+    '.psx-zoom-card .psx-zoom-close{background-image:url("data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 width=%278%27 height=%277%27%3E%3Cpath d=%27M1 1l6 5M7 1l-6 5%27 stroke=%27%23000%27 stroke-width=%271.8%27/%3E%3C/svg%3E") !important;' +
+    'background-position:center !important;background-repeat:no-repeat !important;' +
+    'background-size:8px 7px !important}',
 
-    // toggles become checkboxes: the track is the box, the knob goes away
+    // toggles become checkboxes: the track is the box, the knob goes away.
+    // margin:0 and padding:0 - the app's own metrics were measured for the
+    // wide pill - and transform:none because the old knob slide is written
+    // inline per frame and pushed the box 25px out of its holder, past the
+    // group-box border
     '.subnav label[name] container,.subnav .track{overflow:visible !important;' +
     'background:transparent !important;border-radius:0 !important;border:0 !important;' +
     'box-shadow:none !important;transition:none !important;width:14px !important;' +
-    'min-width:14px !important;height:14px !important}',
+    'min-width:14px !important;height:14px !important;margin:0 !important;padding:0 !important;' +
+    'transform:none !important}',
     '.subnav .track{background:#fff !important;box-shadow:var(--w95-in) !important}',
     '.subnav .toggleButton{display:none !important}',
     'label.toggled .track{background:#fff url("data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 width=%2710%27 height=%2710%27%3E%3Cpath d=%27M1 5l2.6 3L9 1.5%27 stroke=%27%23000%27 stroke-width=%272%27 fill=%27none%27/%3E%3C/svg%3E") 1px 1px/10px 10px no-repeat !important}',
@@ -10184,15 +10215,18 @@
     '.psx-zoom-card input[type="range"]::-moz-range-thumb{width:12px;height:20px;border:0;' +
     'border-radius:0;background:var(--w95-face);box-shadow:var(--w95-out)}',
 
-    // selects: a white sunken field; the app's own arrow recoloured black
+    // selects: a white sunken field and the W95 dropdown button drawn straight
+    // onto its right edge. The app's own arrow is absolutely placed for the old
+    // pill field and landed half outside this one, so it is gone
     '.subnav .select{background:transparent !important;border-radius:0 !important;padding:0 !important}',
-    '.subnav select{background:#fff !important;color:#000 !important;border:0 !important;' +
-    'border-radius:0 !important;box-shadow:var(--w95-in) !important;padding:4px 20px 4px 6px !important;' +
-    'font-size:13px !important;height:auto !important}',
+    '.subnav select{background-color:#fff !important;color:#000 !important;border:0 !important;' +
+    'border-radius:0 !important;box-shadow:var(--w95-in) !important;padding:4px 22px 4px 6px !important;' +
+    'font-size:13px !important;height:auto !important;' +
+    'background-image:url("data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 width=%2716%27 height=%2718%27 preserveAspectRatio=%27none%27%3E%3Cpath d=%27M0 0h16v18H0z%27 fill=%27%23c0c0c0%27/%3E%3Cpath d=%27M.5.5h15M.5.5v17%27 stroke=%27%23fff%27 fill=%27none%27/%3E%3Cpath d=%27M.5 17.5h15M15.5.5v17%27 stroke=%27%230a0a0a%27 fill=%27none%27/%3E%3Cpath d=%27M4.5 7h7L8 11.5z%27 fill=%27%23000%27/%3E%3C/svg%3E") !important;' +
+    'background-repeat:no-repeat !important;background-position:right 1px center !important;' +
+    'background-size:16px calc(100% - 2px) !important}',
     '.subnav select option{background:#fff !important;color:#000 !important}',
-    '.subnav .select_arrow{border-left:5px solid transparent !important;' +
-    'border-right:5px solid transparent !important;border-top:6px solid #000 !important;' +
-    'background:none !important;box-shadow:none !important}',
+    '.subnav .select_arrow{display:none !important}',
 
     // colour picker: square the iro widgets and sink them into the panel
     '.subnav .IroBox,.subnav .IroSlider,.subnav .IroSliderGradient,' +
@@ -10204,16 +10238,19 @@
     '#picker .hex .prefix{color:var(--w95-shadow) !important}',
 
     // tabs at the bottom of the background panel: pinned there by the app,
-    // so they keep the spot and become a Win95 tab row on gray
+    // so they keep the spot. No plate behind them - W95 tabs sit directly on
+    // the gray, the selected one popped forward, the rest a step lower. The
+    // strip spans the window now: the old width came off --container-w-d and
+    // stopped short of the desktop window
     '.subnav .tabs{background:var(--w95-face) !important;color:#000 !important;' +
-    'border-radius:0 !important;border-top:1px solid var(--w95-hilite);' +
-    'left:3px !important;bottom:3px !important;width:calc(var(--container-w-d,360px) - 8px) !important;' +
-    'padding:3px 6px !important;justify-content:flex-start !important}',
+    'border:0 !important;border-radius:0 !important;box-shadow:none !important;' +
+    'left:3px !important;bottom:3px !important;width:calc(100% - 6px) !important;' +
+    'padding:2px 0 0 2px !important;justify-content:flex-start !important;gap:2px}',
     '.subnav .tabs p{background:var(--w95-face) !important;color:#000 !important;' +
-    'box-shadow:var(--w95-in);border-radius:0 !important;padding:3px 12px !important;' +
-    'font-size:12px !important;font-weight:400 !important;cursor:pointer;margin:0}',
-    // W95 tabs: the selected one pops forward, the rest sit sunken in the row
-    '.subnav .tabs p.selected{font-weight:700 !important;box-shadow:var(--w95-out)}',
+    'box-shadow:var(--w95-out);border-radius:0 !important;padding:3px 12px 4px !important;' +
+    'font-size:12px !important;font-weight:400 !important;cursor:pointer;margin:2px 0 0 !important}',
+    // W95 tabs: the selected one pops forward, the rest sit back a step
+    '.subnav .tabs p.selected{font-weight:700 !important;margin-top:0 !important;padding:4px 12px 4px !important}',
 
     // the character panel: the model tile goes square with the same navy pick
     // ring as everything else; its selection plate is a :before circle
@@ -10257,7 +10294,11 @@
     // sparkle), thumb and buttons are bevelled face, arrows drawn as SVG.
     '.subnav ::-webkit-scrollbar{display:block !important;width:16px !important;height:16px !important}',
     '.subnav ::-webkit-scrollbar-track{background:repeating-conic-gradient(#fff 0% 25%,#c0c0c0 0% 50%) 50% / 2px 2px !important;box-shadow:none !important}',
-    '.subnav ::-webkit-scrollbar-thumb{background:var(--w95-face) !important;box-shadow:var(--w95-out) !important}',
+    // the thumb needs the extra specificity: the app paints its own white one
+    // from a later stylesheet, and at our specificity its !important wins the
+    // cascade - the thumb read as a white slab against the dithered track
+    '.subnav ::-webkit-scrollbar-thumb,container.subnav .content container::-webkit-scrollbar-thumb{' +
+    'background:var(--w95-face) !important;box-shadow:var(--w95-out) !important}',
     '.subnav ::-webkit-scrollbar-corner{background:var(--w95-face) !important}',
     '.subnav ::-webkit-scrollbar-button,.psx-zoom-card ::-webkit-scrollbar-button{' +
     'display:block;width:16px;height:16px;background-color:var(--w95-face);' +
@@ -10270,6 +10311,9 @@
     'background-image:url("data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 width=%277%27 height=%274%27%3E%3Cpath d=%27M3.5 4L0 0h7z%27 fill=%27%23000%27/%3E%3C/svg%3E")}',
 
     // ---- keyboard + state fidelity -------------------------------------
+    // no intro animations: the bundle runs Svelte keyframe fades on the panel
+    // roots, the lists and the tab strip, and a W95 window draws in one frame
+    '.subnav .content,.subnav .content *,.psx-zoom-card,.psx-zoom-card *{animation:none !important}',
     // Tab focus is the W95 dotted rectangle, not Chromium's modern blue glow.
     'button:focus-visible,.subnav button:focus-visible,.psx-zoom-card button:focus-visible,' +
     '.subnav .psx-front-pick:focus-visible,.subnav .psx-bg-image:focus-visible,' +
@@ -10298,7 +10342,7 @@
     // Its 1s opacity fade is killed: the splash now waits for tracking to
     // actually be live (PSX.bootReady holds the bundle's ready signal), and
     // when it releases the title goes out in one frame - a W95 cut, no fade
-    'h1{font-family:"W95FA",sans-serif !important;transition:none !important}'
+    'h1{font-family:"W95FA",sans-serif !important;transition:none !important;animation:none !important}'
   ].join('');
 
   function injectW95Css() {
@@ -10379,15 +10423,25 @@
       // which only attaches while the attribute reads false
       sub.setAttribute('data-dragging', 'true');
       e.preventDefault();
+      // capture the pointer: a release outside the viewport used to leave the
+      // drag armed, and the window then chased the cursor - the close button
+      // could never win that race. With capture the release is delivered even
+      // off-window, and lostpointercapture covers the take-away case
+      try { bar.setPointerCapture(e.pointerId); } catch (err) {}
+      var done = false;
       var move = function (ev) {
         var x = clamp(ox + ev.clientX - sx, 8, Math.max(8, window.innerWidth - w - 8));
         var y = clamp(oy + ev.clientY - sy, 8, Math.max(8, window.innerHeight - 48));
         winPosRule().textContent = winPosText(x, y);
       };
       var up = function () {
+        if (done) return;
+        done = true;
+        try { bar.releasePointerCapture(e.pointerId); } catch (err) {}
         window.removeEventListener('pointermove', move);
         window.removeEventListener('pointerup', up);
         window.removeEventListener('pointercancel', up);
+        window.removeEventListener('lostpointercapture', up);
         sub.setAttribute('data-dragging', 'false');
         var r2 = sub.getBoundingClientRect();
         cfg.win = { x: Math.round(r2.left), y: Math.round(r2.top) };
@@ -10396,6 +10450,7 @@
       window.addEventListener('pointermove', move);
       window.addEventListener('pointerup', up);
       window.addEventListener('pointercancel', up);
+      window.addEventListener('lostpointercapture', up);
     });
   }
 
