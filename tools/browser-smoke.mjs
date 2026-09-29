@@ -190,15 +190,22 @@ try {
       setValue: (k, v) => { values[k] = v; }, getValue: k => values[k] || 0
     } };
     const face = { mouth: { x: 0.3, y: 0.5, shape: {} } };
+    // count the delta: the render loop drives PSX.face on its own even with
+    // no camera, and headless timers can throttle the 55ms gaps far past
+    // 50ms - both add reads, so an absolute bound would fail on the machine,
+    // not on the app
+    const before = PSX.mic().reads;
     const start = performance.now();
     for (let i = 0; i < 25; i++) {
       PSX.face(vrm, face);
       await new Promise(resolve => setTimeout(resolve, 55));
     }
-    return { ...PSX.mic(), elapsed: performance.now() - start };
+    return { ...PSX.mic(), before, elapsed: performance.now() - start };
   });
-  assert.ok(audioResult.reads > 0 && audioResult.reads <= 25);
-  assert.ok(audioResult.reads <= Math.ceil(audioResult.elapsed / 50));
+  assert.ok(audioResult.reads > audioResult.before, 'PSX.face samples the microphone buffer');
+  // one shared 50 ms gate covers the loop's calls too, so the whole window's
+  // delta stays inside the 20 Hz cap (+1 for the boundary read)
+  assert.ok(audioResult.reads - audioResult.before <= Math.ceil(audioResult.elapsed / 50) + 1);
   console.log('Real Web Audio sampling (synthetic microphone):', JSON.stringify(audioResult));
   await page.getByRole('button', { name: 'Disable microphone', exact: true }).click();
   assert.equal(await page.evaluate(() => PSX.mic().state), 'off');
