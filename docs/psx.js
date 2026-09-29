@@ -10530,6 +10530,11 @@
     'backdrop-filter:none !important;border:0 !important;padding:3px !important}',
     'container.subnav.psx-empty #psx-w95-title{display:none}',
     'container.subnav section:empty,container.subnav .shape-overlays{display:none !important}',
+    // The boot wave: upstream sweeps a full-screen gradient curtain (three SVG
+    // paths) over the page when it opens and on some view swaps. Purely
+    // decorative - pointer-events:none, nothing waits on it - and a W95 window
+    // draws in one frame, so it is cut everywhere, not just in the subnav.
+    '.shape-overlays{display:none !important}',
     // ---- the desktop window -------------------------------------------
     // On a mouse the panel stops being a fixed column and becomes a free W95
     // window: opened where it was last dragged (the position lives in the
