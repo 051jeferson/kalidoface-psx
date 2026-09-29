@@ -6868,6 +6868,10 @@
     'Fine tuning': 'Ajuste fino',
     'Low power preset': 'Preset de baixo consumo',
     'Profile': 'Perfil',
+    'Face': 'Rosto',
+    'Body': 'Corpo',
+    'Voice': 'Voz',
+    'Capture': 'Captura',
     'note.novoice': 'Este navegador não tem nenhuma voz de fala instalada, então as ' +
       'instruções faladas ficam mudas - os bipes e o texto na tela continuam ' +
       'funcionando. No Raspberry Pi OS, instalar um motor de fala dá uma lista ' +
@@ -8447,6 +8451,7 @@
     // them: it is an explanation of a switch that is now off.
     if (key === 'calCues') syncVoiceNote();
     if (key === 'gpu') syncTrackerBackend();
+    if (key === 'zoom') applyZoom();
     if (REBUILDS[key]) { applyDocLang(); rebuildPanels(); }
     if (LATCH_KEYS[key]) refreshModels();
   }
@@ -8685,6 +8690,22 @@
 
   // --- Settings tab: calibrating one model ---------------------------------
 
+  // A Win95 group label: navy small caps over an etched rule. The cards under
+  // it keep their own headings - the category says what they belong to, which
+  // nine cards in a flat column never did.
+  function cat(label, sc) {
+    var d = el('div', sc || STG, '');
+    d.style.cssText = 'display:flex;align-items:center;gap:8px;width:100%;margin:14px 0 2px';
+    var t = el('span', sc || STG, label);
+    t.style.cssText = 'font-size:11px;font-weight:700;letter-spacing:.08em;' +
+      'text-transform:uppercase;color:#000080;flex:0 0 auto';
+    var line = el('span', sc || STG, '');
+    line.style.cssText = 'flex:1;height:0;border-top:1px solid #808080;border-bottom:1px solid #fff';
+    d.appendChild(t);
+    d.appendChild(line);
+    return d;
+  }
+
   function buildSettings() {
     var frag = document.createDocumentFragment();
 
@@ -8698,6 +8719,7 @@
       [T('English'), T('Portuguese (BR)')], STG);
     frag.appendChild(lg);
 
+    frag.appendChild(cat(T('Face'), STG));
     var x = card(T('Face Expressions'), STG);
     addRange(x, 'threshold', T('Trigger threshold'), 0, 1, 0.01, function (v) { return v.toFixed(2); }, STG);
     addRange(x, 'hysteresis', T('Release margin'), 0, 0.5, 0.01, function (v) { return v.toFixed(2); }, STG);
@@ -8714,34 +8736,6 @@
       x.appendChild(hint);
     }
     frag.appendChild(x);
-
-    var audio = card(T('Microphone assist'), STG);
-    micSelect = addSelect(audio, 'micDevice', T('Microphone'), micDeviceValues,
-      micDeviceValues.map(function () { return ''; }), STG);
-    paintMicDevices();
-    refreshMicDevices();
-    addSelect(audio, 'micMode', T('Mouth control'), ['assist', 'speech'],
-      [T('Camera with microphone assist'), T('Speech from microphone')], STG);
-    micModeNote = el('div', STG, '');
-    micModeNote.style.cssText = 'width:100%;font-size:12px;line-height:1.5;text-align:left;margin-bottom:12px';
-    audio.appendChild(micModeNote);
-    micNote = el('div', STG, '');
-    micNote.style.cssText = 'width:100%;font-size:12px;line-height:1.5;text-align:left';
-    micNote.setAttribute('role', 'status');
-    audio.appendChild(micNote);
-    micButton = el('button', 'trigger ' + STG, '');
-    micButton.type = 'button';
-    micButton.setAttribute('data-psx-mic', '');
-    micButton.style.marginTop = '12px';
-    micButton.addEventListener('click', function () {
-      if (mic.state === 'active' || mic.state === 'requesting') stopMic();
-      else startMic();
-    });
-    audio.appendChild(micButton);
-    addRange(audio, 'micSensitivity', T('Microphone sensitivity'), 0.5, 4, 0.1,
-      function (v) { return v.toFixed(1) + 'x'; }, STG);
-    syncMicUi();
-    frag.appendChild(audio);
 
     // --- eyes ----------------------------------------------------------
     var ey = card(T('Eyes'), STG);
@@ -8853,6 +8847,7 @@
     frag.appendChild(em);
 
     // --- motion --------------------------------------------------------
+    frag.appendChild(cat(T('Body'), STG));
     var mo = card(T('Motion Calibration'), STG);
     var moNote = el('div', STG, T('note.motion'));
     moNote.style.cssText = 'width:100%;opacity:.5;font-size:12px;margin:0 0 4px;text-align:left';
@@ -8923,6 +8918,41 @@
     syncCalUi();
     frag.appendChild(mo);
 
+    var hnd = card(T('PSX Hands'), STG);
+    addSelect(hnd, 'fingers', T('Driven fingers'), ['all', 'thumb', 'none'],
+      [T('all fingers'), T('thumb only'), T('none')], STG);
+    frag.appendChild(hnd);
+
+    frag.appendChild(cat(T('Voice'), STG));
+    var audio = card(T('Microphone assist'), STG);
+    micSelect = addSelect(audio, 'micDevice', T('Microphone'), micDeviceValues,
+      micDeviceValues.map(function () { return ''; }), STG);
+    paintMicDevices();
+    refreshMicDevices();
+    addSelect(audio, 'micMode', T('Mouth control'), ['assist', 'speech'],
+      [T('Camera with microphone assist'), T('Speech from microphone')], STG);
+    micModeNote = el('div', STG, '');
+    micModeNote.style.cssText = 'width:100%;font-size:12px;line-height:1.5;text-align:left;margin-bottom:12px';
+    audio.appendChild(micModeNote);
+    micNote = el('div', STG, '');
+    micNote.style.cssText = 'width:100%;font-size:12px;line-height:1.5;text-align:left';
+    micNote.setAttribute('role', 'status');
+    audio.appendChild(micNote);
+    micButton = el('button', 'trigger ' + STG, '');
+    micButton.type = 'button';
+    micButton.setAttribute('data-psx-mic', '');
+    micButton.style.marginTop = '12px';
+    micButton.addEventListener('click', function () {
+      if (mic.state === 'active' || mic.state === 'requesting') stopMic();
+      else startMic();
+    });
+    audio.appendChild(micButton);
+    addRange(audio, 'micSensitivity', T('Microphone sensitivity'), 0.5, 4, 0.1,
+      function (v) { return v.toFixed(1) + 'x'; }, STG);
+    syncMicUi();
+    frag.appendChild(audio);
+
+    frag.appendChild(cat(T('Performance'), STG));
     // --- performance ---------------------------------------------------
     var pf = card(T('Performance'), STG);
     var pfNote = el('div', STG, T('note.perf'));
@@ -8953,12 +8983,43 @@
     reloadNote(pf, T('note.reloadPerf'), STG);
     frag.appendChild(pf);
 
-    var hnd = card(T('PSX Hands'), STG);
-    addSelect(hnd, 'fingers', T('Driven fingers'), ['all', 'thumb', 'none'],
-      [T('all fingers'), T('thumb only'), T('none')], STG);
-    frag.appendChild(hnd);
+    frag.appendChild(cat(T('Capture'), STG));
+    // The tray zoom button opens this card. The slider rides the ordinary
+    // control plumbing: liveChange('zoom') re-applies the shot while it
+    // drags, and the change event saves.
+    var cap = card(T('Capture'), STG);
+    cap.id = 'psx-capture-card';
+    addRange(cap, 'zoom', T('Zoom'), 50, 300, 1,
+      function (v) { return Math.round(v) + '%'; }, STG);
+    var zrow = el('div', STG, '');
+    zrow.style.cssText = 'display:flex;gap:8px;width:100%;margin-top:12px';
+    var zstep = function (d) {
+      var zb = el('button', 'trigger ' + STG, d > 0 ? '+' : '\u2212');
+      zb.type = 'button';
+      zb.setAttribute('aria-label', T(d > 0 ? 'Zoom in' : 'Zoom out'));
+      zb.style.cssText = 'flex:0 0 44px;padding:6px 0';
+      zb.addEventListener('click', function () {
+        cfg.zoom = clamp(zoomValue() + d, 50, 300);
+        liveChange('zoom');
+        save();
+      });
+      return zb;
+    };
+    var zreset = el('button', 'trigger ' + STG, T('Reset'));
+    zreset.type = 'button';
+    zreset.style.cssText = 'flex:1;padding:6px 0';
+    zreset.addEventListener('click', function () {
+      cfg.zoom = 100;
+      liveChange('zoom');
+      save();
+    });
+    zrow.appendChild(zstep(-10));
+    zrow.appendChild(zstep(10));
+    zrow.appendChild(zreset);
+    cap.appendChild(zrow);
+    frag.appendChild(cap);
 
-    // Export / import / reset are about the settings file, not about hands.
+    frag.appendChild(cat(T('Profile'), STG));
     var io = card(T('Profile'), STG);
     var exp = el('button', 'trigger ' + STG, T('Export settings'));
     exp.addEventListener('click', function () { exportSettings(); });
@@ -9891,100 +9952,9 @@
     if (!zoomCanvas || !zoomCanvas.isConnected || zoomCanvas.style.transform === '') applyZoom();
   }
 
-  var zoomCard = null;
-
+  // The tray zoom button opens this panel section; the zoom control itself
+  // lives in Settings under Captura, where the rest of the shot's settings are.
   function zoomValue() { return Math.round(clamp(cfg.zoom, 50, 300)); }
-
-  // live on input, saved on release - the same split the opacity slider uses
-  function setZoom(v, persist) {
-    cfg.zoom = clamp(Math.round(v), 50, 300);
-    applyZoom();
-    syncZoomCard();
-    if (persist) save();
-  }
-
-  function syncZoomCard() {
-    if (!zoomCard) return;
-    var range = zoomCard.__psxZoomRange, val = zoomCard.__psxZoomVal;
-    if (range) range.value = String(zoomValue());
-    if (val) val.textContent = zoomValue() + '%';
-  }
-
-  function buildZoomCard() {
-    var wrap = el('div', 'psx-injected psx-zoom-card', '');
-    // a win95 window like the panels: gray face, navy caption, bevelled bits.
-    // No drop shadow - W95 windows had none
-    wrap.style.cssText = 'position:fixed;right:14px;bottom:290px;z-index:20;width:232px;' +
-      'color:#000;background:#c0c0c0;border:0;border-radius:0;padding:3px;box-sizing:border-box;' +
-      'box-shadow:inset -1px -1px #0a0a0a,inset 1px 1px #dfdfdf,inset -2px -2px #808080,' +
-      'inset 2px 2px #fff;text-align:left';
-
-    // the caption the panels wear: 18px navy bar flush on the frame, 16px app
-    // icon, and the same 16x14 close glyph, so the card reads as one more
-    // window and not a widget with its own idea of chrome
-    var head = el('div', '', '');
-    head.style.cssText = 'position:relative;display:flex;align-items:center;gap:3px;height:18px;' +
-      'margin:-1px -1px 0;background:#000080;padding:2px 21px 2px 3px;box-sizing:border-box;overflow:hidden';
-    var ico = el('span', '', '');
-    ico.style.cssText = 'flex:0 0 16px;width:16px;height:16px;' +
-      'background:center/contain no-repeat url(vendor/icon/apple-icon-180.png);image-rendering:pixelated';
-    var title = el('strong', '', T('Zoom'));
-    title.style.cssText = 'font-size:11px;font-weight:700;flex:1;color:#fff;overflow:hidden;' +
-      'white-space:nowrap;text-overflow:ellipsis';
-    var val = el('span', '', zoomValue() + '%');
-    val.style.cssText = 'font-size:11px;color:#fff;font-variant-numeric:tabular-nums';
-    var close = el('button', 'psx-zoom-close', '');
-    close.type = 'button';
-    close.setAttribute('aria-label', T('Close'));
-    close.style.cssText = 'position:absolute;top:2px;right:3px;width:16px;height:14px;padding:0;' +
-      'border-radius:0;border:0;background-color:#c0c0c0;cursor:pointer;' +
-      'box-shadow:inset -1px -1px #0a0a0a,inset 1px 1px #fff,inset -2px -2px #808080,inset 2px 2px #dfdfdf;' +
-      'background-image:url("data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 width=%278%27 height=%277%27%3E%3Cpath d=%27M1 1l6 5M7 1l-6 5%27 stroke=%27%23000%27 stroke-width=%271.8%27/%3E%3C/svg%3E");' +
-      'background-position:center;background-repeat:no-repeat;background-size:8px 7px';
-    close.addEventListener('click', function () { toggleZoomCard(false); });
-    head.appendChild(ico);
-    head.appendChild(title);
-    head.appendChild(val);
-    head.appendChild(close);
-    wrap.appendChild(head);
-
-    function stepBtn(txt, d, label, cls) {
-      var b = el('button', cls, txt);
-      b.type = 'button';
-      b.style.cssText = 'width:26px;height:22px;line-height:20px;padding:0;flex:0 0 auto;' +
-        'border-radius:0;border:0;background:#c0c0c0;color:#000;font-size:14px;cursor:pointer;' +
-        'box-shadow:inset -1px -1px #0a0a0a,inset 1px 1px #fff,inset -2px -2px #808080,' +
-        'inset 2px 2px #dfdfdf';
-      b.setAttribute('aria-label', label);
-      b.addEventListener('click', function () { setZoom(zoomValue() + d, true); });
-      return b;
-    }
-
-    var row = el('div', '', '');
-    row.style.cssText = 'display:flex;align-items:center;gap:8px;padding:10px 8px 4px';
-    var range = document.createElement('input');
-    range.type = 'range';
-    range.min = '50';
-    range.max = '300';
-    range.step = '1';
-    range.value = String(zoomValue());
-    range.style.cssText = 'flex:1;min-width:0';
-    range.addEventListener('input', function () { setZoom(parseFloat(range.value), false); });
-    range.addEventListener('change', function () { setZoom(parseFloat(range.value), true); });
-    wrap.__psxZoomRange = range;
-    wrap.__psxZoomVal = val;
-    row.appendChild(stepBtn('\u2212', -10, T('Zoom out'), 'psx-zoom-minus'));
-    row.appendChild(range);
-    row.appendChild(stepBtn('+', 10, T('Zoom in'), 'psx-zoom-plus'));
-    wrap.appendChild(row);
-
-    var reset = el('button', 'trigger ' + STG, T('Reset'));
-    reset.style.cssText = 'width:calc(100% - 16px);margin:6px 8px 8px;padding:6px;' +
-      'border-radius:0;font-size:13px;font-weight:400;box-sizing:border-box';
-    reset.addEventListener('click', function () { setZoom(100, true); });
-    wrap.appendChild(reset);
-    return wrap;
-  }
 
   // --------------------------------------------------------- camera framing
 
@@ -10073,18 +10043,6 @@
     camApplyTimer = setTimeout(camApply, 0);
   }
 
-  function toggleZoomCard(open) {
-    if (!open && zoomCard) {
-      if (zoomCard.parentNode) zoomCard.parentNode.removeChild(zoomCard);
-      zoomCard = null;
-      return;
-    }
-    if (open && !zoomCard) {
-      zoomCard = buildZoomCard();
-      (document.body || document.documentElement).appendChild(zoomCard);
-    }
-  }
-
   // The cluster's own fifth slot - the one the friend-call button was rendered
   // into, hidden here - is free, and the cluster spreads its children onto
   // fixed slots by nth-child. Taking the call button's place keeps the spread
@@ -10124,10 +10082,39 @@
     ico.appendChild(glass);
     ico.appendChild(handle);
     b.appendChild(ico);
-    b.addEventListener('click', function () { toggleZoomCard(!zoomCard); });
+    // opens the Settings window on the Captura section - the zoom slider lives
+    // there now, and a whole floating window for one control was one more
+    // surface to drag, close and explain
+    b.addEventListener('click', function () { openSettings(); });
     var call = nav.querySelector('.menu-item.call');
     if (call && call.parentNode === nav) nav.insertBefore(b, call);
     else nav.appendChild(b);
+  }
+
+  // The corner launcher is the app's own way into the settings window, so its
+  // store, animation and position all behave as if the user had clicked it.
+  // A second click would toggle the window shut, so an already-open Settings
+  // window is left alone - only the Captura card is scrolled into view.
+  function openSettings() {
+    var sub = document.querySelector('container.subnav');
+    if (sub && !sub.classList.contains('hide') && w95TitleText() === T('Settings')) {
+      var cardEl = document.getElementById('psx-capture-card');
+      if (cardEl && cardEl.scrollIntoView) cardEl.scrollIntoView({ block: 'center' });
+      return;
+    }
+    var btns = document.querySelectorAll('.secondaryMenu button');
+    for (var i = 0; i < btns.length; i++) {
+      var bt = btns[i];
+      if (!bt.getBoundingClientRect().width) continue;
+      var t = ((bt.getAttribute('aria-label') || '') + ' ' + (bt.getAttribute('data-text') || '') + ' ' +
+        (bt.textContent || '')).toLowerCase();
+      if (t.indexOf('settings') >= 0 || t.indexOf('ajustes') >= 0) { bt.click(); break; }
+    }
+    // the window animates in; the card exists by the next frame after that
+    setTimeout(function () {
+      var cardEl = document.getElementById('psx-capture-card');
+      if (cardEl && cardEl.scrollIntoView) cardEl.scrollIntoView({ block: 'center' });
+    }, 120);
   }
 
   function injectInto(c, build, keyed) {
@@ -10347,7 +10334,6 @@
     }
     if (!calRun) {
       if (e.key === 'Escape') {
-        if (zoomCard) { toggleZoomCard(false); e.preventDefault(); return; }
         if (closePanel()) e.preventDefault();
       }
       return;
@@ -10405,8 +10391,7 @@
     // overlay a run with no panel still needs.
     'body.psx-hud-off nav.menu,body.psx-hud-off container.subnav,' +
     'body.psx-hud-off .subButton,body.psx-hud-off .secondaryMenu{display:none !important}',
-    'body.psx-hud-off main>container:not(.scene),body.psx-hud-off #pip,' +
-    'body.psx-hud-off .psx-zoom-card{visibility:hidden !important}',
+    'body.psx-hud-off main>container:not(.scene),body.psx-hud-off #pip{visibility:hidden !important}',
     // The scaled canvas and the front layer are stacking contexts at z-index 1
     // and 2; the cluster has none of its own, so both would paint over it.
     'nav.menu{z-index:3}',
@@ -10613,17 +10598,11 @@
     'border-bottom:1px solid var(--w95-hilite);margin:10px 0 !important;opacity:1}',
 
     // buttons
-    '.subnav .trigger,.psx-zoom-card button{background:var(--w95-face) !important;' +
+    '.subnav .trigger{background:var(--w95-face) !important;' +
     'color:#000 !important;border:0 !important;border-radius:0 !important;' +
     'box-shadow:var(--w95-out) !important;font-weight:400 !important;transition:none !important}',
-    '.subnav .trigger:active,.psx-zoom-card button:active{box-shadow:var(--w95-in) !important}',
+    '.subnav .trigger:active{box-shadow:var(--w95-in) !important}',
     '.subnav .trigger{padding:6px 12px !important;font-size:13px !important;margin:4px 0 !important}',
-    // the zoom caption's close glyph. The card-button rule above is a
-    // background shorthand at !important and would wipe any inline glyph, so
-    // the image rides here instead
-    '.psx-zoom-card .psx-zoom-close{background-image:url("data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 width=%278%27 height=%277%27%3E%3Cpath d=%27M1 1l6 5M7 1l-6 5%27 stroke=%27%23000%27 stroke-width=%271.8%27/%3E%3C/svg%3E") !important;' +
-    'background-position:center !important;background-repeat:no-repeat !important;' +
-    'background-size:8px 7px !important}',
 
     // toggles become checkboxes: the track is the box, the knob goes away.
     // margin:0 and padding:0 - the app's own metrics were measured for the
@@ -10645,21 +10624,17 @@
     // sliders: a sunken groove and a bevelled thumb, no coloured fill. The
     // app's own thumb rule is injected after this stylesheet and matches at
     // the same specificity, so every property here is forced.
-    '.subnav input[type="range"],.psx-zoom-card input[type="range"]{' +
+    '.subnav input[type="range"]{' +
     '-webkit-appearance:none !important;appearance:none !important;' +
     'background:transparent !important;height:20px !important;border-radius:0 !important;margin:0}',
-    '.subnav input[type="range"]::-webkit-slider-runnable-track,' +
-    '.psx-zoom-card input[type="range"]::-webkit-slider-runnable-track{height:4px !important;' +
+    '.subnav input[type="range"]::-webkit-slider-runnable-track{height:4px !important;' +
     'background:var(--w95-shadow) !important;box-shadow:1px 1px 0 var(--w95-hilite)}',
-    '.subnav input[type="range"]::-webkit-slider-thumb,' +
-    '.psx-zoom-card input[type="range"]::-webkit-slider-thumb{-webkit-appearance:none !important;' +
+    '.subnav input[type="range"]::-webkit-slider-thumb{-webkit-appearance:none !important;' +
     'width:12px !important;height:20px !important;margin-top:-8px !important;' +
     'border:0 !important;border-radius:0 !important;background:var(--w95-face) !important;' +
     'box-shadow:var(--w95-out) !important;cursor:pointer}',
-    '.subnav input[type="range"]::-moz-range-track,' +
-    '.psx-zoom-card input[type="range"]::-moz-range-track{height:4px;background:var(--w95-shadow)}',
-    '.subnav input[type="range"]::-moz-range-thumb,' +
-    '.psx-zoom-card input[type="range"]::-moz-range-thumb{width:12px;height:20px;border:0;' +
+    '.subnav input[type="range"]::-moz-range-track{height:4px;background:var(--w95-shadow)}',
+    '.subnav input[type="range"]::-moz-range-thumb{width:12px;height:20px;border:0;' +
     'border-radius:0;background:var(--w95-face);box-shadow:var(--w95-out)}',
 
     // selects: a white sunken field and the W95 dropdown button drawn straight
@@ -10747,22 +10722,20 @@
     '.subnav ::-webkit-scrollbar-thumb,container.subnav .content container::-webkit-scrollbar-thumb{' +
     'background:var(--w95-face) !important;box-shadow:var(--w95-out) !important}',
     '.subnav ::-webkit-scrollbar-corner{background:var(--w95-face) !important}',
-    '.subnav ::-webkit-scrollbar-button,.psx-zoom-card ::-webkit-scrollbar-button{' +
+    '.subnav ::-webkit-scrollbar-button{' +
     'display:block;width:16px;height:16px;background-color:var(--w95-face);' +
     'background-position:center;background-repeat:no-repeat;box-shadow:var(--w95-out)}',
-    '.subnav ::-webkit-scrollbar-button:single-button:vertical:decrement,' +
-    '.psx-zoom-card ::-webkit-scrollbar-button:single-button:vertical:decrement{' +
+    '.subnav ::-webkit-scrollbar-button:single-button:vertical:decrement{' +
     'background-image:url("data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 width=%277%27 height=%274%27%3E%3Cpath d=%27M3.5 0L7 4H0z%27 fill=%27%23000%27/%3E%3C/svg%3E")}',
-    '.subnav ::-webkit-scrollbar-button:single-button:vertical:increment,' +
-    '.psx-zoom-card ::-webkit-scrollbar-button:single-button:vertical:increment{' +
+    '.subnav ::-webkit-scrollbar-button:single-button:vertical:increment{' +
     'background-image:url("data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 width=%277%27 height=%274%27%3E%3Cpath d=%27M3.5 4L0 0h7z%27 fill=%27%23000%27/%3E%3C/svg%3E")}',
 
     // ---- keyboard + state fidelity -------------------------------------
     // no intro animations: the bundle runs Svelte keyframe fades on the panel
     // roots, the lists and the tab strip, and a W95 window draws in one frame
-    '.subnav .content,.subnav .content *,.psx-zoom-card,.psx-zoom-card *{animation:none !important}',
+    '.subnav .content,.subnav .content *{animation:none !important}',
     // Tab focus is the W95 dotted rectangle, not Chromium's modern blue glow.
-    'button:focus-visible,.subnav button:focus-visible,.psx-zoom-card button:focus-visible,' +
+    'button:focus-visible,.subnav button:focus-visible,' +
     '.subnav .psx-front-pick:focus-visible,.subnav .psx-bg-image:focus-visible,' +
     '.subnav .psx-colour-pick:focus-visible,.subnav .trackingOption:focus-visible,' +
     '.subnav .model:focus-visible{outline:1px dotted #000;outline-offset:-4px}',
@@ -10770,9 +10743,9 @@
     '.subnav select:focus-visible,.subnav input:focus-visible{outline:1px dotted #000;outline-offset:1px}',
     // disabled: flat shadow-gray ink with a white emboss, and the face never
     // sinks on press
-    '.subnav button:disabled,.psx-zoom-card button:disabled{color:var(--w95-shadow) !important;' +
+    '.subnav button:disabled{color:var(--w95-shadow) !important;' +
     'text-shadow:1px 1px 0 var(--w95-hilite);cursor:default}',
-    '.subnav button:disabled:active,.psx-zoom-card button:disabled:active{box-shadow:var(--w95-out) !important}',
+    '.subnav button:disabled:active{box-shadow:var(--w95-out) !important}',
     '.subnav select:disabled{color:var(--w95-shadow)}',
     '.subnav input[type="checkbox"]:disabled{background:var(--w95-face)}',
     // dormant until a radio ships: the W95 ring-and-dot
