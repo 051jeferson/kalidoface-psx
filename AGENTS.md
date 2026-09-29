@@ -2,7 +2,7 @@
 
 Fork of [yeemachine/kalidoface-3d](https://github.com/yeemachine/kalidoface-3d) retuned for PSX / low-poly VRM models. Product behaviour lives in `README.md`. This file is for agents working the repo.
 
-There is **no app source tree**. Upstream's Vite sources and build config are gone from the repo entirely. The running app is the built static site in `docs/`. All fork behaviour is `docs/psx.js` plus 46 patched call sites in the minified bundle (60 find/replace pairs, five of which only rewrite a URL or an asset list).
+There is **no app source tree**. Upstream's Vite sources and build config are gone from the repo entirely. The running app is the built static site in `docs/`. All fork behaviour is `docs/psx.js` plus 46 patched call sites in the minified bundle (79 find/replace pairs; most are PSX hooks, the rest rewrite dead-host URLs or stub dead call sites such as the peer dial).
 
 The fork ships **one avatar** (`docs/vrm/Jeferson.vrm`, vendored, same-origin), **one default background** (chroma green, `PSX.bgDefault`) and **two art presets** (`docs/art/front.png` over the avatar, `docs/art/back.png` behind it). Upstream's nine sample characters and its image/panorama backgrounds are cut from the bundle. A stored selection pointing off-origin is rewritten to the shipped default at hydrate by `PSX.bgFix` / `PSX.modelFix`; uploads (`data:`/`blob:`) pass through.
 
