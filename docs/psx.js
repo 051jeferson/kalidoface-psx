@@ -7170,7 +7170,7 @@
   var EXPECTED_HOOKS = {
     setupRenderer: 1, aa: 1, smaa: 1, fingers: 1, onModel: 1, tick: 1,
     face: 1, brow: 1, headGain: 1, bodyGain: 1, leanGain: 1, spineLean: 1, armGain: 1,
-    smooth: 7, frame: 1, nextTrack: 1,
+    smooth: 7, frame: 1, nextTrack: 1, frameGate: 2,
     mpOptions: 2, shadows: 1, shadowSize: 4, overlay: 3, overlayOpen: 1, gaze: 1,
     pose: 1, hands: 1, arm: 1, guide: 1, bg: 1, bgDrop: 1,
     bgDefault: 1, bgFix: 1, modelFix: 1, front: 2, frontFiles: 1, cam: 1,
@@ -7597,6 +7597,22 @@
   // last cycle so the rate holds steady instead of drifting slower.
   var trackAt = 0;
 
+  // The camera delivers fewer fps than the tracking cap in anything but good
+  // light, and the loop then re-runs both model inferences on a frame it has
+  // already solved - full price, identical result. A frame seen before is
+  // skipped whole. The decision belongs to the frame, not to one send: a
+  // cycle runs two sends (face mesh and holistic) and both must see the same
+  // answer, so nextTrack closes the gate when a cycle ends and the next
+  // cycle's first send reopens it only if currentTime moved.
+  var gateT = -1, gateFresh = false;
+
+  function frameGate(v) {
+    if (!v || !isNum(v.currentTime)) return true;
+    var t = v.currentTime;
+    if (t !== gateT) { gateT = t; gateFresh = true; }
+    return gateFresh;
+  }
+
   function nextTrack(fn) {
     // One call per completed cycle, so the gap between two of them is what the
     // tracker is managing end to end. A gap long enough to be a tab that was
@@ -7607,6 +7623,8 @@
       trackMs = trackMs ? trackMs + (gap - trackMs) * 0.2 : gap;
     }
     trackSeen = tn;
+    // this cycle's sends are done; the next one decides its frame anew
+    gateFresh = false;
 
     var fps = cfg.trackFps;
     if (cfg.perfAuto) fps = fps ? Math.min(fps, autoFps) : autoFps;
@@ -10593,6 +10611,7 @@
 
     frame: frame,
     nextTrack: nextTrack,
+    frameGate: frameGate,
     mpOptions: mpOptions,
     shadows: shadows,
     shadowSize: shadowSize,

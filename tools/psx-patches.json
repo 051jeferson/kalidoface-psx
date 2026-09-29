@@ -264,6 +264,21 @@
       "name": "bootReady-error",
       "find": "console.error(g),u||setTimeout(()=>{ol.set(!0),Cn.set(1)},1e3)",
       "replace": "console.error(g),u||window.PSX.bootReady(function(){ol.set(!0),Cn.set(1)})"
+    },
+    {
+      "name": "frameGate-face",
+      "find": "else await f.send({image:je});",
+      "replace": "else if(window.PSX.frameGate(je))await f.send({image:je});"
+    },
+    {
+      "name": "frameGate-holistic",
+      "find": "else await c.send({image:je});",
+      "replace": "else if(window.PSX.frameGate(je))await c.send({image:je});"
+    },
+    {
+      "name": "camera-frameRate-cap",
+      "find": "height:{min:480,ideal:480,max:480}},audio:!1",
+      "replace": "height:{min:480,ideal:480,max:480},frameRate:{max:30}},audio:!1"
     }
   ],
   "vendorPatches": [
