@@ -415,3 +415,15 @@ body.user-is-tabbing input:focus + container {
     scroll-behavior: auto !important;
   }
 }
+
+/* Dead upstream CDN images. The Glitch asset host (cdn.glitch.com) and
+   yeemachine.github.io no longer resolve, and the page must not reach out.
+   VideoCover: the webcam card's placeholder art (blank it); transparent: the
+   background picker's checkerboard swatch (re-painted in pure CSS). */
+#drag-cam {
+  background-image: none !important;
+}
+.content.color.transparent {
+  background-image: conic-gradient(#c8c8c8 25%, #fff 0 50%, #c8c8c8 0 75%, #fff 0) !important;
+  background-size: 20px 20px !important;
+}

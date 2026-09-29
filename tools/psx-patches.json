@@ -279,6 +279,46 @@
       "name": "camera-frameRate-cap",
       "find": "height:{min:480,ideal:480,max:480}},audio:!1",
       "replace": "height:{min:480,ideal:480,max:480},frameRate:{max:30}},audio:!1"
+    },
+    {
+      "find": "https://cdn.glitch.com/29e07830-2317-4b15-a044-135e73c7f840%2F95d0cfb2406ee5a65491bbaba429713684b5b089.jpeg?v=1622566026664",
+      "replace": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg=="
+    },
+    {
+      "find": "https://cdn.glitch.com/239c5934-4d83-4c5c-bef6-44dcdb04c8fb%2Fkofi.png?v=1626708861780",
+      "replace": "data:image/png;%89%50%4e%47%0d%0a%1a%0a%00%00%00%0d%49%48%44%52%00%00%00%01%00%00%00%01%08%06%00%00%00%1f%15%c4%89%00%00%00%0d%49%44%41%54%78%da%63%64%60%f8%5f%0f%00%02%87%01%80%eb%47%ba%92%00%00%00%00%49%45%4e%44%ae%42%60%82"
+    },
+    {
+      "find": "https://yeemachine.github.io/k2021/gif/fullbody.gif",
+      "replace": "data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7"
+    },
+    {
+      "find": "https://yeemachine.github.io/k2021/gif/face_eye.gif",
+      "replace": "data:image/gif;%47%49%46%38%39%61%01%00%01%00%80%00%00%00%00%00%ff%ff%ff%21%f9%04%01%00%00%00%00%2c%00%00%00%00%01%00%01%00%00%02%01%44%00%3b"
+    },
+    {
+      "find": "https://cdn.glitch.com/29e07830-2317-4b15-a044-135e73c7f840%2Fcharupload1clippedcropped.mp4?v=1625730916425",
+      "replace": "data:video/mp4,"
+    },
+    {
+      "find": "https://cdn.glitch.com/29e07830-2317-4b15-a044-135e73c7f840%2Fbgupload1.mp4?v=1625732427215",
+      "replace": "data:video/mp4;charset=b,"
+    },
+    {
+      "find": "https://cdn.glitch.com/29e07830-2317-4b15-a044-135e73c7f840%2Fstickerdropcrop.mp4?v=1625760067751",
+      "replace": "data:video/mp4;base64,AA=="
+    },
+    {
+      "find": "https://cdn.glitch.com/29e07830-2317-4b15-a044-135e73c7f840%2Fcall_small.mp4?v=1626041341731",
+      "replace": "data:video/mp4;base64,AAAA"
+    },
+    {
+      "find": "ge=\"https://yeemachine.github.io/k2021/\"",
+      "replace": "ge=\"\""
+    },
+    {
+      "find": "new js(_,{host:\"kalidoface-pair.glitch.me\"",
+      "replace": "new class{constructor(){this.open=!1,this.disconnected=!1}on(){return this}once(){return this}off(){return this}removeAllListeners(){return this}emit(){}connect(){const e={open:!1,metadata:null,peer:null,dataChannel:null};return e.on=e.once=e.off=e.close=()=>e,e.send=()=>{},e}call(){return this.connect()}destroy(){this.open=!1,this.disconnected=!0}disconnect(){this.open=!1,this.disconnected=!0}get dataChannel(){return null}}(_,{host:\"kalidoface-pair.glitch.me\""
     }
   ],
   "vendorPatches": [
