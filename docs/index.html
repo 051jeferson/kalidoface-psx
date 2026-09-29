@@ -88,6 +88,10 @@
         // swap fix lives in psx.js; the bundle uses this return value, so a
         // missing hook here is a TypeError per tracked frame.
         hands: function (h) { return h; },
+        // stock behaviour: always solve the body, never hold it
+        bodyHold: function () { return false; },
+        // stock behaviour: release the boot splash immediately
+        bootReady: function (cb) { if (cb) cb(); },
         bg: function () {},
         // stock behaviour: the index the list rendered at, against the whole list
         bgDrop: function (list, idx) { var o = list.slice(); o.splice(idx, 1); return o; },

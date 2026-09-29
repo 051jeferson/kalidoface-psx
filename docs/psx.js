@@ -4921,7 +4921,64 @@
     imgSeq++;
     poseHand = placeHands(h);
     if (!poseImg) poseLm = null;
+    // holistic has produced real results: the boot splash may go
+    if (bootArmed) bootGo();
     return poseHand || h;
+  }
+
+  // -------------------------------------------------------------- body hold
+  // Holistic keeps firing with the person half out of frame, and a solve on
+  // those landmarks relaxes the whole rig toward neutral - the visible slump
+  // of "losing tracking". When both shoulders are unreadable there is no body
+  // to solve, so the bundle swaps the solve for the store itself: every write
+  // becomes a no-op and the rig holds its last pose until the person is back.
+  // One visible shoulder keeps the solve running - sitting at a desk hides
+  // hips routinely, and the solve copes with that.
+  function bodyHold(lm) {
+    if (!lm || lm.length <= ARM_LM.Left.hip) return true;
+    return !(vis(lm[ARM_LM.Right.shoulder]) || vis(lm[ARM_LM.Left.shoulder]));
+  }
+
+  // ------------------------------------------------------------- boot gate
+  // The splash used to clear on the asset loader finishing plus a second -
+  // a timer, not a state. From here it clears on a state: tracking has been
+  // started through the app's own toggle and holistic has delivered its first
+  // results. The bundle hands us its own ready callback, so the release path
+  // is upstream's unchanged; the h1 fade it drives is killed in CSS, which
+  // makes the cut dry. The timeout is the catch-all for a denied camera or a
+  // dead detector - the splash must never trap the page.
+  var bootWait = [];
+  var bootArmed = false;
+  var bootLive = false;
+  var BOOT_TIMEOUT = 12000;
+
+  function bootRelease() {
+    var fns = bootWait;
+    bootWait = [];
+    for (var i = 0; i < fns.length; i++) {
+      try { fns[i](); } catch (e) {}
+    }
+  }
+
+  function bootGo() {
+    if (bootLive) return;
+    bootLive = true;
+    bootRelease();
+  }
+
+  function bootReady(cb) {
+    if (!cb) return;
+    if (bootLive) { cb(); return; }
+    bootWait.push(cb);
+    if (bootArmed) return;
+    bootArmed = true;
+    // through the app's own toggle: holistic loads its wasm from this origin,
+    // the camera asks for permission, and hands() marks the first results
+    setTimeout(function () {
+      var b = document.querySelector('nav.menu .menu-item.video');
+      if (b) b.click();
+    }, 0);
+    setTimeout(bootGo, BOOT_TIMEOUT);
   }
 
   function pose(world, image, hands) {
@@ -7114,7 +7171,8 @@
     smooth: 7, frame: 1, nextTrack: 1,
     mpOptions: 2, shadows: 1, shadowSize: 4, overlay: 3, overlayOpen: 1, gaze: 1,
     pose: 1, hands: 1, arm: 1, guide: 1, bg: 1, bgDrop: 1,
-    bgDefault: 1, bgFix: 1, modelFix: 1, front: 2, frontFiles: 1, cam: 1
+    bgDefault: 1, bgFix: 1, modelFix: 1, front: 2, frontFiles: 1, cam: 1,
+    bodyHold: 2, bootReady: 2
   };
 
   function verify() {
@@ -10209,8 +10267,11 @@
     '.psx-zoom-card ::-webkit-scrollbar-button:single-button:vertical:increment{' +
     'background-image:url("data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 width=%277%27 height=%274%27%3E%3Cpath d=%27M3.5 4L0 0h7z%27 fill=%27%23000%27/%3E%3C/svg%3E")}',
 
-    // the boot title keeps its jelly face, but reads in the same family
-    'h1{font-family:"W95FA",sans-serif !important}'
+    // the boot title keeps its jelly face, but reads in the same family.
+    // Its 1s opacity fade is killed: the splash now waits for tracking to
+    // actually be live (PSX.bootReady holds the bundle's ready signal), and
+    // when it releases the title goes out in one frame - a W95 cut, no fade
+    'h1{font-family:"W95FA",sans-serif !important;transition:none !important}'
   ].join('');
 
   function injectW95Css() {
@@ -10432,6 +10493,8 @@
 
     pose: pose,
     hands: hands,
+    bodyHold: bodyHold,
+    bootReady: bootReady,
     arm: arm,
     armInfo: armInfo,
     perf: perfInfo,
