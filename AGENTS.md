@@ -25,6 +25,8 @@ tools/
   patch.mjs           # applies / checks the hooks
   psx-patches.json    # find/replace pairs for those hooks
   fetch-vendor.mjs    # downloads docs/vendor/ from the CDNs it replaced
+ref/                  # external design references, never shipped or loaded
+  windows-95-ui-kit/  #   Themesberg W95 kit (MIT), trimmed; see ref/README.md
 ```
 
 Upstream's Vite entry, build config, lint/format configs, yarn shrinkwrap and
