@@ -10398,7 +10398,13 @@
     // the zoom button's glyph: the icon font has no magnifier, so the button
     // carries its own
     '.psx-zoom-btn .psx-zoom-ico{position:relative;width:24px;height:24px;' +
-    'pointer-events:none}'
+    'pointer-events:none}',
+    // Upstream chrome the fork cuts entirely: the Ko-fi donation banner that
+    // floats over the page, and the per-tab FTUE tutorial videos (they teach
+    // uploading characters and stickers, which the fork removed; their dead
+    // -host stubs stay in the bundle in case another path reaches them)
+    'a[href="https://ko-fi.com/B0B75DIY1"]{display:none !important}',
+    'container.svelte-1kc6ls6{display:none !important}'
   ].join('');
 
   function injectAppCss() {
