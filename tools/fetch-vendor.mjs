@@ -129,6 +129,12 @@ const files = [
       settings: 'settings-32x32', effects: 'themes-32x32', controls: 'task-32x32',
     }[n] + '.png',
   ]),
+
+  // The character panel's upload pair: open folder = from file, the HTML page
+  // = from URL. No W95-era upload glyph exists; a folder-open reads as
+  // "choose from disk" and the html page is the period web-link icon.
+  ['icon/w95/folder-open.png', 'https://raw.githubusercontent.com/1j01/98/master/images/icons/folder-open-32x32.png'],
+  ['icon/w95/html.png', 'https://raw.githubusercontent.com/1j01/98/master/images/icons/html-32x32.png'],
 ];
 
 function mb(n) { return (n / 1048576).toFixed(1) + ' MB'; }

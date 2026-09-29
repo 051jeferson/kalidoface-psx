@@ -10741,8 +10741,16 @@
     '.subnav .model{border-radius:0 !important;box-shadow:var(--w95-out) !important}',
     '.subnav .model:before{display:none !important}',
     '.subnav .model.selected{box-shadow:var(--w95-in),0 0 0 2px var(--w95-navy) !important}',
-    // stray glyphs left as icons (the upload/link pair on the character
-    // panel, the close cross) read in ink, not white
+    // the upload/link pair on the character panel wears the same period rips
+    // as the tray: open folder for from-file, the HTML page for from-URL. The
+    // glyphs under them are upstream's line art - sized away, not coloured
+    '.subnav label i.kalicon{font-size:0 !important;display:block;width:32px !important;' +
+    'height:32px !important;margin:0 auto;padding:0;background:' +
+    'center/contain no-repeat url(vendor/icon/w95/folder-open.png);image-rendering:pixelated}',
+    '.subnav label svg{display:block;width:32px !important;height:32px !important;' +
+    'margin:0 auto;background:center/contain no-repeat url(vendor/icon/w95/html.png);' +
+    'image-rendering:pixelated}',
+    '.subnav label svg path{display:none}',
     '.subnav i.kalicon.solid{color:#000 !important}',
     '.subnav svg path{fill:#000 !important}',
 
