@@ -4962,6 +4962,7 @@
   var BOOT_TIMEOUT = 12000;
 
   function bootRelease() {
+    bootBarEnd();
     var fns = bootWait;
     bootWait = [];
     for (var i = 0; i < fns.length; i++) {
@@ -4975,12 +4976,58 @@
     bootRelease();
   }
 
+  // ----------------------------------------------------------- ps1 boot bar
+  // The splash is the name and a loading bar, PS1 style - nothing else. The
+  // tagline container is muted for as long as the body wears .psx-booting.
+  // The fill walks in two honest steps (layer installed, tracking starting)
+  // and then creeps toward the end on a CSS transition, the way PS1 bars
+  // mostly filled anyway. bootRelease takes the bar with it, so the cut to
+  // the app stays dry.
+  function bootBarStep(pct, creepMs) {
+    var fill = document.getElementById('psx-boot-fill');
+    if (!fill) return;
+    fill.style.transition = creepMs ? ('width ' + creepMs + 'ms linear') : 'none';
+    fill.style.width = pct + '%';
+  }
+
+  function bootBarInstall() {
+    // the regression harness runs this file against a document stub with no
+    // element factory - same guard injectAppCss takes
+    if (typeof document.createElement !== 'function') return;
+    var body = document.body || document.documentElement;
+    if (!body || document.getElementById('psx-boot-bar')) return;
+    // the mute rides in its own style tag rather than a class on <body>:
+    // svelte rewrites the body class attribute and would drop the class
+    var mute = document.createElement('style');
+    mute.id = 'psx-boot-mute';
+    mute.textContent = 'body > container:not(.subnav){display:none !important}';
+    (document.head || body).appendChild(mute);
+    var bar = el('div', '', '');
+    bar.id = 'psx-boot-bar';
+    bar.style.cssText = 'position:fixed;left:50%;top:calc(50% + 56px);transform:translateX(-50%);' +
+      'width:224px;height:14px;padding:2px;box-sizing:border-box;background:#fff;z-index:60;' +
+      'box-shadow:inset 1px 1px #808080,inset -1px -1px #fff,inset 2px 2px #0a0a0a,inset -2px -2px #dfdfdf';
+    var fill = el('div', '', '');
+    fill.id = 'psx-boot-fill';
+    fill.style.cssText = 'width:8%;height:100%;background:#000080';
+    bar.appendChild(fill);
+    body.appendChild(bar);
+  }
+
+  function bootBarEnd() {
+    var bar = document.getElementById('psx-boot-bar');
+    if (bar && bar.parentNode) bar.parentNode.removeChild(bar);
+    var mute = document.getElementById('psx-boot-mute');
+    if (mute && mute.parentNode) mute.parentNode.removeChild(mute);
+  }
+
   function bootReady(cb) {
     if (!cb) return;
     if (bootLive) { cb(); return; }
     bootWait.push(cb);
     if (bootArmed) return;
     bootArmed = true;
+    bootBarStep(88, 9000);
     // through the app's own toggle: holistic loads its wasm from this origin,
     // the camera asks for permission, and hands() marks the first results
     setTimeout(function () {
@@ -10971,6 +11018,7 @@
   injectAppCss();
   applyDocLang();
   injectW95Css();
+  bootBarInstall();
 
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', startObserver);
