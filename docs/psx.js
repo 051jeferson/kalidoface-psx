@@ -4998,9 +4998,19 @@
     if (!body || document.getElementById('psx-boot-bar')) return;
     // the mute rides in its own style tag rather than a class on <body>:
     // svelte rewrites the body class attribute and would drop the class
+    // The boot window is a black screen: the splash containers the old rule
+    // already hid, but <main> (canvas, back art, model) is not a container
+    // and #psx-front-layer mounts on <body> - both stayed painted through
+    // the load. visibility, not display, so the canvas keeps its laid-out
+    // size for the bundle's resize store; black on html/body because the
+    // splash is the name and the bar on nothing else.
     var mute = document.createElement('style');
     mute.id = 'psx-boot-mute';
-    mute.textContent = 'body > container:not(.subnav){display:none !important}';
+    mute.textContent = 'body > container:not(.subnav){display:none !important}' +
+      'body > main{visibility:hidden !important}' +
+      '#psx-front-layer{visibility:hidden !important}' +
+      'body > section.secondaryMenu{visibility:hidden !important}' +
+      'body{background:#000 !important}';
     (document.head || body).appendChild(mute);
     var bar = el('div', '', '');
     bar.id = 'psx-boot-bar';
