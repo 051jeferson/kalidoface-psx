@@ -137,6 +137,15 @@
     </script>
     <!-- PSX / low-poly compatibility layer. Must load before the bundle. -->
     <script src="./psx.js" charset="utf-8"></script>
+    <!-- The tracker discovers its wasm and models late, through locateFile: a
+         3-deep fetch chain the preload scanner cannot see. Naming them here
+         turns the cold boot's serial waterfall parallel. SIMD pair only - a
+         browser without SIMD takes the legacy graph, which keeps its own
+         assets and is not worth preloading on a machine this old. -->
+    <link rel="preload" as="fetch" href="./vendor/mediapipe/tasks/wasm/vision_wasm_internal.wasm" fetchpriority="high">
+    <link rel="preload" as="fetch" href="./vendor/mediapipe/tasks/face_landmarker.task" fetchpriority="high">
+    <link rel="preload" as="fetch" href="./vendor/mediapipe/tasks/hand_landmarker.task" fetchpriority="high">
+    <link rel="preload" as="fetch" href="./vendor/mediapipe/tasks/pose_landmarker_full.task" fetchpriority="high">
     <script type="module" crossorigin src="./assets/index.e2bec78d.js"></script>
     <link rel="modulepreload" href="./assets/vendor.832d142e.js">
     <link rel="stylesheet" href="./assets/index.1b91a8e8.css">
