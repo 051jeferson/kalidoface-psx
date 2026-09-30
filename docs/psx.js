@@ -4950,16 +4950,20 @@
 
   // ------------------------------------------------------------- boot gate
   // The splash used to clear on the asset loader finishing plus a second -
-  // a timer, not a state. From here it clears on a state: tracking has been
-  // started through the app's own toggle and holistic has delivered its first
-  // results. The bundle hands us its own ready callback, so the release path
-  // is upstream's unchanged; the h1 fade it drives is killed in CSS, which
-  // makes the cut dry. The timeout is the catch-all for a denied camera or a
-  // dead detector - the splash must never trap the page.
+  // a timer, not a state - and then on tracking's first results, which held
+  // the black screen through the camera prompt and the detector's warmup.
+  // Now it clears on the bundle's own ready signal. The software has been
+  // running underneath the whole time (visibility, not display: the canvas
+  // kept its laid-out size and the render loop kept painting), so at the cut
+  // the model, HUD and tray are already on screen. Tracking still starts
+  // under the splash, so the permission prompt and the warmup are spent
+  // behind the cut rather than after it. The release path is upstream's
+  // unchanged; the h1 fade it drives is killed in CSS, which keeps the cut
+  // dry. hands() still calls bootGo() on first results - if tracking ever
+  // comes up before the bundle's ready, the splash leaves just as early.
   var bootWait = [];
   var bootArmed = false;
   var bootLive = false;
-  var BOOT_TIMEOUT = 12000;
 
   function bootRelease() {
     bootBarEnd();
@@ -4979,16 +4983,9 @@
   // ----------------------------------------------------------- ps1 boot bar
   // The splash is the name and a loading bar, PS1 style - nothing else. The
   // tagline container is muted for as long as the body wears .psx-booting.
-  // The fill walks in two honest steps (layer installed, tracking starting)
-  // and then creeps toward the end on a CSS transition, the way PS1 bars
-  // mostly filled anyway. bootRelease takes the bar with it, so the cut to
-  // the app stays dry.
-  function bootBarStep(pct, creepMs) {
-    var fill = document.getElementById('psx-boot-fill');
-    if (!fill) return;
-    fill.style.transition = creepMs ? ('width ' + creepMs + 'ms linear') : 'none';
-    fill.style.width = pct + '%';
-  }
+  // The fill opens at 8% and holds; the cut is the bundle's ready signal,
+  // and bootRelease takes the bar and the mute with it, so the cut to the
+  // app stays dry.
 
   function bootBarInstall() {
     // the regression harness runs this file against a document stub with no
@@ -5033,18 +5030,16 @@
 
   function bootReady(cb) {
     if (!cb) return;
-    if (bootLive) { cb(); return; }
-    bootWait.push(cb);
-    if (bootArmed) return;
-    bootArmed = true;
-    bootBarStep(88, 9000);
-    // through the app's own toggle: holistic loads its wasm from this origin,
-    // the camera asks for permission, and hands() marks the first results
+    // through the app's own toggle: holistic loads its wasm from this origin
+    // and the camera asks for permission - underneath the splash, not in
+    // front of it. Release follows immediately; nothing waits on the camera.
     setTimeout(function () {
       var b = document.querySelector('nav.menu .menu-item.video');
       if (b) b.click();
     }, 0);
-    setTimeout(bootGo, BOOT_TIMEOUT);
+    bootArmed = true;
+    bootWait.push(cb);
+    bootGo();
   }
 
   function pose(world, image, hands) {
