@@ -268,12 +268,12 @@
     {
       "name": "frameGate-face",
       "find": "else await f.send({image:je});",
-      "replace": "else if(window.PSX.frameGate(je))await f.send({image:je});"
+      "replace": "else if(window.PSX.frameGate(je,0))await f.send({image:je});"
     },
     {
       "name": "frameGate-holistic",
       "find": "else await c.send({image:je});",
-      "replace": "else if(window.PSX.frameGate(je))await c.send({image:je});"
+      "replace": "else if(window.PSX.frameGate(je,1))await c.send({image:je});"
     },
     {
       "name": "camera-frameRate-cap",

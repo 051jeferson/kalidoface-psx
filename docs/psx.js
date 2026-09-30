@@ -212,6 +212,16 @@
     twist: 1,
 
     // --- arm retarget ---------------------------------------------------
+    // Send the holistic (pose + hands) inference at all. Off, only the face
+    // graph runs, which is 2-4x less inference - the single biggest lever on
+    // a weak machine - and the arms fall to the sway below. On is the default:
+    // the arms are the point of body tracking.
+    bodyTrack: true,
+    // With body tracking off, swing the arms gently with the head's own
+    // rotation instead of freezing them at rest - a talking head still reads
+    // as alive. The gains are deliberately small: without landmarks there is
+    // nothing to correct them against.
+    armSway: true,
     // Aim the arm at the hand the camera saw instead of replaying Kalidokit's
     // solved angles. Not a panel control - it is the rig, and the one thing
     // that turns it off is a model whose arm it cannot drive, which it works
@@ -5782,6 +5792,13 @@
   // Called at the top of the arm rig. Returning true means the retarget has
   // written the three bones and the stock Euler rig must not run.
   function arm(vrm, rig, side, mirrored, instant, upper, lower, hand) {
+    // Body tracking off: either the head-driven sway or the stock rig, never
+    // a retarget solving on landmarks nothing is delivering any more.
+    if (!cfg.bodyTrack) {
+      if (!cfg.armSway || !upper || !lower || !hand) return false;
+      try { return sway(vrm, side, mirrored, upper, lower, hand); }
+      catch (e) { cfg.armSway = false; return false; }
+    }
     if (!cfg.armIK || !vrm || !rig || !upper || !lower || !hand) return false;
     var idx = ARM_LM[side];
     if (!idx) return false;
@@ -5792,6 +5809,50 @@
       cfg.armIK = false;
       return false;
     }
+  }
+
+  // Arms with no landmarks can still follow the head. The head bone's own
+  // smoothed rotation - roll swings both arms the way the head tips, pitch
+  // draws them a little forward and back - is re-expressed as a small
+  // bone-local rotation over each arm's rest. The gains are fractions of the
+  // head angle on purpose: nothing measures whether the result reads right,
+  // so the failure mode has to be "barely visible" and not "wrong".
+  //
+  // The z sign is mirrored between the sides the same way the stock Euler
+  // rig mirrors its own z (`i?-1:1`): a VRM's two arm bones see the world
+  // mirrored, and one world swing is opposite local z on each side. A model
+  // whose bind axes disagree flips visibly - turn the sway down and say so
+  // rather than ship an uncorrected guess at the sign.
+  var swayVrm = null, swayHead = null, swayQ = null;
+  var SWAY_ROLL = 0.35, SWAY_NOD = 0.18;
+
+  function sway(vrm, side, mirrored, upper, lower, hand) {
+    if (swayVrm !== vrm) {
+      swayVrm = vrm;
+      swayHead = boneNode(vrm, 'head');
+      swayQ = upper.quaternion.clone();
+    }
+    if (!swayHead) return false;
+    var rest = swayHead.__psxHeadRest;
+    var hx = 0, hz = 0;
+    if (rest) {
+      hx = swayHead.rotation.x - rest.x;
+      hz = swayHead.rotation.z - rest.z;
+    } else {
+      hx = swayHead.rotation.x;
+      hz = swayHead.rotation.z;
+    }
+    var mz = mirrored ? -1 : 1;
+    var zs = clamp(hz, -0.5, 0.5) * SWAY_ROLL * mz;
+    var xs = clamp(hx, -0.4, 0.4) * SWAY_NOD;
+    upper.quaternion.copy(restQuat(upper)).multiply(
+      quatFromEuler(swayQ, xs, 0, zs));
+    lower.quaternion.copy(restQuat(lower)).multiply(
+      quatFromEuler(swayQ, xs * 0.6, 0, zs * 0.6));
+    hand.quaternion.copy(restQuat(hand));
+    armDbg[side].live = false;
+    armDbg[side].reason = 'sway';
+    return true;
   }
 
   // A lost landmark used to hand the arm straight back to the stock Euler rig,
@@ -7053,6 +7114,13 @@
       'A sobrancelha agora é medida contra a lateral do teu próprio rosto, e não atravessando o olho, então ela encurta junto com a sobrancelha em vez de contra: girar, inclinar ou deitar a cabeça quase não mexe na leitura. A calibragem grava o que sobra, e as duas coisas juntas são o motivo de olhar para o lado não ler mais como bravo.',
     'note.motion': 'Os ganhos de pescoço e torso são fixos no app, entao um movimento real pequeno vira um movimento grande no avatar. Baixe o ganho para mexer menos. Tudo que o assistente consegue medir na tua própria câmera - o quanto você gira de verdade, o quanto a câmera treme, quanto de uma inclinação de torso é na verdade a cabeça, até onde teus braços alcançam - ele ajusta sozinho; o que sobra aqui é o punhado de números que é questão de gosto.',
     'note.armIK': 'Mira o braço na mão que a câmera viu, em vez de repetir os ângulos do Kalidokit - é o que faz a mão chegar de fato na cabeça. Precisa de rastreio corporal (holistic). Alcance corrige a proporção de um modelo de braço curto. O ombro não é animado por nada no app, então acompanhamento do ombro solta ele um pouco e o braço erguido para de cortar o pescoço. Um frame em que a malha do rosto e a pose do corpo discordam sobre onde teu rosto está quer dizer que uma das duas te perdeu - esses são segurados em vez de seguidos, com limiares aprendidos da tua própria câmera.',
+    'Body tracking': 'Corpo e mãos',
+    'Track body and hands': 'Rastrear corpo e mãos',
+    'Arm sway from the head': 'Balanço dos braços pela cabeça',
+    'note.bodyTrack': 'Desligado, só o rosto é rastreado - a inferência cai de 2 a 4x, o modo mais leve que a máquina roda. Os braços param em repouso ou seguem o balanço pela cabeça. Ligado, corpo e mãos voltam; quando o Desempenho automático corta taxa, corpo e mãos caem primeiro e o rosto segue no ritmo.',
+    'note.piflags': 'Raspberry Pi: o Chromium vem com metade da aceleração de GPU desligada. Abrir com estas flags (ou gravá-las em /etc/chromium-browser/customisations/00-rpi-vars.sh) liga rasterização e composição por hardware - confira depois em chrome://gpu.',
+    'Copy flags': 'Copiar flags',
+    'Copied': 'Copiado',
     'note.mouth': 'O app reporta cinco pesos de vogal que sobem todos juntos com a mandíbula, então um deles ganha diga o que disser e a boca acaba com um formato aberto só. Isto grava o que o teu rosto marca enquanto você fala cada vogal em voz alta, e escolhe a gravação mais próxima do frame atual - silêncio incluído, que é o que libera a célula da boca para o sorriso. Segurar vogal é o quanto outra vogal precisa estar mais perto para a boca trocar de célula.',
     'note.adaptive': 'Um amortecimento fixo tem que escolher: o suficiente para assentar uma pose parada vira borracha num movimento rápido, e o suficiente para o movimento rápido deixa o tremor. Isto filtra forte quando você está parado e quase nada quando você se mexe. Firmeza é o quanto uma pose parada é filtrada - o passo de ficar parado na calibragem mede isso na sua própria câmera. Resposta é a rapidez com que ele solta quando você se mexe.',
     'note.perf': 'O app roda uma inferencia do Mediapipe a cada frame e renderiza a cada frame. A taxa de rastreio é onde vai quase toda a CPU. ' +
@@ -7182,6 +7250,14 @@
       'and the body pose disagree about where your face is means one of them has ' +
       'lost you - those are coasted rather than followed, on thresholds learned from ' +
       'your own camera.',
+    'note.bodyTrack': 'Off, only the face is tracked - inference drops 2-4x, the ' +
+      'lightest mode this machine can run. The arms go to rest or follow the head ' +
+      'sway. On, body and hands come back; when Auto throttle sheds rate, body and ' +
+      'hands fall first while the face keeps its pace.',
+    'note.piflags': 'Raspberry Pi: Chromium ships with half its GPU acceleration ' +
+      'off. Launching with these flags (or saving them into ' +
+      '/etc/chromium-browser/customisations/00-rpi-vars.sh) turns on hardware ' +
+      'rasterisation and compositing - verify in chrome://gpu.',
     'note.bgColour': 'The picker keeps one colour, and there was no way to keep a '
       + 'second one or drop one you are done with. Click a swatch to apply it and '
       + 'load it back into the picker to edit; × deletes it. The app never wrote '
@@ -7896,6 +7972,8 @@
   function perfInfo() {
     return {
       auto: cfg.perfAuto,
+      bodyTrack: cfg.bodyTrack,
+      holiEvery: holiEvery,
       trackFps: cfg.trackFps, renderFps: cfg.renderFps, poseLite: cfg.poseLite,
       autoFps: r2(autoFps),
       frameMs: r2(autoBest),
@@ -8085,13 +8163,54 @@
   // cycle runs two sends (face mesh and holistic) and both must see the same
   // answer, so nextTrack closes the gate when a cycle ends and the next
   // cycle's first send reopens it only if currentTime moved.
+  //
+  // The holistic send is the expensive half (pose detector and hands on top
+  // of the landmarks) and the face is the half the viewer reads, so the gate
+  // also carries the ordered shed: `bodyTrack` off drops the holistic send
+  // whole, and perfAuto's shed runs it only on every `holiEvery`th cycle
+  // before the face rate itself is cut. A skipped send answers before the
+  // freshness logic runs, so it neither consumes nor reopens the gate.
   var gateT = -1, gateFresh = false;
+  var trackCycle = 0;
+  var holiEvery = 1;
 
-  function frameGate(v) {
+  function frameGate(v, holistic) {
+    if (v && isNum(v.currentTime)) camVideo = v;
+    if (holistic) {
+      if (!cfg.bodyTrack) return false;
+      if (holiEvery > 1 && trackCycle % holiEvery) return false;
+    }
     if (!v || !isNum(v.currentTime)) return true;
     var t = v.currentTime;
     if (t !== gateT) { gateT = t; gateFresh = true; }
     return gateFresh;
+  }
+
+  // Stage under the shed: 20 is where the pose+hands cadence halves, 15 where
+  // it thirds. AUTO_MIN (12) stays the floor of the face itself - the face is
+  // never divided, only slowed.
+  function holiStage(fps) {
+    if (!fps) return 0;
+    if (fps < 15) return 2;
+    if (fps < 20) return 1;
+    return 0;
+  }
+
+  // The camera is told once per stage change, never per cycle: drivers vary in
+  // whether they honour a live frameRate change, so this is a best-effort cut
+  // of sensor/USB/upload work, not a guarantee - the dedupe gate above is what
+  // actually keeps a low-delivery camera from costing inference.
+  var camStage = -1, camVideo = null;
+
+  function camRate(stage) {
+    if (stage === camStage) return;
+    camStage = stage;
+    var v = camVideo;
+    if (!v || !v.srcObject || !v.srcObject.getVideoTracks) return;
+    var t = v.srcObject.getVideoTracks()[0];
+    if (!t || !t.applyConstraints) return;
+    try { t.applyConstraints({ frameRate: { ideal: stage ? 15 : 30 } }); }
+    catch (e) {}
   }
 
   function nextTrack(fn) {
@@ -8106,9 +8225,19 @@
     trackSeen = tn;
     // this cycle's sends are done; the next one decides its frame anew
     gateFresh = false;
+    trackCycle++;
 
     var fps = cfg.trackFps;
     if (cfg.perfAuto) fps = fps ? Math.min(fps, autoFps) : autoFps;
+    // The stage belongs here, next to the rate it is derived from, so a
+    // perfAuto toggle or a recovered autoFps always leaves the two
+    // consistent. Stage 1 = nothing divided; deeper stages halve (then
+    // third) the pose+hands cadence while the face keeps the full rate -
+    // and each stage also asks the camera for fewer frames, which is work
+    // the Pi stops doing at the sensor rather than skipping later.
+    var stage = cfg.bodyTrack && cfg.perfAuto ? holiStage(fps) : 0;
+    holiEvery = stage ? (stage === 2 ? 2 : 3) : 1;
+    camRate(stage);
     // At the ceiling there is nothing to wait for: hand it straight back to the
     // animation frame, which is what upstream does.
     if (!fps || fps >= AUTO_MAX) return requestAnimationFrame(fn);
@@ -8175,6 +8304,12 @@
         if (node.isBone && node.quaternion && !node.__psxRest) restQuat(node);
       });
     }
+    // The sway reads the head's rotation as a delta from bind, captured at
+    // the same pre-animation moment the arm rests are.
+    var hb = boneNode(vrm, 'head');
+    if (hb && !hb.__psxHeadRest) {
+      hb.__psxHeadRest = { x: hb.rotation.x, y: hb.rotation.y, z: hb.rotation.z };
+    }
     measureRigidHands(vrm);
     measureHeadCenter(vrm);
     if (!vrm.__psxDisposeHook && typeof vrm.dispose === 'function') {
@@ -8206,6 +8341,14 @@
     });
     eachMaterial(vrm, hookMaterial);
     syncShaderUniforms();
+    // Every shader variant this model will ever need compiles here, behind
+    // the boot splash, instead of on the first frame that shows the piece -
+    // a program compiled mid-session stalls the render for tens of ms on a
+    // weak GPU. Needs the camera, which lands with the orbit hook; a model
+    // registered before that still gets its uniforms, only not the warmup.
+    if (renderer && renderer.compile && vrm.scene && camCtl && camCtl.object) {
+      try { renderer.compile(vrm.scene, camCtl.object); } catch (e) {}
+    }
     scheduleInject();
     return vrm;
   }
@@ -8970,6 +9113,16 @@
     syncCalUi();
     frag.appendChild(mo);
 
+    // Body tracking is the fork's own switch on the expensive half of the
+    // inference: off, only the face graph runs and the arms fall to the sway.
+    var bod = card(T('Body tracking'), STG);
+    var bodNote = el('div', STG, T('note.bodyTrack'));
+    bodNote.style.cssText = 'width:100%;opacity:.5;font-size:12px;margin:0 0 4px;text-align:left';
+    bod.appendChild(bodNote);
+    addToggle(bod, 'bodyTrack', T('Track body and hands'), STG);
+    addToggle(bod, 'armSway', T('Arm sway from the head'), STG);
+    frag.appendChild(bod);
+
     var hnd = card(T('PSX Hands'), STG);
     addSelect(hnd, 'fingers', T('Driven fingers'), ['all', 'thumb', 'none'],
       [T('all fingers'), T('thumb only'), T('none')], STG);
@@ -9031,6 +9184,38 @@
     low.style.marginTop = '4px';
     low.addEventListener('click', function () { applyLowPower(); });
     pf.appendChild(low);
+
+    // A Raspberry Pi's Chromium ships with GPU rasterisation and compositing
+    // off, which no slider here can fix. The flag line is copyable because it
+    // is a launcher argument, not a setting the page can flip.
+    var flagNote = el('div', STG, T('note.piflags'));
+    flagNote.style.cssText = 'width:100%;opacity:.5;font-size:12px;margin:12px 0 4px;text-align:left';
+    pf.appendChild(flagNote);
+    var flagLine = el('div', STG, 'chromium-browser --enable-gpu-rasterization ' +
+      '--enable-zero-copy --ignore-gpu-blocklist');
+    flagLine.style.cssText = 'width:100%;font-family:monospace;font-size:11px;text-align:left;' +
+      'background:rgba(0,0,0,.25);padding:6px 8px;user-select:all;word-break:break-word';
+    pf.appendChild(flagLine);
+    var flagBtn = el('button', 'trigger ' + STG, T('Copy flags'));
+    flagBtn.style.marginTop = '4px';
+    flagBtn.addEventListener('click', function () {
+      var t = flagLine.textContent;
+      var done = function () {
+        flagBtn.textContent = T('Copied');
+        setTimeout(function () { flagBtn.textContent = T('Copy flags'); }, 1500);
+      };
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(t).then(done, function () {});
+      } else {
+        var r = document.createRange();
+        r.selectNodeContents(flagLine);
+        var s = getSelection();
+        s.removeAllRanges();
+        s.addRange(r);
+        done();
+      }
+    });
+    pf.appendChild(flagBtn);
 
     reloadNote(pf, T('note.reloadPerf'), STG);
     frag.appendChild(pf);
