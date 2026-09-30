@@ -10095,80 +10095,6 @@
     camApplyTimer = setTimeout(camApply, 0);
   }
 
-  // The cluster's own fifth slot - the one the friend-call button was rendered
-  // into, hidden here - is free, and the cluster spreads its children onto
-  // fixed slots by nth-child. Taking the call button's place keeps the spread
-  // rules on the buttons before it untouched.
-  function injectZoomButton() {
-    var nav = document.querySelector('nav.menu');
-    if (!nav || nav.querySelector('.psx-zoom-btn')) return;
-    var b = el('button', 'menu-item no_highlights svelte-1ngro65 psx-zoom-btn', '');
-    b.type = 'button';
-    b.setAttribute('data-text', 'Zoom');
-    var fill = document.createElement('i');
-    fill.className = 'kalicon notranslate fill medium svelte-1ngro65';
-    fill.textContent = 'jellyfill3';
-    b.appendChild(fill);
-    // the icon font has no magnifier; the Effects button already mixes in an
-    // SVG, so this one does too
-    var NS = 'http://www.w3.org/2000/svg';
-    var ico = document.createElementNS(NS, 'svg');
-    ico.setAttribute('viewBox', '0 0 24 24');
-    ico.setAttribute('class', 'psx-zoom-ico');
-    ico.setAttribute('aria-hidden', 'true');
-    var glass = document.createElementNS(NS, 'circle');
-    glass.setAttribute('cx', '10.5');
-    glass.setAttribute('cy', '10.5');
-    glass.setAttribute('r', '6.25');
-    glass.setAttribute('fill', 'none');
-    var handle = document.createElementNS(NS, 'line');
-    handle.setAttribute('x1', '15.2');
-    handle.setAttribute('y1', '15.2');
-    handle.setAttribute('x2', '21');
-    handle.setAttribute('y2', '21');
-    // stroke set per element: an attribute on the <svg> would be inherited, but
-    // the fill blob next to it is a sibling, not a child
-    ico.setAttribute('stroke', '#fff');
-    ico.setAttribute('stroke-width', '2.3');
-    ico.setAttribute('stroke-linecap', 'round');
-    ico.appendChild(glass);
-    ico.appendChild(handle);
-    b.appendChild(ico);
-    // opens the Settings window on the Captura section - the zoom slider lives
-    // there now, and a whole floating window for one control was one more
-    // surface to drag, close and explain
-    b.addEventListener('click', function () { openSettings(); });
-    var call = nav.querySelector('.menu-item.call');
-    if (call && call.parentNode === nav) nav.insertBefore(b, call);
-    else nav.appendChild(b);
-  }
-
-  // The corner launcher is the app's own way into the settings window, so its
-  // store, animation and position all behave as if the user had clicked it.
-  // A second click would toggle the window shut, so an already-open Settings
-  // window is left alone - only the Captura card is scrolled into view.
-  function openSettings() {
-    var sub = document.querySelector('container.subnav');
-    if (sub && !sub.classList.contains('hide') && w95TitleText() === T('Settings')) {
-      var cardEl = document.getElementById('psx-capture-card');
-      if (cardEl && cardEl.scrollIntoView) cardEl.scrollIntoView({ block: 'center' });
-      return;
-    }
-    var btns = document.querySelectorAll('.secondaryMenu button');
-    for (var i = 0; i < btns.length; i++) {
-      var bt = btns[i];
-      if (!bt.getBoundingClientRect().width) continue;
-      var t = ((bt.getAttribute('aria-label') || '') + ' ' + (bt.getAttribute('data-text') || '') + ' ' +
-        (bt.textContent || '')).toLowerCase();
-      if (t.indexOf('settings') >= 0 || t.indexOf('ajustes') >= 0) { bt.click(); break; }
-    }
-    // the window animates in; the card exists by the next frame after that
-    setTimeout(function () {
-      var cardEl = document.getElementById('psx-capture-card');
-      if (cardEl && cardEl.scrollIntoView) cardEl.scrollIntoView({ block: 'center' });
-    }, 120);
-  }
-
   function injectInto(c, build, keyed) {
     if (!c) return;
     // only the Settings side lists per-model expression cells, so it is the
@@ -10212,7 +10138,6 @@
     injectInto(settingsContainer(), buildSettings, true);
     injectBgColours();
     injectFrontCard();
-    injectZoomButton();
     watchSubnavChrome();
     syncW95Title();
   }
@@ -10448,10 +10373,6 @@
     // The scaled canvas and the front layer are stacking contexts at z-index 1
     // and 2; the cluster has none of its own, so both would paint over it.
     'nav.menu{z-index:3}',
-    // the zoom button's glyph: the icon font has no magnifier, so the button
-    // carries its own
-    '.psx-zoom-btn .psx-zoom-ico{position:relative;width:24px;height:24px;' +
-    'pointer-events:none}',
     // Upstream chrome the fork cuts entirely: the Ko-fi donation banner that
     // floats over the page, and the per-tab FTUE tutorial videos (they teach
     // uploading characters and stickers, which the fork removed; their dead
@@ -10526,11 +10447,6 @@
     '.menu-item.char .solid{background-image:url(vendor/icon/w95/char.png)}',
     '.menu-item.sticker .solid{background-image:url(vendor/icon/w95/front.png)}',
     '.menu-item.bg .solid{background-image:url(vendor/icon/w95/back.png)}',
-    // the zoom glyph is an inline svg, not a ligature: square it off and give
-    // it the same icon the tray buttons wear
-    '.psx-zoom-btn .psx-zoom-ico{width:32px !important;height:32px !important;margin:0;' +
-    'background:url(vendor/icon/w95/zoom.png) center/contain no-repeat;image-rendering:pixelated}',
-    '.psx-zoom-btn .psx-zoom-ico circle,.psx-zoom-btn .psx-zoom-ico line{display:none}',
     // win95 tooltips: opaque pale yellow, hard border
     '.menu-item:before,.subButton:before,' +
     '.upload label:after{background:#ffffe1 !important;color:#000 !important;' +
