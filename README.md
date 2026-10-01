@@ -92,9 +92,9 @@ the upstream sample avatars and some gallery images still use remote URLs.
 
 In Settings, choose **Microphone assist → Enable microphone**. Capture is off
 on every page load and must be enabled for each session. The camera keeps its
-vowel/rest/smile decisions in **Camera with microphone assist**; volume can reinforce a selected vowel. When a hand
+mouth/rest/smile decisions in **Camera with microphone assist**; volume can reinforce a selected mouth. When a hand
 covers the face, volume drives a generic A mouth instead of holding the last
-vowel. This requires the face update loop and is not audio-only tracking.
+decision. This requires the face update loop and is not audio-only tracking.
 
 Choose **Microphone** to select an input device, or keep **System default**.
 Device names may appear only after enabling capture and granting permission.
@@ -102,7 +102,7 @@ Changing the device while active releases the old stream and opens the chosen
 input. An unavailable selection reports an error instead of using another input.
 
 Under **Mouth control**, choose **Speech from microphone** to let volume alone
-open and close a generic A mouth. Camera vowels no longer drive speech, while
+open and close a generic A mouth. Camera mouth decisions no longer drive speech, while
 camera smiles, blinks and brows remain available. Silence frees the mouth for
 the smile; speech takes priority when both share an atlas texture. This mode
 still needs the camera's face update loop. Disabling the microphone returns
@@ -255,14 +255,14 @@ aim at by eye.
 weights, so when both signals were up the face went to whichever of **Blink gain**
 and **Signal gain** happened to be larger — a decision nobody made, and one that
 flips frame to frame. Cells are now ranked by class first and weight only within a
-class: a vowel outranks everything, because a mouth that stops moving mid-sentence
+class: a viseme outranks everything, because a mouth that stops moving mid-sentence
 reads as broken; a blink outranks an emotion, because it is an event with a
 beginning and an end that takes the face for a tenth of a second and gives it
 straight back, where an emotion is a state that will still be there afterwards. An
 emotion that loses to a blink loses nothing. A blink that loses to an emotion never
 happens, and an avatar that cannot blink looks dead.
 
-### Vowel calibration
+### Mouth calibration
 
 Kalidokit reports five vowel weights (`A`/`I`/`U`/`E`/`O`) that all rise together
 with the jaw, so one of them outranks the rest whatever you say. On a PSX atlas —
@@ -271,28 +271,35 @@ mouth lands on the same cell, and the avatar has one talking shape. Deriving the
 vowels from width and openness instead only moves the problem: those constants are
 one person's mouth, and on another face two vowels still collapse onto one cell.
 
-**Calibrate vowels** records what *your* face reads while you say each vowel out
-loud — a closed mouth, a toothy grin, then A, E, I, O, U — and a live frame
-becomes whichever recording it lands nearest. It works on the shape weights precisely because it
-never compares them to each other, only to what they read while you said that
-vowel. Each pose is counted in rather than waiting for a key: someone holding
-"oooo" while hunting for Space has stopped saying it.
+The shipped avatar makes the ceiling explicit: its `u` and `o` groups bind the
+same atlas photo and its `e` and `a` groups differ by nothing, so five vowel
+recordings would spend two steps and half the classifier's margin splitting
+between mouths that render identically.
+
+**Calibrate mouths** records what *your* face reads while you voice each mouth
+out loud — a closed mouth, a toothy grin, then the open, the round and the wide —
+and a live frame becomes whichever recording it lands nearest. It works on the
+shape weights precisely because it never compares them to each other, only to
+what they read while you said that sound. Each pose is counted in rather than
+waiting for a key: someone holding "oooo" while hunting for Space has stopped
+saying it.
 
 Silence is one of the recorded poses, so a closed mouth is a *decision*, not a
 threshold to guess at — and that is what frees the mouth cell for a smile. Without
 the recording, a mouth's width alone used to keep a vowel lit at all times, so the
-smile cell could never win it. **Vowel hold** is how much closer another vowel has
-to be before the mouth swaps cell; two vowels trading the lead frame by frame reads
-as a flicker rather than as speech.
+smile cell could never win it. **Mouth hold** is how much closer another recorded
+mouth has to be before the cell swaps; two mouths trading the lead frame by frame
+reads as a flicker rather than as speech.
 
 The grin is recorded for the same reason silence is. A smile showing teeth *is* an
 open, spread mouth — it is the same width as "ee" and nearly the same openness as
 "eh" — so no threshold can separate them, because they are not different amounts of
 one thing. Once it is its own recording, the classifier tells a grin from an "ee"
-the way it tells "ee" from "eh", and having already ruled out every vowel it is a
-better smile detector than the width threshold: when it fires, the smile goes in
-past **Smile at** rather than through it. A calibration recorded before that step
-existed still loads and still works, minus the grin.
+the way it tells "ee" from "eh", and having already ruled out every recorded mouth
+it is a better smile detector than the width threshold: when it fires, the smile
+goes in past **Smile at** rather than through it. A calibration recorded before
+that step existed still loads and still works, minus the grin — and so does one
+recorded as five vowels, which keeps classifying among the vowels it has.
 
 If two mouths come out reading almost the same, the wizard names the pair rather
 than saving a mapping that quietly cannot work.
@@ -501,10 +508,10 @@ holding an expression doesn't turn it into the new neutral and fade out mid
 grimace. `PSX.resetCalibration()` starts that learning over, and so does
 finishing any wizard; **Reset PSX settings** clears it with everything else.
 
-**Speech first** fixes the other half. On a PSX atlas the vowels and the emotions
+**Speech first** fixes the other half. On a PSX atlas the mouths and the emotions
 are cells of the *same* face texture, so they cannot both show — an emotion that
-outweighs a vowel takes the whole face and the lip sync stops dead. With this on,
-the emotions stand down while a vowel is above **Talking at**, so the mouth keeps
+outweighs a viseme takes the whole face and the lip sync stops dead. With this on,
+the emotions stand down while a viseme is above **Talking at**, so the mouth keeps
 speaking and the expression returns when you stop.
 
 The card carries a **live readout** of the normalised `brow` and `smile` values
@@ -1041,7 +1048,7 @@ and scoped class names, so they look native. Controls are split by what they do:
 - **Language** — English or Portuguese (BR). First thing in the tab, because it is what someone who cannot read the rest of the panel is looking for
 - **Face Expressions** — Trigger threshold, Release margin, Minimum hold, Mouth gain, Preview cell (force one expression for calibration)
 - **Eyes** — Eyes shut at, live eye readout, Calibrate blink
-- **Emotion Detection** — Signal gain, Brow offset, Angry at, Sorrow at, Smile at, Emotion hold, live readout, Calibrate expressions, Vowel hold, Calibrate vowels
+- **Emotion Detection** — Signal gain, Brow offset, Angry at, Sorrow at, Smile at, Emotion hold, live readout, Calibrate expressions, Mouth hold, Calibrate mouths
 - **Motion Calibration** — Calibration cues, Head / neck gain, Torso lean gain, Calibrate motion, and a **Fine tuning** disclosure holding Steadiness, Responsiveness, Reach, Reach up, Right arm, Left arm, Shoulder follow, Forearm twist, Face anchor, Prediction, Dropout hold and Head-tilt isolation
 - **Performance** — Auto throttle, Run while hidden, Tracking rate, Render rate, Low power preset (the lite pose model is preset-only, no toggle)
 - **PSX Hands** — Driven fingers (`all fingers` / `thumb only` / `none`)
@@ -1068,7 +1075,7 @@ card says so once you touch one. Everything else is live.
 
 Settings persist in `localStorage` under the key `kf3d.psx`. **Export settings**
 downloads that snapshot as JSON — every setting plus all three calibrations, the
-recorded expression spans, the vowel prototypes and the motion gains.
+recorded expression spans, the mouth prototypes and the motion gains.
 **Import settings** loads it on another device or after a cache clear, and says
 underneath which of the three calibrations the file actually carried: a file
 exported before you ran one does not have it, and the one already loaded is kept

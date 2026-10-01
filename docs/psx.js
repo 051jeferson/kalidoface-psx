@@ -144,8 +144,9 @@
     signal: 'auto',
     // recorded by the guided calibration; null until it has been run
     cal: null,
-    // recorded by the mouth wizard: one feature vector per vowel plus a rest
-    // pose. null until it has been run, and the vowels fall back to a formula.
+    // recorded by the mouth wizard: one feature vector per recorded mouth plus
+    // a rest pose. null until it has been run, and the mouth falls back to a
+    // formula.
     mouth: null,
     micMouth: null,
     // Run the pose correction at all - the recorded per-pose mapping and the
@@ -170,7 +171,7 @@
     emotionHold: 100,
     // how wide the mouth corners have to go before it reads as a smile
     smileAt: 0.3,
-    // how much closer another vowel has to be before the mouth swaps cell.
+    // how much closer another recorded mouth has to be before the cell swaps.
     // 0 = swap on any lead, which flickers; this is the hysteresis of speech.
     mouthStick: 0.25,
 
@@ -351,6 +352,15 @@
   var STOCK_LEAN_GAIN = 0.05;
 
   var MOUTH_KEYS = { a: 1, i: 1, u: 1, e: 1, o: 1 };
+  // The shipped avatar renders the mouth as photo cells on an atlas: its u and
+  // o groups bind the same cell and its e and a groups differ by 0.002 of U,
+  // which is no cell at all. So the mouth wizard records three mouths - one
+  // per atlas cell - and the classifier decides among cells, instead of
+  // splitting its margin between two vowels that render identically. A cell is
+  // written through the vowel preset bound to that photo, because the snap
+  // layer only knows the model's own groups.
+  var MOUTH_CELLS = ['open', 'round', 'wide'];
+  var CELL_PRESET = { open: 'a', round: 'u', wide: 'i' };
   // A toothy smile is an open, spread mouth - the solver writes A/I/E. Rounded
   // U/O cannot be a smile, so those are what still count as talking over one.
   var SPEECH_OVER_SMILE = { u: 1, o: 1 };
@@ -435,11 +445,12 @@
   }
 
   var VOWELS = ['a', 'i', 'u', 'e', 'o'];
-  // The features a vowel is recognised by: how wide the mouth is, how open it
-  // is, and Kalidokit's own five shape weights. The shape weights all rise
-  // together with the jaw, which is why they cannot pick a vowel on their own -
-  // but the *differences* between them still separate one vowel from another,
-  // and a recorded prototype per vowel is what turns that into a decision.
+  // The features a recorded mouth is recognised by: how wide the mouth is, how
+  // open it is, and Kalidokit's own five shape weights. The shape weights all
+  // rise together with the jaw, which is why they cannot pick a mouth on their
+  // own - but the *differences* between them still separate one mouth from
+  // another, and a recorded prototype per mouth is what turns that into a
+  // decision.
   var MOUTH_DIMS = 7;
   var MIC_BANDS = [180, 300, 450, 650, 900, 1200, 1550, 1950, 2400, 2900, 3500, 4200, 5000];
   var MIC_DIMS = MIC_BANDS.length - 1;
@@ -448,6 +459,14 @@
     if (!v || v.version !== 1 || !isNum(v.noise) || v.noise < 0 || v.noise > 1) return false;
     for (var i = 0; i < VOWELS.length; i++) {
       var f = v[VOWELS[i]], sum = 0;
+      // A recording of the three cells carries only the a, i and u sounds -
+      // e and o sit on other faces' cells, so there is nothing to ask for.
+      // Five-vowel recordings keep all five; a sound that is present is
+      // always validated.
+      if (!f) {
+        if (VOWELS[i] === 'e' || VOWELS[i] === 'o') continue;
+        return false;
+      }
       if (!Array.isArray(f) || f.length !== MIC_DIMS) return false;
       for (var j = 0; j < f.length; j++) {
         if (!isNum(f[j]) || f[j] < 0 || f[j] > 1) return false;
@@ -475,7 +494,9 @@
     }
     if (key === 'mouth') {
       if (!v || typeof v !== 'object') return null;
-      var keys = ['rest'].concat(VOWELS);
+      // two recording formats: the three atlas cells, and the five vowels a
+      // profile saved before them carries. Either is a whole recording.
+      var keys = v.open ? ['rest'].concat(MOUTH_CELLS) : ['rest'].concat(VOWELS);
       for (var m = 0; m < keys.length; m++) {
         if (!okVec(v[keys[m]])) return null;
       }
@@ -667,8 +688,8 @@
   // arrived, or a half-imported profile looks exactly like a whole one.
   var CAL_PARTS = [
     { key: 'cal', name: 'expression calibration' },
-    { key: 'mouth', name: 'vowel calibration' },
-    { key: 'micMouth', name: 'microphone vowel calibration' }
+    { key: 'mouth', name: 'mouth calibration' },
+    { key: 'micMouth', name: 'microphone mouth calibration' }
   ];
 
   function applyImported(parsed) {
@@ -1491,7 +1512,7 @@
   ];
 
   // Said out loud and held. The sound matters as much as the shape: people
-  // make a much more definite mouth when they are actually voicing the vowel
+  // make a much more definite mouth when they are actually voicing the sound
   // than when they are posing it.
   var MOUTH_STEPS = [
     { key: 'rest', title: 'Close your mouth',
@@ -1499,14 +1520,20 @@
     // A toothy smile is an open, spread mouth, which is also what "ee" and
     // "eh" are. No threshold separates them, because they are not different
     // amounts of the same thing - so record the smile as its own mouth and let
-    // the classifier tell them apart the way it tells the vowels apart.
+    // the classifier tell them apart the way it tells the mouths apart.
     { key: 'smile', title: 'Smile, showing your teeth',
       hint: 'The big one, teeth and all, and hold it' },
-    { key: 'a', title: 'Say "aaah" and hold it', hint: 'As in f-a-ther. Jaw open' },
-    { key: 'e', title: 'Say "ehh" and hold it', hint: 'As in b-e-d' },
-    { key: 'i', title: 'Say "eee" and hold it', hint: 'As in s-ee. Lips wide' },
-    { key: 'o', title: 'Say "ooh" and hold it', hint: 'As in g-o. Lips rounded' },
-    { key: 'u', title: 'Say "oooo" and hold it', hint: 'As in b-oo-t. Lips pushed forward' }
+    // One step per atlas cell, not per vowel. The shipped avatar draws three
+    // mouth photos; five vowel recordings would spend two steps and half the
+    // classifier's margin splitting between mouths that render identically.
+    // The sound still matters - people hold a much more definite pose when
+    // they are voicing it - so each step names its sound.
+    { key: 'open', title: 'Open mouth: say "aaah" and hold it',
+      hint: 'As in f-a-ther. Jaw open - the open-mouth cell' },
+    { key: 'round', title: 'Round mouth: say "oooo" and hold it',
+      hint: 'As in b-oo-t. Lips pushed forward - one cell serves o and u' },
+    { key: 'wide', title: 'Wide mouth: say "eeee" and hold it',
+      hint: 'As in s-ee. Lips wide - one cell serves i and e' }
   ];
 
   // Head pose fools the eye solver AND the brow scalar: looking down or 40°
@@ -2059,10 +2086,15 @@
       if (calRun.audio && mic.epoch === calRun.micEpoch) {
         if (st.key === 'rest' && a.audioRms.length >= CAL_MIN_SAMPLES) {
           calRun.audio.noise = pct(a.audioRms, 0.75);
-        } else if (VOWELS.indexOf(st.key) !== -1 && a.audio.length >= CAL_MIN_SAMPLES) {
-          var af = medianVec(a.audio, MIC_DIMS);
-          normalizeMicFeature(af);
-          calRun.audio[st.key] = af;
+        } else {
+          // Audio prototypes live under the vowel the model is driven through:
+          // a cell step records the sound of the preset that renders it.
+          var snd = CELL_PRESET[st.key] || st.key;
+          if (VOWELS.indexOf(snd) !== -1 && a.audio.length >= CAL_MIN_SAMPLES) {
+            var af = medianVec(a.audio, MIC_DIMS);
+            normalizeMicFeature(af);
+            calRun.audio[snd] = af;
+          }
         }
       }
       nextStep(MOUTH_STEPS.length, finishMouth);
@@ -2481,7 +2513,8 @@
     var out = calRun.out;
     var m = { rest: out.rest };
     var i;
-    for (i = 0; i < VOWELS.length; i++) m[VOWELS[i]] = out[VOWELS[i]];
+    for (i = 0; i < MOUTH_CELLS.length; i++) if (out[MOUTH_CELLS[i]]) m[MOUTH_CELLS[i]] = out[MOUTH_CELLS[i]];
+    for (i = 0; i < VOWELS.length; i++) if (out[VOWELS[i]]) m[VOWELS[i]] = out[VOWELS[i]];
     if (out.smile) m.smile = out.smile;
 
     // Two vowels that read the same are two vowels that will land on the same
@@ -2512,7 +2545,8 @@
       var similar = [];
       for (i = 0; i < VOWELS.length; i++) {
         for (var ai = i + 1; ai < VOWELS.length; ai++) {
-          if (micDistance(cfg.micMouth[VOWELS[i]], cfg.micMouth[VOWELS[ai]]) < 0.025) {
+          if (cfg.micMouth[VOWELS[i]] && cfg.micMouth[VOWELS[ai]] &&
+              micDistance(cfg.micMouth[VOWELS[i]], cfg.micMouth[VOWELS[ai]]) < 0.025) {
             similar.push(VOWELS[i].toUpperCase() + '/' + VOWELS[ai].toUpperCase());
           }
         }
@@ -3602,7 +3636,11 @@
     // that looked like "one emotion at a time" even with exclusive off.
     // Only stand down an emotion that actually shares a mouth texture.
     var smiling = sm > 0;
-    var articulating = lastViseme.key && lastViseme.w >= 0.15 && lastViseme.key !== 'a';
+    // 'open' is the recorded a/e - the mouths a grin reads as - so it does not
+    // count as speech over a smile; the same was true of a vowel recording of
+    // 'a', which is what older saves carry here.
+    var articulating = lastViseme.key && lastViseme.w >= 0.15 &&
+      lastViseme.key !== 'open' && lastViseme.key !== 'a';
     var talking = mouthLevel(proxy, smiling) >= SPEECH_AT || articulating;
     if (micSpeech()) talking = mic.level >= SPEECH_AT;
     if (talking) {
@@ -3719,14 +3757,19 @@
 
   function mouthCalUsable(m) {
     if (!m || !m.rest) return false;
-    for (var i = 0; i < VOWELS.length; i++) if (!m[VOWELS[i]]) return false;
+    var i;
+    if (m.open) return !!(m.round && m.wide);
+    for (i = 0; i < VOWELS.length; i++) if (!m[VOWELS[i]]) return false;
     return true;
   }
 
   // `smile` is optional: a calibration recorded before that step existed is
-  // still a usable one, it just cannot tell a grin from an "ee".
+  // still a usable one, it just cannot tell a grin from an "ee". A recording
+  // from before the cells did is too - it keeps its five vowel prototypes and
+  // classifies as before, only crisper, because the winner is written through
+  // its own preset either way.
   function mouthProtos(m) {
-    var keys = ['rest'].concat(VOWELS);
+    var keys = m.open ? ['rest'].concat(MOUTH_CELLS) : ['rest'].concat(VOWELS);
     if (m.smile) keys.push('smile');
     return keys;
   }
@@ -3784,6 +3827,13 @@
       }
     }
     return { key: best, d: bestD, margin: Math.max(second - bestD, 0) };
+  }
+
+  // The classifier decides among recorded mouths; the model only has vowel
+  // groups, so a cell is written through the vowel bound to its photo. Vowel
+  // prototypes (older recordings) pass through unchanged.
+  function visemePreset(key) {
+    return CELL_PRESET[key] || key || null;
   }
 
   // Capture is session-only: opening a saved profile never opens a microphone.
@@ -3851,10 +3901,14 @@
     mic.classified = mic.reads;
     var best = 'a', distance = Infinity;
     for (var i = 0; i < VOWELS.length; i++) {
-      var key = VOWELS[i], d = micDistance(mic.feature, cfg.micMouth[key]);
+      var key = VOWELS[i];
+      // a three-cell recording carries a, i and u only
+      if (!cfg.micMouth[key]) continue;
+      var d = micDistance(mic.feature, cfg.micMouth[key]);
       if (d < distance) { distance = d; best = key; }
     }
-    if (mic.vowel && micDistance(mic.feature, cfg.micMouth[mic.vowel]) <= distance * (1 + cfg.mouthStick) + 0.005) {
+    if (mic.vowel && cfg.micMouth[mic.vowel] &&
+        micDistance(mic.feature, cfg.micMouth[mic.vowel]) <= distance * (1 + cfg.mouthStick) + 0.005) {
       best = mic.vowel;
     }
     if (best !== mic.candidate) { mic.candidate = best; mic.candidateReads = 0; }
@@ -4038,7 +4092,7 @@
     // Assist keeps the camera decision. Speech compares only the audio against
     // its own recordings; camera prototypes carry no acoustic information.
     if (!micSpeech() && !faceOcc && (!lastViseme.key || mouthSays > 0)) return;
-    var key = micSpeech() ? micVowel() : faceOcc ? 'a' : lastViseme.key;
+    var key = micSpeech() ? micVowel() : faceOcc ? 'a' : visemePreset(lastViseme.key);
     var weight = micSpeech() || faceOcc ? level : Math.max(lastViseme.w, level);
     for (var k in MOUTH_KEYS) {
       try { proxy.setValue(k, k === key ? weight : 0); } catch (e) {}
@@ -4054,8 +4108,9 @@
     var k;
     if (faceOcc) {
       if (lastViseme.key) {
+        var held = visemePreset(lastViseme.key);
         for (k in MOUTH_KEYS) {
-          try { proxy.setValue(k, k === lastViseme.key ? lastViseme.w : 0); } catch (err) {}
+          try { proxy.setValue(k, k === held ? lastViseme.w : 0); } catch (err) {}
         }
       } else {
         clearVowels(proxy);
@@ -4070,6 +4125,7 @@
       // exclusive, so this does not blend anything - it is what the emotion
       // arbitration reads as "how sure are we that this face is talking".
       var conf = got ? clamp(got.margin / Math.max(got.d + got.margin, 1e-6), 0, 1) : 0;
+      if (got) mouthWin(got.key);
       // A grin is nearer the recorded grin than any vowel, so the mouth is not
       // talking and the cell belongs to the emotion. Saying so here is what
       // stops a toothy smile from being read as speech, which no threshold on
@@ -4081,8 +4137,9 @@
         return;
       }
       lastViseme = { key: got.key, w: Math.max(conf, 0.55) };
+      var say = visemePreset(got.key);
       for (k in MOUTH_KEYS) {
-        try { proxy.setValue(k, k === got.key ? lastViseme.w : 0); } catch (err) {}
+        try { proxy.setValue(k, k === say ? lastViseme.w : 0); } catch (err) {}
       }
       return;
     }
@@ -4102,6 +4159,7 @@
     // a vowel lit - so the mouth cell was never free and a smile could not show
     // on it. Openness is what says the mouth is doing something at all.
     if (y < 0.12 && shMax < 0.2) {
+      mouthWin('rest');
       lastViseme = { key: null, w: 0 };
       clearVowels(proxy);
       return;
@@ -4120,15 +4178,52 @@
       if (vis[k] > topW) { topW = vis[k]; topK = k; }
     }
     if (topW < 0.1) {
+      mouthWin('rest');
       lastViseme = { key: null, w: 0 };
       clearVowels(proxy);
       return;
     }
     lastViseme = { key: topK, w: topW };
+    mouthWin(topK);
     for (k in vis) {
       var w = k === topK ? Math.max(topW, 0.55) : vis[k] * 0.15;
       try { proxy.setValue(k, w); } catch (err) {}
     }
+  }
+
+  // ------------------------------------------------------- mouth readout
+  //
+  // "The mouth sits on the open cell" is an eyeball read of a moving face, and
+  // it has been wrong before - what looked like a stuck 'a' turned out to be
+  // two vowels bound to one photo. Count what the classifier actually chose,
+  // per window, so the share is a number: a calibration collapsing onto one
+  // mouth shows up here as one key taking most of the window, whatever the
+  // eye thinks it is seeing.
+  var mouthStats = { at: 0, cur: null, prev: null };
+  var MOUTH_STATS_MS = 15000;
+
+  function mouthWin(key) {
+    var t = now();
+    if (!mouthStats.cur || t - mouthStats.at >= MOUTH_STATS_MS) {
+      mouthStats.prev = mouthStats.cur;
+      mouthStats.cur = {};
+      mouthStats.at = t;
+    }
+    mouthStats.cur[key] = (mouthStats.cur[key] || 0) + 1;
+  }
+
+  function mouthInfo() {
+    return {
+      cal: mouthCalUsable(cfg.mouth) ? (cfg.mouth.open ? 'cells' : 'vowels') : 'formula',
+      key: lastViseme.key,
+      w: Math.round(lastViseme.w * 100) / 100,
+      faceOcc: !!faceOcc,
+      mic: mic.state,
+      micMode: cfg.micMode,
+      windowMs: MOUTH_STATS_MS,
+      stats: mouthStats.cur,
+      prev: mouthStats.prev
+    };
   }
 
   // True when this emotion's atlas cell sits on a material that also has
@@ -6746,14 +6841,14 @@
     'Mouth control': 'Controle da boca',
     'Camera with microphone assist': 'Câmera com apoio do microfone',
     'Speech from microphone': 'Fala pelo microfone',
-    'mic.mode.assist': 'A câmera escolhe as vogais e o sorriso; o áudio reforça a fala. Ative o microfone para liberar os nomes dos dispositivos.',
+    'mic.mode.assist': 'A câmera escolhe as bocas e o sorriso; o áudio reforça a fala. Ative o microfone para liberar os nomes dos dispositivos.',
     'mic.mode.speech': 'O microfone controla a fala; a câmera mantém sorriso, olhos e sobrancelhas. Sem microfone ativo, a boca volta à câmera.',
-    'mic.cal.needed': 'Para variar as texturas, ative o microfone e use Calibrar vogais abaixo: fale cada vogal em voz alta. Até gravar os sons, a fala usa só a boca A.',
-    'mic.cal.ready': 'Vogais de áudio calibradas: a textura segue o som mais parecido. Use o mesmo microfone e posição da gravação; ao trocar, calibre novamente.',
-    'mic.cal.saved': 'Sons das cinco vogais gravados para o microfone.',
-    'mic.cal.failed': 'Áudio incompleto: a calibração anterior do microfone foi mantida, se existia. Ative o microfone antes de começar, mantenha o dispositivo e fale as vogais acima do ruído de fundo.',
+    'mic.cal.needed': 'Para variar as texturas, ative o microfone e use Calibrar bocas abaixo: fale o som de cada boca em voz alta. Até gravar os sons, a fala usa só a boca aberta.',
+    'mic.cal.ready': 'Sons das bocas calibrados: a textura segue o som mais parecido. Use o mesmo microfone e posição da gravação; ao trocar, calibre novamente.',
+    'mic.cal.saved': 'Sons das bocas gravados para o microfone.',
+    'mic.cal.failed': 'Áudio incompleto: a calibração anterior do microfone foi mantida, se existia. Ative o microfone antes de começar, mantenha o dispositivo e fale cada boca acima do ruído de fundo.',
     'mic.cal.similar': 'Estes sons ficaram parecidos; grave novamente em um lugar silencioso:',
-    'note.mic.calibration': 'Com o microfone já ativo, esta calibração também grava o som de cada vogal para variar as texturas na fala por áudio. Fique em silêncio no repouso e no sorriso; depois sustente cada vogal em voz alta. As gravações antigas da câmera continuam válidas, mas não contêm áudio.',
+    'note.mic.calibration': 'Com o microfone já ativo, esta calibração também grava o som de cada boca para variar as texturas na fala por áudio. Fique em silêncio no repouso e no sorriso; depois fale cada boca em voz alta. As gravações antigas da câmera continuam válidas, mas não contêm áudio.',
     'Microphone assist': 'Apoio do microfone',
     'Microphone sensitivity': 'Sensibilidade do microfone',
     'Enable microphone': 'Ativar microfone',
@@ -6821,8 +6916,8 @@
     'Calibrate expressions': 'Calibrar expressões',
     'Cancel calibration': 'Cancelar calibração',
     'Calibrate motion': 'Calibrar movimento',
-    'Calibrate vowels': 'Calibrar vogais',
-    'Vowel hold': 'Segurar vogal',
+    'Calibrate mouths': 'Calibrar bocas',
+    'Mouth hold': 'Segurar a boca',
     'Mouth calibrated': 'Boca calibrada',
     'mouths recorded': 'bocas gravadas',
     'Smile, showing your teeth': 'Sorria mostrando os dentes',
@@ -6834,16 +6929,15 @@
     'Close your mouth': 'Feche a boca',
     'Lips together, relaxed - this is what silence looks like':
       'Lábios juntos, relaxado - é assim que o silêncio se parece',
-    'Say "aaah" and hold it': 'Fale "ááá" e segure',
-    'As in f-a-ther. Jaw open': 'Como em p-a-to. Mandíbula aberta',
-    'Say "ehh" and hold it': 'Fale "êêê" e segure',
-    'As in b-e-d': 'Como em p-e-na',
-    'Say "eee" and hold it': 'Fale "iii" e segure',
-    'As in s-ee. Lips wide': 'Como em v-i-da. Lábios esticados',
-    'Say "ooh" and hold it': 'Fale "óóó" e segure',
-    'As in g-o. Lips rounded': 'Como em b-o-la. Lábios arredondados',
-    'Say "oooo" and hold it': 'Fale "uuu" e segure',
-    'As in b-oo-t. Lips pushed forward': 'Como em l-u-a. Lábios projetados',
+    'Open mouth: say "aaah" and hold it': 'Boca aberta: fale "ááá" e segure',
+    'As in f-a-ther. Jaw open - the open-mouth cell':
+      'Como em p-a-to. Mandíbula aberta - a célula de boca aberta',
+    'Round mouth: say "oooo" and hold it': 'Boca redonda: fale "uuu" e segure',
+    'As in b-oo-t. Lips pushed forward - one cell serves o and u':
+      'Como em l-u-a. Lábios projetados - uma célula serve para o e u',
+    'Wide mouth: say "eeee" and hold it': 'Boca esticada: fale "iii" e segure',
+    'As in s-ee. Lips wide - one cell serves i and e':
+      'Como em v-i-da. Lábios esticados - uma célula serve para i e e',
     'Capture (Space)': 'Capturar (Espaço)',
     'Reading...': 'Lendo...',
     'Hold the pose, then press Space. Esc cancels.':
@@ -7121,7 +7215,7 @@
     'note.piflags': 'Raspberry Pi: o Chromium vem com metade da aceleração de GPU desligada. Abrir com estas flags (ou gravá-las em /etc/chromium-browser/customisations/00-rpi-vars.sh) liga rasterização e composição por hardware - confira depois em chrome://gpu.',
     'Copy flags': 'Copiar flags',
     'Copied': 'Copiado',
-    'note.mouth': 'O app reporta cinco pesos de vogal que sobem todos juntos com a mandíbula, então um deles ganha diga o que disser e a boca acaba com um formato aberto só. Isto grava o que o teu rosto marca enquanto você fala cada vogal em voz alta, e escolhe a gravação mais próxima do frame atual - silêncio incluído, que é o que libera a célula da boca para o sorriso. Segurar vogal é o quanto outra vogal precisa estar mais perto para a boca trocar de célula.',
+    'note.mouth': 'O avatar desenha a boca em três fotos de um atlas - u e o são a mesma foto, e e a quase não diferem. Em vez de decidir entre cinco vogais que renderizam igual, isto grava o que o teu rosto marca enquanto você fala cada boca em voz alta (aberta, redonda, esticada), e escolhe a gravação mais próxima do frame atual - silêncio incluído, que é o que libera a célula da boca para o sorriso. Calibrações antigas de cinco vogais continuam valendo. Segurar a boca é o quanto outra boca precisa estar mais perto para a célula trocar.',
     'note.adaptive': 'Um amortecimento fixo tem que escolher: o suficiente para assentar uma pose parada vira borracha num movimento rápido, e o suficiente para o movimento rápido deixa o tremor. Isto filtra forte quando você está parado e quase nada quando você se mexe. Firmeza é o quanto uma pose parada é filtrada - o passo de ficar parado na calibragem mede isso na sua própria câmera. Resposta é a rapidez com que ele solta quando você se mexe.',
     'note.perf': 'O app roda uma inferencia do Mediapipe a cada frame e renderiza a cada frame. A taxa de rastreio é onde vai quase toda a CPU. ' +
       'O ajuste automático larga taxa de rastreio sozinho enquanto a máquina não dá conta - OBS gravando, um render rodando - e devolve quando sobra folga. ' +
@@ -7188,12 +7282,12 @@
     'Speech from microphone': 'Speech from microphone',
     'mic.mode.assist': 'The camera chooses vowels and smiles; audio reinforces speech. Enable the microphone to reveal device names.',
     'mic.mode.speech': 'The microphone controls speech; the camera keeps smiles, eyes and brows. Without an active microphone, mouth control returns to the camera.',
-    'mic.cal.needed': 'To vary textures, enable the microphone and use Calibrate vowels below: voice each vowel out loud. Until sounds are recorded, speech uses only the A mouth.',
-    'mic.cal.ready': 'Audio vowels calibrated: the texture follows the closest recorded sound. Use the same microphone and position; recalibrate after switching.',
-    'mic.cal.saved': 'All five vowel sounds recorded for the microphone.',
-    'mic.cal.failed': 'Audio incomplete: the previous microphone calibration was kept, if any. Enable the microphone before starting, keep the same device and voice the vowels above background noise.',
+    'mic.cal.needed': 'To vary textures, enable the microphone and use Calibrate mouths below: voice each mouth out loud. Until sounds are recorded, speech uses only the open mouth.',
+    'mic.cal.ready': 'Mouth sounds calibrated: the texture follows the closest recorded sound. Use the same microphone and position; recalibrate after switching.',
+    'mic.cal.saved': 'Mouth sounds recorded for the microphone.',
+    'mic.cal.failed': 'Audio incomplete: the previous microphone calibration was kept, if any. Enable the microphone before starting, keep the same device and voice each mouth above background noise.',
     'mic.cal.similar': 'These sounds were similar; record again in a quiet place:',
-    'note.mic.calibration': 'With the microphone already active, this calibration also captures each vowel sound to vary textures during audio speech. Stay silent for rest and smile, then sustain each vowel out loud. Older camera recordings still work, but contain no audio.',
+    'note.mic.calibration': 'With the microphone already active, this calibration also captures the sound of each mouth to vary textures during audio speech. Stay silent for rest and smile, then voice each mouth out loud. Older camera recordings still work, but contain no audio.',
     'Microphone assist': 'Microphone assist',
     'Microphone sensitivity': 'Microphone sensitivity',
     'Enable microphone': 'Enable microphone',
@@ -7271,12 +7365,14 @@
     'note.back': 'A background image sits behind the avatar, where a colour would '
       + 'be. Upload a pre-rendered scene with the character left out of it, or a '
       + 'chroma that is not green - whatever the capture calls for.',
-    'note.mouth': 'Upstream reports five vowel weights that all rise together with '
-      + 'the jaw, so one of them wins whatever you say and the mouth ends up with a '
-      + 'single open shape. This records what your own face reads while you say each '
-      + 'vowel out loud, and picks whichever recording a live frame lands nearest - '
-      + 'silence included, which is what frees the mouth cell for a smile. Vowel hold '
-      + 'is how much closer another vowel has to be before the mouth swaps cell.',
+    'note.mouth': 'The shipped avatar draws the mouth as three photo cells on an '
+      + 'atlas - its u and o bind the same photo and its e and a differ by '
+      + 'nothing. Instead of deciding among five vowels that render the same, '
+      + 'this records what your own face reads while you voice each mouth out '
+      + 'loud (open, round, wide), and picks whichever recording a live frame '
+      + 'lands nearest - silence included, which is what frees the mouth cell '
+      + 'for a smile. Older five-vowel calibrations still work. Mouth hold is '
+      + 'how much closer another mouth has to be before the cell swaps.',
     'note.adaptive': 'A flat damping factor has to choose: enough to settle a held ' +
       'pose turns a fast move to rubber, enough for the fast move leaves the tremor ' +
       'in. This filters hard while you are still and barely at all while you move. ' +
@@ -9016,14 +9112,14 @@
     var micCalNote = el('div', STG, T('note.mic.calibration'));
     micCalNote.style.cssText = 'width:100%;font-size:12px;line-height:1.5;margin:8px 0;text-align:left';
     em.appendChild(micCalNote);
-    addRange(em, 'mouthStick', T('Vowel hold'), 0, 1, 0.05, function (v) { return v.toFixed(2); }, STG);
+    addRange(em, 'mouthStick', T('Mouth hold'), 0, 1, 0.05, function (v) { return v.toFixed(2); }, STG);
 
     calMouthEl = el('div', STG, '');
     calMouthEl.style.cssText = 'width:100%;font-size:12px;opacity:.85;text-align:left;' +
       'white-space:pre-line;margin-top:10px;line-height:1.5';
     em.appendChild(calMouthEl);
 
-    calMouthBtn = el('button', 'trigger ' + STG, T('Calibrate vowels'));
+    calMouthBtn = el('button', 'trigger ' + STG, T('Calibrate mouths'));
     calMouthBtn.style.marginTop = '12px';
     calMouthBtn.addEventListener('click', function () {
       if (!calRun) startMouthCalibration();
@@ -9321,7 +9417,7 @@
   function syncCalUi() {
     syncCalBtn(calBtn, calCancelBtn, 'face', T('Calibrate expressions'));
     syncCalBtn(calMotionBtn, calMotionCancelBtn, 'motion', T('Calibrate motion'));
-    syncCalBtn(calMouthBtn, calMouthCancelBtn, 'mouth', T('Calibrate vowels'));
+    syncCalBtn(calMouthBtn, calMouthCancelBtn, 'mouth', T('Calibrate mouths'));
     syncCalBtn(calBlinkBtn, calBlinkCancelBtn, 'blink', T('Calibrate blink'));
     syncCalHud();
   }
@@ -11228,6 +11324,7 @@
     bootReady: bootReady,
     arm: arm,
     armInfo: armInfo,
+    mouthInfo: mouthInfo,
     perf: perfInfo,
     mic: micInfo,
     bg: bg,

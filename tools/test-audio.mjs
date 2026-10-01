@@ -129,10 +129,11 @@ r.cfg.calCues = false;
 r.psx.importSettings({ lang: 'en' }); // Cancels the earlier face wizard.
 r.setOccluded(false);
 r.cfg.calCues = false;
-const tones = { a: 750, e: 1350, i: 2650, o: 525, u: 375 };
+const tones = { a: 750, e: 1350, i: 2650, o: 525, u: 375, open: 750, round: 375, wide: 2650 };
 function recordMouth({ missing = '', changeDevice = false } = {}) {
   r.psx.calibrateMouth();
-  for (let step = 0; step < 7; step++) {
+  const total = r.steps().length;
+  for (let step = 0; step < total; step++) {
     const key = r.steps()[r.getRun().i].key;
     r.captureStep();
     amplitude = key === 'rest' || key === 'smile' || key === missing ? 0.001 : 0.08;
@@ -140,7 +141,7 @@ function recordMouth({ missing = '', changeDevice = false } = {}) {
     time += 300;
     for (let i = 0; i < 16; i++) {
       r.sampleCalibration(0, 0, rig);
-      if (key === 'a' && i === 0) {
+      if (key === 'open' && i === 0) {
         const samples = r.getRun().acc.audio.length;
         for (let repeat = 0; repeat < 100; repeat++) r.sampleCalibration(0, 0, rig);
         assert.equal(r.getRun().acc.audio.length, samples, 'render retries cannot duplicate audio recordings');
@@ -150,10 +151,10 @@ function recordMouth({ missing = '', changeDevice = false } = {}) {
     if (changeDevice && step === 3) r.mic.epoch++;
     r.advanceCalibration();
   }
-  assert.equal(r.getRun(), null, 'vowel calibration finishes');
+  assert.equal(r.getRun(), null, 'mouth calibration finishes');
 }
 recordMouth();
-assert.ok(r.cfg.micMouth, 'the mouth wizard records all five audio prototypes');
+assert.ok(r.cfg.micMouth, 'the mouth wizard records the three mouth sounds');
 assert.ok(r.cfg.micMouth.noise > 0, 'silence establishes the background noise');
 assert.equal(spectralBuffers.size, 1, 'spectral analysis reuses one buffer');
 const recording = r.cfg.micMouth;
@@ -166,14 +167,14 @@ assert.equal(r.snapshotSettings().settings.micDevice, undefined);
 const broken = JSON.parse(JSON.stringify(recording)); broken.i[0] = NaN;
 assert.ok(r.psx.importSettings({ lang: 'en', micMouth: broken }).includes('unusable'));
 assert.equal(r.cfg.micMouth, recording, 'invalid imported audio preserves the existing calibration');
-recordMouth({ missing: 'i' });
-assert.equal(r.cfg.micMouth, recording, 'a silent vowel cannot overwrite a working recording');
+recordMouth({ missing: 'wide' });
+assert.equal(r.cfg.micMouth, recording, 'a silent mouth cannot overwrite a working recording');
 recordMouth({ changeDevice: true });
 assert.equal(r.cfg.micMouth, recording, 'a device change invalidates the entire audio recording');
 r.cfg.micMode = 'speech';
 amplitude = 0.08;
-for (const [key, tone] of Object.entries(tones)) {
-  frequency = tone;
+for (const key of ['a', 'i', 'u']) {
+  frequency = tones[key];
   for (let i = 0; i < 3; i++) { time += 50; r.driveVisemes(vrm, rig); }
   assert.ok(values[key] > 0.5, `recorded ${key.toUpperCase()} selects its own mouth texture`);
   assert.equal(Object.values(values).filter(v => v > 0).length, 1, 'audio vowels never blend textures');
@@ -196,4 +197,4 @@ assert.equal(spectralReads, quietReads, 'assist skips frequency analysis even wi
 events.pagehide();
 assert.equal(r.psx.mic().state, 'off', 'leaving the page releases capture');
 assert.equal(created, closed, 'every acquired audio context is closed');
-console.log('Audio regressions passed: lifecycle, 20 Hz cap, fixed buffers, five calibrated vowels, silence, hysteresis, recording failures and persistence.');
+console.log('Audio regressions passed: lifecycle, 20 Hz cap, fixed buffers, calibrated mouth sounds, silence, hysteresis, recording failures and persistence.');
