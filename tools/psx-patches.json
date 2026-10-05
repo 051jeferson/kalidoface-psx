@@ -131,7 +131,7 @@
     },
     {
       "find": "r&&zt(r,{x:ae(e.head.x*c,-.3,.3),z:E(de).holistic.enable?ae(t.Spine.z*c,-.7,.7)*a:ae(e.head.z*c,-.1,.1)*a,y:E(de).holistic.enable?ae(t.Spine.y*c*.2,-.7,.7)",
-      "replace": "r&&zt(r,{x:ae(e.head.x*c,-.3,.3),z:E(de).holistic.enable?ae(t.Spine.z*ps,-.7,.7)*a:ae(e.head.z*c,-.1,.1)*a,y:E(de).holistic.enable?ae(t.Spine.y*ps*.2,-.7,.7)"
+      "replace": "r&&zt(r,{x:ae(e.head.x*c,-.3,.3)+window.PSX.breath(),z:E(de).holistic.enable?ae(t.Spine.z*ps,-.7,.7)*a:ae(e.head.z*c,-.1,.1)*a,y:E(de).holistic.enable?ae(t.Spine.y*ps*.2,-.7,.7)"
     },
     {
       "find": "u&&zt(u,{x:ae(e.head.x*c,-.3,.3),z:E(de).holistic.enable?ae(t.Spine.z*c,-.7,.7)*a:ae(e.head.z*c,-.3,.3)*a,y:E(de).holistic.enable?ae(t.Spine.y*c*.2,-.4,.4)",

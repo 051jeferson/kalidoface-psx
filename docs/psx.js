@@ -213,16 +213,22 @@
     twist: 1,
 
     // --- arm retarget ---------------------------------------------------
-    // Send the holistic (pose + hands) inference at all. Off, only the face
-    // graph runs, which is 2-4x less inference - the single biggest lever on
-    // a weak machine - and the arms fall to the sway below. On is the default:
-    // the arms are the point of body tracking.
+    // Run the pose detector inside the body send. Off, the pose graph is
+    // skipped - roughly half the inference gone, the single biggest lever on
+    // a weak machine - while hands and face keep coming, so the fingers
+    // still move. The arms fall to the sway below: without world landmarks
+    // there is nothing for the retarget to solve on. On is the default: the
+    // arms are the point of body tracking.
     bodyTrack: true,
     // With body tracking off, swing the arms gently with the head's own
     // rotation instead of freezing them at rest - a talking head still reads
     // as alive. The gains are deliberately small: without landmarks there is
     // nothing to correct them against.
     armSway: true,
+    // A slow, shallow chest sine under whatever the rig is doing - a still
+    // avatar reads as a mannequin on a long stream. Amplitude is constant,
+    // not a slider: at ~1 degree nobody tunes it, they only notice it gone.
+    breathe: true,
     // Aim the arm at the hand the camera saw instead of replaying Kalidokit's
     // solved angles. Not a panel control - it is the rig, and the one thing
     // that turns it off is a model whose arm it cannot drive, which it works
@@ -252,6 +258,11 @@
     // nearer the lens, makes one arm read consistently shorter than the other.
     reachR: 1,
     reachL: 1,
+    // The check step's last verdict, kept on the profile so a run that came
+    // out poor stays visible long after the toast is gone. null = no check
+    // has ever passed FIT_MIN on this profile.
+    lastCheck: null,
+    lastCheckAt: null,
     // how far the shoulder bone follows the arm, 0 = pinned (stock). Nothing
     // upstream drives it at all, which is why a raised arm clips the neck.
     shoulder: 0.25,
@@ -406,6 +417,8 @@
     twist: { min: 0, max: 1 },
     predict: { min: 0, max: 1 },
     armHold: { min: 0, max: 1000 },
+    lastCheck: { min: 0, max: 1 },
+    lastCheckAt: { min: 0, max: 4e12 },
     trackFps: { min: 0, max: 60 },
     renderFps: { min: 0, max: 60 },
     colorLevels: { one: [8, 16, 32, 64] },
@@ -1494,6 +1507,15 @@
       hint: 'Shoulder height, elbows locked, like a T. Needs full-body tracking.' },
     { key: 'depth', title: 'Point one arm at the camera',
       hint: 'Elbow straight, hand toward the lens, and hold' },
+    // A second held direction for the same reading. The depth compression is
+    // not one number - it varies across the frame - and one pose asks a
+    // single direction to speak for all of them. The circles sweep that used
+    // to generalise it never read (see sampleCheck), so the generalisation
+    // comes from two poses the tracker can hold instead: one at the lens,
+    // one a little above it. depthRatio's gate admits an arm within 45
+    // degrees of the lens axis, which is why the instruction says a little.
+    { key: 'depth2', title: 'Point at the camera, arm higher',
+      hint: 'Same straight arm, aimed a little above the lens, and hold' },
     { key: 'hands', title: 'Put both hands on your head',
       hint: 'Palms on your skull, elbows out. Needs full-body tracking.' },
     // Changes nothing, and asks for the one pose this wizard has already proven
@@ -2137,8 +2159,14 @@
         // the depth step reads against this, so it has to be recorded even
         // when the model-space span could not be
         if (a.alen.length >= CAL_MIN_SAMPLES) o.userArm = median(a.alen);
-      } else if (st.key === 'depth') {
-        if (a.depth.length >= CAL_MIN_SAMPLES) o.depth = median(a.depth);
+      } else if (st.key === 'depth' || st.key === 'depth2') {
+        // Two held directions feed one pool, and the median over the pool is
+        // the reading. A step that read nothing leaves the pool to the other,
+        // which is one direction - today's standing state, not a failure.
+        if (a.depth.length >= CAL_MIN_SAMPLES) {
+          o.depthS = (o.depthS || []).concat(a.depth);
+          o.depth = median(o.depthS);
+        }
       } else if (st.key === 'hands') {
         if (a.reach.length >= CAL_MIN_SAMPLES) o.handsReach = median(a.reach);
         // Last of the held arm poses. The check that follows has to be
@@ -2346,6 +2374,22 @@
 
   function fitPct(r) { return (r * 100).toFixed(1) + '%'; }
 
+  // The verdict outlives the toast: a run that came out poor should still be
+  // saying so next week, when nobody remembers which profile was loaded or
+  // what the run said. Nothing here decides anything - the number was
+  // measured against the finished rig once, and it is only being shown.
+  function paintLastCheck() {
+    var el = typeof document !== 'undefined' &&
+      document.getElementById('psx-last-check');
+    if (!el) return;
+    if (!isNum(cfg.lastCheck)) { el.textContent = ''; return; }
+    var when = isNum(cfg.lastCheckAt) &&
+      new Date(cfg.lastCheckAt).toLocaleDateString();
+    el.textContent = T('Last check') + ' ' + fitPct(cfg.lastCheck) + ' - ' +
+      T(cfg.lastCheck <= FIT_GOOD ? 'good' : 'redo this') +
+      (when ? ' - ' + when : '');
+  }
+
   // Median over the check's samples: the one number in the run measured
   // against the finished rig rather than the poses that produced it.
   function fitResidual(f) {
@@ -2424,8 +2468,12 @@
       notes.push(T('Arm gain') + ' ' + c.armGain.toFixed(2));
     }
     // The check ran against the finished rig, so this number is the one that
-    // says whether the calibration is any good.
+    // says whether the calibration is any good. Kept on the profile: the
+    // toast is gone in seconds, and a run that came out poor should still be
+    // saying so next week.
     if (isNum(c.checkRes)) {
+      cfg.lastCheck = c.checkRes;
+      cfg.lastCheckAt = Date.now();
       notes.push(T('Check') + ' ' + fitPct(c.checkRes) +
         ' - ' + T(c.checkRes <= FIT_GOOD ? 'good' : 'redo this'));
     }
@@ -2442,6 +2490,7 @@
     }
     save();
     syncControls();
+    paintLastCheck();
 
     stopCalibration(shakeNote(dev) + T('Calibrated') + ' - ' + T('turn') + ' ' + devY.toFixed(2) +
       ', ' + T('tilt') + ' ' + devX.toFixed(2) + '  ->  ' +
@@ -4414,7 +4463,7 @@
       if (n < 2) return;
       calRun.tpose = poseSeq;
       a.alen.push(sum / n);
-    } else if (key === 'depth') {
+    } else if (key === 'depth' || key === 'depth2') {
       var r = depthRatio(world, calRun.out.userArm);
       if (r) a.depth.push(r);
     } else if (steps()[calRun.i].check) {
@@ -5809,8 +5858,9 @@
   // Called at the top of the arm rig. Returning true means the retarget has
   // written the three bones and the stock Euler rig must not run.
   function arm(vrm, rig, side, mirrored, instant, upper, lower, hand) {
-    // Body tracking off: either the head-driven sway or the stock rig, never
-    // a retarget solving on landmarks nothing is delivering any more.
+    // Body tracking off: the hands keep tracking but the world landmarks do
+    // not, so it is either the head-driven sway or the stock rig - never a
+    // retarget solving on landmarks nothing is delivering any more.
     if (!cfg.bodyTrack) {
       if (!cfg.armSway || !upper || !lower || !hand) return false;
       try { return sway(vrm, side, mirrored, upper, lower, hand); }
@@ -5872,6 +5922,23 @@
     armDbg[side].live = false;
     armDbg[side].reason = 'sway';
     return true;
+  }
+
+  // ------------------------------------------------------------- idle breath
+  // A slow, shallow sine added to the chest's pitch at the torso write site -
+  // a still avatar reads as a mannequin on a long stream. The bundle rewrites
+  // the chest every frame in both tracking modes (only the z/y sources are
+  // gated on holistic), so one additive term on the x Euler covers face-only
+  // and body alike, and nothing accumulates: the write is absolute each frame
+  // and the term rides on it. The visible motion is about a degree of pitch
+  // over four seconds - present at rest, invisible under movement, never
+  // large enough to fight a solve. No amplitude control on purpose: at this
+  // size nobody tunes it, they only notice it gone.
+  var BREATH_PERIOD = 4.0, BREATH_PITCH = 0.02;
+
+  function breath() {
+    if (!cfg.breathe) return 0;
+    return Math.sin(now() / 1000 * Math.PI * 2 / BREATH_PERIOD) * BREATH_PITCH;
   }
 
   // A lost landmark used to hand the arm straight back to the stock Euler rig,
@@ -7057,6 +7124,10 @@
     'Point one arm at the camera': 'Aponte um braço para a câmera',
     'Elbow straight, hand toward the lens, and hold':
       'Cotovelo esticado, mão na direção da lente, e segure',
+    'Point at the camera, arm higher': 'Aponte para a câmera, braço mais alto',
+    'Same straight arm, aimed a little above the lens, and hold':
+      'Mesmo braço reto, mirado um pouco acima da lente, e segure',
+    'Last check': 'Última conferência',
     'Palms on your skull, elbows out. Needs full-body tracking.':
       'Palmas no crânio, cotovelos para fora. Precisa de rastreio corporal.',
 
@@ -7127,10 +7198,11 @@
       'A sobrancelha agora é medida contra a lateral do teu próprio rosto, e não atravessando o olho, então ela encurta junto com a sobrancelha em vez de contra: girar, inclinar ou deitar a cabeça quase não mexe na leitura. A calibragem grava o que sobra, e as duas coisas juntas são o motivo de olhar para o lado não ler mais como bravo.',
     'note.motion': 'Os ganhos de pescoço e torso são fixos no app, entao um movimento real pequeno vira um movimento grande no avatar. Baixe o ganho para mexer menos. Tudo que o assistente consegue medir na tua própria câmera - o quanto você gira de verdade, o quanto a câmera treme, quanto de uma inclinação de torso é na verdade a cabeça, até onde teus braços alcançam - ele ajusta sozinho; o que sobra aqui é o punhado de números que é questão de gosto.',
     'note.armIK': 'Mira o braço na mão que a câmera viu, em vez de repetir os ângulos do Kalidokit - é o que faz a mão chegar de fato na cabeça. Precisa de rastreio corporal (holistic). Alcance corrige a proporção de um modelo de braço curto. O ombro não é animado por nada no app, então acompanhamento do ombro solta ele um pouco e o braço erguido para de cortar o pescoço. Um frame em que a malha do rosto e a pose do corpo discordam sobre onde teu rosto está quer dizer que uma das duas te perdeu - esses são segurados em vez de seguidos, com limiares aprendidos da tua própria câmera.',
-    'Body tracking': 'Corpo e mãos',
-    'Track body and hands': 'Rastrear corpo e mãos',
+    'Body tracking': 'Corpo',
+    'Track body': 'Rastrear corpo',
     'Arm sway from the head': 'Balanço dos braços pela cabeça',
-    'note.bodyTrack': 'Desligado, só o rosto é rastreado - a inferência cai de 2 a 4x, o modo mais leve que a máquina roda. Os braços param em repouso ou seguem o balanço pela cabeça. Ligado, corpo e mãos voltam; quando o Desempenho automático corta taxa, corpo e mãos caem primeiro e o rosto segue no ritmo.',
+    'Idle breathing': 'Respiração em repouso',
+    'note.bodyTrack': 'Desligado, o corpo para de ser rastreado - a inferência cai pela metade e as mãos continuam, então os dedos seguem vivos. Os braços ficam em repouso ou seguem o balanço pela cabeça. Ligado, o corpo volta; quando o Desempenho automático corta taxa, o envio do corpo cai primeiro e o rosto segue no ritmo.',
     'note.piflags': 'Raspberry Pi: o Chromium vem com metade da aceleração de GPU desligada. Abrir com estas flags (ou gravá-las em /etc/chromium-browser/customisations/00-rpi-vars.sh) liga rasterização e composição por hardware - confira depois em chrome://gpu.',
     'Copy flags': 'Copiar flags',
     'Copied': 'Copiado',
@@ -7263,10 +7335,11 @@
       'and the body pose disagree about where your face is means one of them has ' +
       'lost you - those are coasted rather than followed, on thresholds learned from ' +
       'your own camera.',
-    'note.bodyTrack': 'Off, only the face is tracked - inference drops 2-4x, the ' +
-      'lightest mode this machine can run. The arms go to rest or follow the head ' +
-      'sway. On, body and hands come back; when Auto throttle sheds rate, body and ' +
-      'hands fall first while the face keeps its pace.',
+    'note.bodyTrack': 'Off, the body is not tracked - inference drops by about ' +
+      'half and the hands keep working, so the fingers stay alive. The arms go ' +
+      'to rest or follow the head sway. On, the body comes back; when Auto ' +
+      'throttle sheds rate, the body send falls first while the face keeps its ' +
+      'pace.',
     'note.piflags': 'Raspberry Pi: Chromium ships with half its GPU acceleration ' +
       'off. Launching with these flags (or saving them into ' +
       '/etc/chromium-browser/customisations/00-rpi-vars.sh) turns on hardware ' +
@@ -7333,6 +7406,7 @@
   var EXPECTED_HOOKS = {
     setupRenderer: 1, aa: 1, smaa: 1, fingers: 1, onModel: 1, tick: 1,
     face: 1, brow: 1, headGain: 1, bodyGain: 1, leanGain: 1, spineLean: 1, armGain: 1,
+    breath: 1,
     smooth: 7, frame: 1, nextTrack: 1, frameGate: 2,
     mpOptions: 2, shadows: 1, shadowSize: 4, overlay: 3, overlayOpen: 1, gaze: 1,
     pose: 1, hands: 1, arm: 1, guide: 1, bg: 1, bgDrop: 1,
@@ -7812,7 +7886,13 @@
   // The holistic result, built to the names the bundle reads.
   function tvHolisticFrame(img, t, tasks, cb) {
     var res = { image: img };
-    var pose = tasks.pose.detectForVideo(img, t);
+    // Body tracking off skips the pose detector inside the same send - hands
+    // and face keep coming, so the lightest mode still gestures. The pose
+    // model stays built: the waste is a few MB of weights, and a mid-session
+    // toggle then needs no rebuild. A legacy-fallen instance cannot skip
+    // anything - its graph is one piece - so that machine tracks the body
+    // either way.
+    var pose = (cfg.bodyTrack && tasks.pose) ? tasks.pose.detectForVideo(img, t) : null;
     var pImg = pose && pose.landmarks && pose.landmarks[0];
     var pWorld = pose && pose.worldLandmarks && pose.worldLandmarks[0];
     if (pImg) {
@@ -8181,29 +8261,29 @@
   //
   // The holistic send is the expensive half (pose detector and hands on top
   // of the landmarks) and the face is the half the viewer reads, so the gate
-  // also carries the ordered shed: `bodyTrack` off drops the holistic send
-  // whole, and perfAuto's shed runs it only on every `holiEvery`th cycle
-  // before the face rate itself is cut. A skipped send answers before the
-  // freshness logic runs, so it neither consumes nor reopens the gate.
+  // also carries the ordered shed: perfAuto runs the body send only on every
+  // `holiEvery`th cycle before the face rate itself is cut. A skipped send
+  // answers before the freshness logic runs, so it neither consumes nor
+  // reopens the gate. The send itself always runs: what `bodyTrack` controls
+  // is whether the pose detector fires inside it - hands and face keep
+  // coming when it is off.
   var gateT = -1, gateFresh = false;
   var trackCycle = 0;
   var holiEvery = 1;
 
   function frameGate(v, holistic) {
     if (v && isNum(v.currentTime)) camVideo = v;
-    if (holistic) {
-      if (!cfg.bodyTrack) return false;
-      if (holiEvery > 1 && trackCycle % holiEvery) return false;
-    }
+    if (holistic && holiEvery > 1 && trackCycle % holiEvery) return false;
     if (!v || !isNum(v.currentTime)) return true;
     var t = v.currentTime;
     if (t !== gateT) { gateT = t; gateFresh = true; }
     return gateFresh;
   }
 
-  // Stage under the shed: 20 is where the pose+hands cadence halves, 15 where
-  // it thirds. AUTO_MIN (12) stays the floor of the face itself - the face is
-  // never divided, only slowed.
+  // Stage under the shed: 20 is where the body send's cadence halves, 15
+  // where it thirds. AUTO_MIN (12) stays the floor of the face itself - the
+  // face is never divided, only slowed. With body tracking off the send is
+  // hands only, and the same stages cut its rate.
   function holiStage(fps) {
     if (!fps) return 0;
     if (fps < 15) return 2;
@@ -8247,10 +8327,10 @@
     // The stage belongs here, next to the rate it is derived from, so a
     // perfAuto toggle or a recovered autoFps always leaves the two
     // consistent. Stage 1 = nothing divided; deeper stages halve (then
-    // third) the pose+hands cadence while the face keeps the full rate -
+    // third) the body send's cadence while the face keeps the full rate -
     // and each stage also asks the camera for fewer frames, which is work
     // the Pi stops doing at the sensor rather than skipping later.
-    var stage = cfg.bodyTrack && cfg.perfAuto ? holiStage(fps) : 0;
+    var stage = cfg.perfAuto ? holiStage(fps) : 0;
     holiEvery = stage ? (stage === 2 ? 2 : 3) : 1;
     camRate(stage);
     // At the ceiling there is nothing to wait for: hand it straight back to the
@@ -9125,17 +9205,26 @@
       stopCalibration(T('Calibration cancelled.'), T('Cancelled.'));
     });
     mo.appendChild(calMotionCancelBtn);
+    // The last run's verdict, still on the card after a reload. Written by
+    // finishMotion; a plain text node, never touched by the wizard's paints.
+    var lastCheckEl = el('div', STG, '');
+    lastCheckEl.id = 'psx-last-check';
+    lastCheckEl.style.cssText = 'width:100%;opacity:.5;font-size:12px;margin-top:8px;text-align:left';
+    mo.appendChild(lastCheckEl);
+    paintLastCheck();
     syncCalUi();
     frag.appendChild(mo);
 
     // Body tracking is the fork's own switch on the expensive half of the
-    // inference: off, only the face graph runs and the arms fall to the sway.
+    // inference: off, the pose detector never fires inside the send - face
+    // and hands keep running, and the arms fall to the sway.
     var bod = card(T('Body tracking'), STG);
     var bodNote = el('div', STG, T('note.bodyTrack'));
     bodNote.style.cssText = 'width:100%;opacity:.5;font-size:12px;margin:0 0 4px;text-align:left';
     bod.appendChild(bodNote);
-    addToggle(bod, 'bodyTrack', T('Track body and hands'), STG);
+    addToggle(bod, 'bodyTrack', T('Track body'), STG);
     addToggle(bod, 'armSway', T('Arm sway from the head'), STG);
+    addToggle(bod, 'breathe', T('Idle breathing'), STG);
     frag.appendChild(bod);
 
     var hnd = card(T('PSX Hands'), STG);
@@ -11236,6 +11325,7 @@
     spineLean: spineLean,
     armGain: armGain,
     smooth: smooth,
+    breath: breath,
 
     pose: pose,
     hands: hands,

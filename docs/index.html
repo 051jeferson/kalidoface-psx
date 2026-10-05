@@ -91,6 +91,8 @@
         bodyGain: function () { return 0.05; },
         leanGain: function () { return 0.05; },
         spineLean: function (z) { return z; },
+        // stock behaviour: the chest pitch keeps its flat value, breath adds 0
+        breath: function () { return 0; },
         armGain: function () { return 1; },
         smooth: function (t) { return t; },
         pose: function () {},

@@ -618,6 +618,7 @@ The steps, in order:
 | Shrug your shoulders up | **Shoulder follow** — how far your own shoulders actually travel |
 | Arms straight out to the sides | **Reach**. Arms out sit in the image plane, where the tracker has no depth to get wrong, so this is the cleanest reach reading there is |
 | Point one arm at the camera | **Depth gain**. What is left of your arm's length after the across and up components have been accounted for has to be depth, so comparing it against the depth Mediapipe reported measures how far that estimate is compressed |
+| Point at the camera, arm higher | a second **held** direction for the same reading. The compression is not one number across the frame, so the two poses pool their samples and the gain is the median; a direction that read nothing just leaves the pool to the other |
 | Put both hands on your head | raises **Reach** if the avatar's hands still cannot make it to its skull. This pose is foreshortened, so it may only raise the T-pose reading, never pull it back down |
 | Point one arm at the camera, once more | changes nothing. It re-reads the depth pose against the finished rig, and the residual it reports is the verdict — under 12% is *good*, anything more says redo the run |
 
@@ -626,9 +627,22 @@ depth gain across the whole workspace. It never read: its samples needed the
 arm aimed into the tracker's noisiest axis (depth) while demanding an elbow
 angle measured through that same axis on a *moving* arm, so the gates rejected
 each other's frames and the step skipped itself every run. The held poses pass
-the same gates, which is why the check moved onto one.
+the same gates, which is why the check moved onto one — and why the sweep's
+generalisation was replaced by a second held direction rather than motion.
 
-Full-body tracking has to be on for the head-tilt isolation and the arm steps. Torso *pitch* rides on the
+The run's verdict outlives the toast: the check's last reading stays on the
+motion card ("última conferência"), with the date, so a run that came out poor
+is still saying so next week. It is only a display — the number was measured
+once against the finished rig and nothing re-decides from it.
+
+Full-body tracking has to be on for the head-tilt isolation and the arm steps. **Track body**
+turns the pose detector off inside the send without touching the rest: the face
+and hands keep tracking, so the fingers stay alive — the arms fall to rest and
+the optional head-driven sway. Three toggles live on the body card: the switch
+itself, the sway, and **Idle breathing** — a slow, shallow chest sine (about a
+degree of pitch over four seconds) that keeps a still avatar from reading as a
+mannequin. It rides on the chest write at the torso site, so it composes with
+whatever the rig is doing and adds nothing to fight it. Torso *pitch* rides on the
 head signal, so **Torso gain** keeps its stock ratio to the head; lean and twist
 come from the pose solver instead and get their own gain. A head tilt (ear to
 shoulder) is not a lean, but the pose solver reports it as one; **Head-tilt
@@ -1060,9 +1074,10 @@ and scoped class names, so they look native. Controls are split by what they do:
 - **Face Expressions** — Trigger threshold, Release margin, Minimum hold, Mouth gain, Preview cell (force one expression for calibration)
 - **Eyes** — Eyes shut at, live eye readout, Calibrate blink
 - **Emotion Detection** — Signal gain, Brow offset, Angry at, Sorrow at, Smile at, Emotion hold, live readout, Calibrate expressions, Mouth hold, Calibrate mouths
-- **Motion Calibration** — Calibration cues, Head / neck gain, Torso lean gain, Calibrate motion, and a **Fine tuning** disclosure holding Steadiness, Responsiveness, Reach, Reach up, Right arm, Left arm, Shoulder follow, Forearm twist, Face anchor, Prediction, Dropout hold and Head-tilt isolation
+- **Motion Calibration** — Calibration cues, Head / neck gain, Torso lean gain, Calibrate motion, the last check's verdict, and a **Fine tuning** disclosure holding Steadiness, Responsiveness, Reach, Reach up, Right arm, Left arm, Shoulder follow, Forearm twist, Face anchor, Prediction, Dropout hold and Head-tilt isolation
+- **Body tracking** — Track body (the pose detector; face and hands keep running without it), Arm sway from the head, Idle breathing
 - **Performance** — Auto throttle, Run while hidden, Tracking rate, Render rate, Low power preset (the lite pose model is preset-only, no toggle)
-- **PSX Hands** — Driven fingers (`all fingers` / `thumb only` / `none`)
+- **PSX Hands** — Driven fingers (`all fingers` / `thumb only` / `none`), under the Body group
 - **Profile** — Export settings, Import settings, Reset PSX settings
 
 The camera framing is not a card: the orbit you drag records itself once the drag
