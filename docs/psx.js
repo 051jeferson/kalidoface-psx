@@ -1496,18 +1496,17 @@
       hint: 'Elbow straight, hand toward the lens, and hold' },
     { key: 'hands', title: 'Put both hands on your head',
       hint: 'Palms on your skull, elbows out. Needs full-body tracking.' },
-    // Every step above reads one pose and asks it to speak for the whole arm.
-    // This one reads the whole arm: hundreds of samples spread over every
-    // direction it can reach, which is what lets the three axes be separated
-    // from each other instead of averaged into one number.
-    { key: 'sweep', title: 'Straight arms - draw big slow circles',
-      hint: 'Elbows completely straight, as if reaching for a far wall. Sweep both arms around: out to the sides, up overhead, forward at the camera, down by your legs. Bend an elbow and that moment is thrown away - watch the sample count rise.',
-      ms: 12000, prep: 11000, fit: true },
-    // Changes nothing. A calibration that is run once and then trusted forever
+    // Changes nothing, and asks for the one pose this wizard has already proven
+    // it can read: the arm at the lens. A two-arm circles sweep used to sit
+    // here, and it never read - its samples needed the arm aimed into the
+    // tracker's noisiest axis and an elbow angle held exact while moving, so
+    // the two gates rejected each other's frames and the step skipped itself
+    // every run. The held poses above pass the same gates, so the check moved
+    // onto one. A calibration that is run once and then trusted forever still
     // has to say out loud whether it worked, or a bad run is indistinguishable
     // from a good one for as long as the profile survives.
-    { key: 'check', title: 'Once more, to check the result',
-      hint: 'Same circles, elbows just as straight. This step only measures - it cannot make anything worse.',
+    { key: 'check', title: 'Point one arm at the camera, once more',
+      hint: 'Same pointing pose as before, elbow straight. This step only measures - it cannot make anything worse.',
       ms: 8000, fit: true, check: true }
   ];
 
@@ -1823,7 +1822,7 @@
       // motion: model-space readings from the render tick, landmark-space ones
       // from the holistic result
       reach: [], span: [], roll: [], torso: [], depth: [], alen: [], z: [], modelSeq: -1,
-      // sweep: one depth ratio and one residual per locked arm per inference
+      // check: one residual per locked arm per inference
       fit: newFit(),
       // mouth: one feature vector per sampled frame
       feat: [], audio: [], audioRms: [], audioRead: -1
@@ -1835,13 +1834,13 @@
   // locked, is a wild ratio - and a mean would carry it into the gain.
   function newFit() {
     return {
-      n: 0, r: [], res: [],
-      side: { Right: { r: [], res: [] }, Left: { r: [], res: [] } }
+      n: 0, res: [],
+      side: { Right: { res: [] }, Left: { res: [] } }
     };
   }
 
-  // A sweep only counts frames where an arm was really locked and really out
-  // of the image plane, so it throws most of what it sees away. Still far above
+  // The check only counts frames where the arm was really locked and really
+  // aimed at the lens, so it throws most of what it sees away. Still far above
   // CAL_MIN_SAMPLES, which sizes a percentile off a single held pose.
   var FIT_MIN = 40;
 
@@ -1889,11 +1888,11 @@
     return out;
   }
 
-  // The sweep and the check measure the retarget against the landmarks. With
-  // the retarget off, the arms are on the stock Euler rig and there is nothing
-  // for those two steps to read - they would gather no samples at all and sit
-  // there retrying. So they are dropped from the run rather than failed in it,
-  // and the count in the prompt is the count of steps that can actually happen.
+  // The check measures the retarget against the landmarks. With the retarget
+  // off, the arms are on the stock Euler rig and there is nothing for it to
+  // read - it would gather no samples at all and sit there retrying. So it is
+  // dropped from the run rather than failed in it, and the count in the prompt
+  // is the count of steps that can actually happen.
   function motionSteps() {
     if (cfg.armIK) return MOTION_STEPS;
     var out = [];
@@ -1941,9 +1940,8 @@
     if (calRun.kind !== 'face') {
       calRun.phase = 'prep';
       // A step whose instruction takes longer to say than the count-in lasts
-      // would be cut off mid-sentence by its own reading. The sweep is the one
-      // that needs saying in full, and it is also the one the person should
-      // already be moving for when the reading starts.
+      // would be cut off mid-sentence by its own reading, and a longer count
+      // is also the grace a two-arm pose needs to be found at all.
       calRun.prepUntil = now() + (st.prep || CAL_PREP);
       calTick();
     } else {
@@ -1963,7 +1961,7 @@
     cue(CUE.read);
     // Silence the voice only for the vowels, where the pose *is* a sound and
     // talking over it is talking over the thing being measured. Elsewhere the
-    // instruction is worth finishing - a sweep is easier to hold to when the
+    // instruction is worth finishing - a pose is easier to hold to when the
     // description is still arriving.
     if (calRun.kind === 'mouth') hush();
     calRun.note = '';
@@ -2044,10 +2042,10 @@
   // rather than being written over the prompt, or the count-in's next repaint
   // would wipe it.
   // A held pose that read badly is worth asking for again - the person can
-  // hold it better. A sweep that read nothing is usually not a bad sweep, it is
+  // hold it better. A check that read nothing is usually not a bad check, it is
   // body tracking that is not running, and asking again forever is how a wizard
-  // hangs. Give it two tries and then move on without it: a missing fit leaves
-  // the coarse gains standing, which is the state this build shipped in.
+  // hangs. Give it two tries and then move on without it: a missing check
+  // leaves the gains standing, which is the state this build shipped in.
   var FIT_TRIES = 2;
 
   function retryStep(n) {
@@ -2143,8 +2141,8 @@
         if (a.depth.length >= CAL_MIN_SAMPLES) o.depth = median(a.depth);
       } else if (st.key === 'hands') {
         if (a.reach.length >= CAL_MIN_SAMPLES) o.handsReach = median(a.reach);
-        // Last of the held arm poses. The sweep refines what these set and the
-        // check measures the result, so they go in now rather than at the end.
+        // Last of the held arm poses. The check that follows has to be
+        // measuring the finished rig, so these go in now rather than at the end.
         applyArmGains(o);
       } else if (st.key === 'check') {
         // Deliberately sets nothing. Its whole job is to say how far off the
@@ -2152,10 +2150,6 @@
         o.checkRes = fitResidual(a.fit);
         o.resR = sideResidual(a.fit, 'Right');
         o.resL = sideResidual(a.fit, 'Left');
-      } else if (st.fit) {
-        o.fitN = a.fit.n;
-        if (applyFit(a.fit, o.depth)) o.fitRes = fitResidual(a.fit);
-        else o.fitBad = true;
       } else {
         var yaw = st.key === 'left' || st.key === 'right';
         var arr = yaw ? a.y : a.x;
@@ -2296,12 +2290,6 @@
   // half-lost: one bad step should degrade the fit, not replace it. Nothing a
   // single run reads is allowed to move a gain by more than half either way,
   // so a wrong answer stays recoverable by running it again.
-  // Half a step by default: a re-run reads one pose once, and a reading that
-  // disagrees wildly with a working setting is far more often a bad pose than
-  // a bad setting. The workspace fit is the exception - it is hundreds of
-  // samples across the whole reachable volume rather than one held pose, so it
-  // is allowed to move a gain much further in a single run. That is the point
-  // of running the long calibration.
   function nudge(from, to, band) {
     if (!isNum(from) || from <= 0) return to;
     var b = band || 0.5;
@@ -2309,9 +2297,8 @@
   }
 
   // The three arm poses, applied the moment the last of them is read rather
-  // than at the end of the wizard. The sweep that follows refines what they
-  // set and the check after that has to be measuring the finished rig, so
-  // nothing here may still be pending by the time either of those runs.
+  // than at the end of the wizard. The check that follows has to be measuring
+  // the finished rig, so nothing here may still be pending by the time it runs.
   function applyArmGains(c) {
     // The depth gain multiplies the raw landmark depth, and the ratio was
     // measured against that same raw depth, so it is the gain outright. Floored
@@ -2353,49 +2340,16 @@
     }
   }
 
-  // How far one sweep may move a gain. Wide on purpose: `nudge`'s half step
-  // guards a working setting against a single mis-held pose, and a sweep is not
-  // one pose - it is the whole workspace, sampled hundreds of times. A
-  // calibration that gets run once and then kept has to be allowed to arrive.
-  var FIT_BAND = 1.5;
   // Residual at or under this is as close as a rig with a different skeleton
   // ever gets; above it, something in the run was wrong.
   var FIT_GOOD = 0.12;
 
   function fitPct(r) { return (r * 100).toFixed(1) + '%'; }
 
+  // Median over the check's samples: the one number in the run measured
+  // against the finished rig rather than the poses that produced it.
   function fitResidual(f) {
     return (f && f.res.length) ? median(f.res) : null;
-  }
-
-  // The median of every direction the arm visited, against the depth pose's
-  // single reading of a single direction. Same quantity, far better sampled -
-  // so this runs after the pose and is allowed to move much further.
-  //
-  // It sets depth and nothing else. Reach is a magnitude, and the sweep has no
-  // magnitude error to read: the model's hand distance comes from the elbow
-  // bend, so it already agrees with the person's in each one's own proportions.
-  // Vertical stays with the hands-on-head pose, which is a known pose and
-  // therefore has a ground truth of its own.
-  // The depth pose measured this same compression a few steps earlier, from a
-  // pose that is hard to get wrong: one arm at the lens. The sweep is the better
-  // instrument when it is performed right and worthless when it is not, and the
-  // one thing that separates those cases is whether it agrees with the pose.
-  //
-  // A bent elbow only ever inflates the ratio - the hand is nearer than the arm
-  // is long and the shortfall is read as depth - so a sweep that comes back far
-  // above the pose is a sweep that was performed with bent arms, and taking it
-  // would distort every mapped direction and weld the model's elbows straight.
-  var FIT_AGREE = 1.6;
-
-  function applyFit(f, pose) {
-    if (!f.r.length) return false;
-    var got = median(f.r);
-    if (isNum(pose) && pose > 0 && (got > pose * FIT_AGREE || got < pose / FIT_AGREE)) {
-      return false;
-    }
-    cfg.armDepth = clamp(nudge(cfg.armDepth, got, FIT_BAND), 0.3, 2);
-    return true;
   }
 
   // Reported, never applied - which arm the tracker is reading worse. It is not
@@ -2469,15 +2423,8 @@
     if (!cfg.armIK && isNum(c.armGain)) {
       notes.push(T('Arm gain') + ' ' + c.armGain.toFixed(2));
     }
-    if (isNum(c.fitRes)) {
-      notes.push(T('Fit') + ' ' + fitPct(c.fitRes) + ' ' + T('over') + ' ' +
-        c.fitN + ' ' + T('samples'));
-    } else if (c.fitBad) {
-      notes.push(T('sweep ignored - it disagreed with the depth pose, so the elbows were probably bent'));
-    }
     // The check ran against the finished rig, so this number is the one that
-    // says whether the calibration is any good - not the fit's own residual,
-    // which is measured on the very samples that produced it.
+    // says whether the calibration is any good.
     if (isNum(c.checkRes)) {
       notes.push(T('Check') + ' ' + fitPct(c.checkRes) +
         ' - ' + T(c.checkRes <= FIT_GOOD ? 'good' : 'redo this'));
@@ -2488,7 +2435,7 @@
     if (isNum(c.resR) && isNum(c.resL)) {
       notes.push(T('Per arm') + ' ' + fitPct(c.resR) + '/' + fitPct(c.resL));
     }
-    if (cfg.armIK && (isNum(c.span) || isNum(c.handsReach) || isNum(c.fitRes))) {
+    if (cfg.armIK && (isNum(c.span) || isNum(c.handsReach) || isNum(c.checkRes))) {
       notes.push(T('Reach') + ' ' + cfg.armReach.toFixed(2) +
         ', ' + T('up') + ' ' + cfg.reachUp.toFixed(2) +
         ', ' + T('depth') + ' ' + cfg.armDepth.toFixed(2));
@@ -2757,7 +2704,7 @@
       line = T('Hold the pose, then press Space. Esc cancels.');
     } else {
       line = T('Reading, keep holding...');
-      // A sweep is the one step whose samples are mostly thrown away - a bent
+      // The check is the step whose samples are mostly thrown away - a bent
       // elbow counts for nothing - and without a number on screen there is no
       // way to tell a pose that is working from one that is not. This step was
       // shipped without it once and a run that gathered nothing looked exactly
@@ -4337,7 +4284,7 @@
     if (!calRun || calRun.kind !== 'motion' || calRun.phase !== 'hold') return;
     if (now() - calRun.holdFrom < CAL_SETTLE) return;
     var step = steps()[calRun.i];
-    // the sweep is read off the landmarks, not off the rig - see sampleSweep
+    // the check is read off the landmarks, not off the rig - see sampleCheck
     if (step.fit) return;
     var key = step.key;
     if (key !== 'tpose' && key !== 'rest' && key !== 'hands') return;
@@ -4455,9 +4402,9 @@
         // ever multiplies, so that shortfall ratchets it to the ceiling over a
         // couple of runs and the straightening cap then irons every pose flat.
         // 0.85 admits an elbow bent 60 degrees, which asks for 18% more reach
-        // on its own. Gate on the two segments being in line instead: it is the
-        // same invariant the sweep uses, and unlike a distance it survives the
-        // depth compression untouched.
+        // on its own. Gate on the two segments being in line instead: it is
+        // the same invariant the depth pose and the check use, and unlike a
+        // distance it survives the depth compression untouched.
         var uSeg = vnorm(vsub(el, sh)), lSeg = vnorm(vsub(wr, el));
         if (!uSeg || !lSeg || vdot(uSeg, lSeg) < 0.99) return;
         if (span < seg * 0.85 || Math.abs(vdot(d, ub.x)) < span * 0.8) return;
@@ -4470,69 +4417,46 @@
     } else if (key === 'depth') {
       var r = depthRatio(world, calRun.out.userArm);
       if (r) a.depth.push(r);
-    } else if (steps()[calRun.i].fit) {
-      sampleSweep(world, ub, a.fit);
+    } else if (steps()[calRun.i].check) {
+      sampleCheck(world, ub, a.fit);
     }
   }
 
-  // The depth pose generalised from one direction to all of them.
+  // The check re-reads the depth pose against the finished rig.
   //
-  // `depthRatio` holds the arm at the lens and reads the compression once. That
-  // is one direction, one reading, and it has to speak for every direction the
-  // arm will ever point. This reads the same quantity continuously while the
-  // arm sweeps the whole sphere, which is worth doing because the compression
-  // is not one number - it varies across the frame - and a median over the
-  // whole sweep is a far better single number than the one pose was.
+  // Every gain the run could move was applied at the hands step, so what is
+  // measured here is the mapping as it will run - not the samples that
+  // produced it. The ground truth is the one the depth pose itself reads: a
+  // locked elbow is exactly as long as the arm is, and `userArm` from the
+  // T-pose says what that length is. Whatever the applied gains still leave
+  // wrong shows up as the residual.
   //
-  // The ground truth is the locked elbow. A straight arm is exactly as long as
-  // it is, whichever way it points, so `userArm` measured in the T-pose - where
-  // nothing is foreshortened - says what the reading should have come to. What
-  // the across and up components cannot account for has to be depth, and
-  // comparing that against the depth actually reported is the compression.
-  //
-  // This is also why the fit cannot be run against the model instead. The
-  // model's hand distance comes from the elbow bend, so it already agrees with
-  // the person's in each one's own proportions - matching them measures
-  // nothing, and would only ever drive the gains back to 1.
-  function sampleSweep(world, ub, f) {
+  // The gates are depthRatio's on purpose. A bent elbow reads as a rig that
+  // cannot reach, and the held pose passes them - which is precisely what the
+  // circles sweep this step replaced could not do: its samples needed the arm
+  // aimed into the tracker's noisiest axis while demanding an elbow angle
+  // measured through that same axis, and the two requirements rejected each
+  // other's frames.
+  function sampleCheck(world, ub, f) {
     var L = calRun.out.userArm;
-    if (!isNum(L) || L < 1e-4) return;
+    if (!isNum(L) || L < 1e-4 || !ub) return;
     for (var side in ARM_LM) {
       var idx = ARM_LM[side];
       var sh = world[idx.shoulder], el = world[idx.elbow], wr = world[idx.wrist];
       if (!vis(sh) || !vis(el) || !vis(wr)) continue;
-      var seg = dist3(sh, el) + dist3(el, wr);
-      var d = vsub(wr, sh);
-      // A bent elbow breaks the ground truth: the hand is nearer than the arm is
-      // long, and every bit of that shortfall is read as depth that was never
-      // there, straight into the gain.
-      //
-      // Gate on the two segments being in line rather than on the hand being
-      // far enough away. Depth compression scales one axis, and a scaling maps
-      // parallel vectors to parallel vectors - so collinearity survives it
-      // exactly, while a distance does not survive it at all. The old distance
-      // gate was measuring the arm with the very error being calibrated, and it
-      // admitted an elbow bent 37 degrees, which inflates the ratio by a third.
-      if (seg < 1e-4) continue;
       var uArm = vnorm(vsub(el, sh)), lArm = vnorm(vsub(wr, el));
       if (!uArm || !lArm || vdot(uArm, lArm) < 0.995) continue;
+      var d = vsub(wr, sh);
       var dx = vdot(d, ub.x), dy = vdot(d, ub.y), dz = vdot(d, ub.z);
       var plane = dx * dx + dy * dy;
-      var want = L * L - plane;
-      // Lying in the image plane there is no depth to compare against, and the
-      // ratio would be the reading's own error divided by nearly nothing.
-      if (want < L * L * 0.0625 || Math.abs(dz) < 1e-4) continue;
-      var acc = f.side[side];
-      var r = Math.sqrt(want) / Math.abs(dz);
-      f.r.push(r);
-      acc.r.push(r);
-      // How long the arm comes out once the gain in force has been applied,
-      // against how long it should be. This is the honest quality number: it
-      // has a ground truth, and at the end of a good run it is near zero.
+      // Only an arm really aimed at the lens says anything about depth.
+      if (plane > L * L * 0.5 || Math.abs(dz) < 1e-4) continue;
+      // The applied rig re-lengthens depth by cfg.armDepth; how far the arm
+      // still comes out from `userArm` is the residual the run reports.
       var fixed = dz * cfg.armDepth;
       var e = Math.abs(Math.sqrt(plane + fixed * fixed) / L - 1);
       f.res.push(e);
-      acc.res.push(e);
+      f.side[side].res.push(e);
       f.n++;
     }
   }
@@ -5060,12 +4984,13 @@
   // Now it clears on the bundle's own ready signal. The software has been
   // running underneath the whole time (visibility, not display: the canvas
   // kept its laid-out size and the render loop kept painting), so at the cut
-  // the model, HUD and tray are already on screen. Tracking still starts
-  // under the splash, so the permission prompt and the warmup are spent
-  // behind the cut rather than after it. The release path is upstream's
-  // unchanged; the h1 fade it drives is killed in CSS, which keeps the cut
-  // dry. hands() still calls bootGo() on first results - if tracking ever
-  // comes up before the bundle's ready, the splash leaves just as early.
+  // the model, HUD and tray are already on screen. The camera is not started
+  // here: the tray's video button starts and stops it, and the permission
+  // prompt belongs to that click, not to opening the page. The release path
+  // is upstream's unchanged; the h1 fade it drives is killed in CSS, which
+  // keeps the cut dry. hands() still calls bootGo() on first results - if
+  // tracking ever comes up before the bundle's ready, the splash leaves just
+  // as early.
   var bootWait = [];
   var bootArmed = false;
   var bootLive = false;
@@ -5135,13 +5060,10 @@
 
   function bootReady(cb) {
     if (!cb) return;
-    // through the app's own toggle: holistic loads its wasm from this origin
-    // and the camera asks for permission - underneath the splash, not in
-    // front of it. Release follows immediately; nothing waits on the camera.
-    setTimeout(function () {
-      var b = document.querySelector('nav.menu .menu-item.video');
-      if (b) b.click();
-    }, 0);
+    // Nothing here starts the camera. It used to click the tray's video
+    // button under the splash, which opened the permission prompt on every
+    // cold boot; the button is the app's own on/off toggle, and the person
+    // decides when the camera runs.
     bootArmed = true;
     bootWait.push(cb);
     bootGo();
@@ -5892,7 +5814,9 @@
     if (!cfg.bodyTrack) {
       if (!cfg.armSway || !upper || !lower || !hand) return false;
       try { return sway(vrm, side, mirrored, upper, lower, hand); }
-      catch (e) { cfg.armSway = false; return false; }
+      // A throw here silently turned the saved toggle off with nothing in the
+      // console to say why - the same self-disable the retarget logs below.
+      catch (e) { log('arm sway failed', e); cfg.armSway = false; return false; }
     }
     if (!cfg.armIK || !vrm || !rig || !upper || !lower || !hand) return false;
     var idx = ARM_LM[side];
@@ -7105,18 +7029,13 @@
     'Check': 'Conferência',
     'good': 'bom',
     'redo this': 'refaça a calibragem',
-    'Straight arms - draw big slow circles':
-      'Braços retos - faça círculos grandes e lentos',
     'straighten your elbows': 'estique bem os cotovelos',
-    'sweep ignored - it disagreed with the depth pose, so the elbows were probably bent':
-      'giro ignorado - discordou da pose de profundidade, provavelmente os cotovelos estavam dobrados',
-    'Elbows completely straight, as if reaching for a far wall. Sweep both arms around: out to the sides, up overhead, forward at the camera, down by your legs. Bend an elbow and that moment is thrown away - watch the sample count rise.':
-      'Cotovelos totalmente esticados, como se fosse alcançar uma parede distante. Gire os dois braços: para os lados, acima da cabeça, à frente da câmera, embaixo junto às pernas. Se dobrar o cotovelo, aquele instante é descartado - acompanhe a contagem de amostras subir.',
-    'Once more, to check the result': 'Mais uma vez, para conferir o resultado',
+    'Point one arm at the camera, once more':
+      'Aponte um braço para a câmera, mais uma vez',
     'Skipped - no body tracking was read for that step.':
       'Pulado - nenhum rastreio de corpo foi lido nesse passo.',
-    'Same circles, elbows just as straight. This step only measures - it cannot make anything worse.':
-      'Mesmos círculos, cotovelos igualmente retos. Este passo só mede - não piora nada.',
+    'Same pointing pose as before, elbow straight. This step only measures - it cannot make anything worse.':
+      'Mesma pose de apontar de antes, cotovelo reto. Este passo só mede - não piora nada.',
     'Shoulder follow': 'Acompanhamento do ombro',
     'Forearm twist': 'Torção do antebraço',
     'Face anchor': 'Âncora no rosto',

@@ -29,6 +29,9 @@ speaking. Like everything else in the fork it is not a setting; the font and
 icons ship in `docs/vendor/`, so the look costs no network round trip and
 survives offline.
 
+Opening the page does not start the camera. The tray's video button starts it —
+the permission prompt belongs to that click — and pressing it again stops it.
+
 ## Run and verify
 
 With Node 18 or newer, no dependency installation is needed:
@@ -54,8 +57,8 @@ detections when independent nearest-wrist decisions would discard one. Clear
 swaps are corrected; ambiguous crossings retain the detector's labels.
 Adaptive motion smoothing measures each wrist separately, including when only
 one is visible, so opposite gestures cannot cancel their measured speed.
-The depth calibration pose requires a straight elbow, as the sweep already
-does; a bent arm no longer produces a false depth gain. These checks run once
+The depth calibration pose requires a straight elbow, as the closing check
+pose does; a bent arm no longer produces a false depth gain. These checks run once
 per tracking result and do not increase detector complexity or tracking rate.
 Model measurements during motion calibration count each tracking result once,
 require visible arms and reject stale poses. A valid T-pose only authorizes
@@ -616,6 +619,14 @@ The steps, in order:
 | Arms straight out to the sides | **Reach**. Arms out sit in the image plane, where the tracker has no depth to get wrong, so this is the cleanest reach reading there is |
 | Point one arm at the camera | **Depth gain**. What is left of your arm's length after the across and up components have been accounted for has to be depth, so comparing it against the depth Mediapipe reported measures how far that estimate is compressed |
 | Put both hands on your head | raises **Reach** if the avatar's hands still cannot make it to its skull. This pose is foreshortened, so it may only raise the T-pose reading, never pull it back down |
+| Point one arm at the camera, once more | changes nothing. It re-reads the depth pose against the finished rig, and the residual it reports is the verdict — under 12% is *good*, anything more says redo the run |
+
+The wizard used to close with a wide two-arm circles sweep that refined the
+depth gain across the whole workspace. It never read: its samples needed the
+arm aimed into the tracker's noisiest axis (depth) while demanding an elbow
+angle measured through that same axis on a *moving* arm, so the gates rejected
+each other's frames and the step skipped itself every run. The held poses pass
+the same gates, which is why the check moved onto one.
 
 Full-body tracking has to be on for the head-tilt isolation and the arm steps. Torso *pitch* rides on the
 head signal, so **Torso gain** keeps its stock ratio to the head; lean and twist
