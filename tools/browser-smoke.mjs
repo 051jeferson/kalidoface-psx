@@ -132,7 +132,14 @@ try {
       bones.rightUpperArm, bones.rightLowerArm, bones.rightHand);
     const palmRepeat = PSX.armInfo().right;
     palmFrame();
-    const palmRecovered = palmFrame();
+    // Confirmation counts distinct images (stableRoll's counter resets on a
+    // null angle, and under headless load one frame can read null), so the
+    // exact frame the new palm is accepted drifts by one. Sample until it
+    // lands, within a generous cap, rather than pinning a fixed call count.
+    let palmRecovered = palmFrame();
+    for (let i = 0; i < 8 && palmRecovered.rollRejected; i++) {
+      palmRecovered = palmFrame();
+    }
     Object.assign(PSX.cfg, cfg);
     return { waist, head, recovery, msPerArm, thumbTurns, palmBefore, palmFlip, palmRepeat, palmRecovered };
   });
