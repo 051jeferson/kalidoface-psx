@@ -144,10 +144,14 @@
          turns the cold boot's serial waterfall parallel. SIMD pair only - a
          browser without SIMD takes the legacy graph, which keeps its own
          assets and is not worth preloading on a machine this old. -->
-    <link rel="preload" as="fetch" href="./vendor/mediapipe/tasks/wasm/vision_wasm_internal.wasm" fetchpriority="high">
-    <link rel="preload" as="fetch" href="./vendor/mediapipe/tasks/face_landmarker.task" fetchpriority="high">
-    <link rel="preload" as="fetch" href="./vendor/mediapipe/tasks/hand_landmarker.task" fetchpriority="high">
-    <link rel="preload" as="fetch" href="./vendor/mediapipe/tasks/pose_landmarker_full.task" fetchpriority="high">
+    <!-- crossorigin makes the preload's request mode match the tracker's own
+         fetch (plain fetch(), cors); without it the browser discards the
+         preloaded response on a credentials-mode mismatch and everything here
+         is fetched twice. -->
+    <link rel="preload" as="fetch" crossorigin href="./vendor/mediapipe/tasks/wasm/vision_wasm_internal.wasm" fetchpriority="high">
+    <link rel="preload" as="fetch" crossorigin href="./vendor/mediapipe/tasks/face_landmarker.task" fetchpriority="high">
+    <link rel="preload" as="fetch" crossorigin href="./vendor/mediapipe/tasks/hand_landmarker.task" fetchpriority="high">
+    <link rel="preload" as="fetch" crossorigin href="./vendor/mediapipe/tasks/pose_landmarker_full.task" fetchpriority="high">
     <script type="module" crossorigin src="./assets/index.e2bec78d.js"></script>
     <link rel="modulepreload" href="./assets/vendor.832d142e.js">
     <link rel="stylesheet" href="./assets/index.1b91a8e8.css">
