@@ -9160,6 +9160,11 @@
 
     addRule(mo);
     addRange(mo, 'headGain', T('Head / neck gain'), 0, 1.5, 0.05, function (v) { return v.toFixed(2) + 'x'; }, STG);
+    // The torso pitch rides on the head signal through this gain, and the
+    // wizard scales it with headGain - on a calibration that measured a small
+    // arc, both scale up together and a nod takes the whole upper body with
+    // it. This slider is the manual way back down; the wizard overwrites it.
+    addRange(mo, 'bodyGain', T('Torso gain'), 0, 0.2, 0.005, function (v) { return v.toFixed(3) + 'x'; }, STG);
     addRange(mo, 'leanGain', T('Torso lean gain'), 0, 1, 0.02, function (v) { return v.toFixed(2) + 'x'; }, STG);
 
     // Everything below is measured by the wizard or left alone. Eleven sliders
