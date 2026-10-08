@@ -7951,13 +7951,18 @@
       if (tvWristMargin(lms[0][0], poseImg) >= 0) out.l = lms[0];
       else out.r = lms[0];
     } else {
-      // no usable pose: the detector's own label, swapped per its
-      // documented rule that it assumes a mirrored feed
+      // No usable pose: file each hand by the detector's own label, exactly
+      // where legacy Holistic files it - leftHandLandmarks is the 'Left'-labeled
+      // hand as-is, and the bundle's map cross ({Right: leftHandLandmarks})
+      // makes the one swap. Swapping here too would cancel that cross and put
+      // every hand on the wrong avatar hand - on raw webcam input the detector
+      // labels the person's right hand 'Left', which has to land on the right.
+      // The margin paths above agree: the image-left hand goes to out.l there.
       var hnd = hand.handedness || hand.handednesses;
       for (i = 0; i < lms.length; i++) {
         label = hnd && hnd[i] && hnd[i][0] && hnd[i][0].categoryName;
-        if (label === 'Left') out.r = lms[i];
-        else if (label === 'Right') out.l = lms[i];
+        if (label === 'Left') out.l = lms[i];
+        else if (label === 'Right') out.r = lms[i];
       }
     }
     return out;
